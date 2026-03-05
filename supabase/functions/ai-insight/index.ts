@@ -21,28 +21,63 @@ const MINDSET_LABELS: Record<string, string> = {
   collective: "Enabling Collective Growth",
 };
 
+const GENZ_CATEGORY_LABELS: Record<string, string> = {
+  authenticity: "Brand Authenticity & Transparency",
+  worklife: "Work-Life Integration & Anti-Hustle",
+  climate: "Climate Action & Conscious Consumption",
+  digital: "Digital Identity & Creator Economy",
+  belonging: "Community & Belonging",
+};
+
 serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
   }
 
   try {
-    const { domains, mindset } = await req.json();
+    const body = await req.json();
+    const mode = body.mode || "resilience";
     const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
     if (!LOVABLE_API_KEY) throw new Error("LOVABLE_API_KEY is not configured");
 
-    const domainNames = (domains as string[])
-      .map((d) => DOMAIN_LABELS[d] || d)
-      .join(", ");
-    const mindsetName = MINDSET_LABELS[mindset] || mindset;
+    let systemPrompt: string;
+    let userPrompt: string;
 
-    const systemPrompt = `You are a senior strategy analyst for Anchorstar Consulting, specializing in global resilience trends and their implications for Japanese business leaders. You are briefing CEOs of major Japanese corporations (Kodansha, PERSOL, NTT East, Kikkoman, Kirin, Nintendo) as part of the Mori Building 49F executive education program in Tokyo.
+    if (mode === "genz") {
+      const categories = (body.categories as string[] || [])
+        .map((c) => GENZ_CATEGORY_LABELS[c] || c)
+        .join(", ");
+
+      systemPrompt = `You are a senior strategy analyst for Anchorstar Consulting, specializing in Gen Z consumer behavior and its implications for Japanese business leaders. You are briefing CEOs of major Japanese corporations (Kodansha, PERSOL, NTT East, Kikkoman, Kirin, Nintendo) as part of the Mori Building 49F executive education program in Tokyo.
+
+Your framework focuses on where Gen Z consumer demand for resilience-oriented products and experiences is strongest globally, and what this means for Japanese companies.
+
+Write in an executive tone: direct, data-grounded, authoritative. No fluff. Reference specific companies, markets, or data points when possible.`;
+
+      userPrompt = `Generate a 150-word executive insight brief analyzing Gen Z consumer signals through these categories:
+
+Categories: ${categories}
+
+Structure:
+1. What Gen Z is demanding globally in these categories right now (2-3 sentences with specific data or examples)
+2. Where the strongest signals are emerging and why (2-3 sentences referencing specific markets)
+3. What this means specifically for Japanese business leaders — actionable, specific, connected to Japanese brands and market dynamics (2-3 sentences)
+
+Be specific. Name countries, companies, figures. This is for CEOs who will challenge vague thinking.`;
+    } else {
+      const { domains, mindset } = body;
+      const domainNames = (domains as string[])
+        .map((d) => DOMAIN_LABELS[d] || d)
+        .join(", ");
+      const mindsetName = MINDSET_LABELS[mindset] || mindset;
+
+      systemPrompt = `You are a senior strategy analyst for Anchorstar Consulting, specializing in global resilience trends and their implications for Japanese business leaders. You are briefing CEOs of major Japanese corporations (Kodansha, PERSOL, NTT East, Kikkoman, Kirin, Nintendo) as part of the Mori Building 49F executive education program in Tokyo.
 
 Your framework is "Flourishing Through Resilience" — resilience is not just surviving disruption but actively growing and innovating through it (anchored in the WEF definition).
 
 Write in an executive tone: direct, data-grounded, authoritative. No fluff. No generic statements. Every sentence should earn its place. Reference specific companies, markets, or data points when possible.`;
 
-    const userPrompt = `Generate a 150-word executive insight brief analyzing global resilience signals through these lenses:
+      userPrompt = `Generate a 150-word executive insight brief analyzing global resilience signals through these lenses:
 
 Domains: ${domainNames}
 Mindset: ${mindsetName}
@@ -53,6 +88,7 @@ Structure:
 3. What this means specifically for Japanese business leaders in the room — actionable, specific, connected to Japanese market dynamics (2-3 sentences)
 
 Be specific. Name countries, companies, figures. This is for CEOs who will challenge vague thinking.`;
+    }
 
     const response = await fetch(
       "https://ai.gateway.lovable.dev/v1/chat/completions",

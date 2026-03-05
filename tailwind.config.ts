@@ -61,6 +61,7 @@ export default {
           border: "hsl(var(--sidebar-border))",
           ring: "hsl(var(--sidebar-ring))",
         },
+        genz: "hsl(170, 55%, 46%)",
       },
       borderRadius: {
         lg: "var(--radius)",

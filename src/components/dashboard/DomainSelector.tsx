@@ -28,7 +28,7 @@ const DomainSelector = ({ activeDomains, onToggle }: Props) => {
             {Icon && <Icon className="h-4 w-4 shrink-0" style={{ color: d.color }} />}
             <div className="flex-1 min-w-0">
               <span className="text-sm font-medium text-foreground">{d.label}</span>
-              <p className="text-[11px] text-muted-foreground leading-tight truncate">{d.description}</p>
+              <p className="text-[11px] text-muted-foreground leading-tight">{d.description}</p>
             </div>
           </label>
         );

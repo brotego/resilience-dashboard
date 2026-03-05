@@ -1,6 +1,12 @@
 import { Badge } from "@/components/ui/badge";
+import { DashboardMode } from "./DashboardLayout";
 
-const ModeToggle = () => {
+interface Props {
+  mode: DashboardMode;
+  onModeChange: (mode: DashboardMode) => void;
+}
+
+const ModeToggle = ({ mode, onModeChange }: Props) => {
   return (
     <header className="flex items-center justify-between px-6 py-3 border-b border-border bg-card">
       <div className="flex items-center gap-3">
@@ -12,14 +18,25 @@ const ModeToggle = () => {
         </span>
       </div>
       <div className="flex items-center gap-2">
-        <button className="px-3 py-1.5 text-sm font-medium rounded-md bg-primary text-primary-foreground">
+        <button
+          onClick={() => onModeChange("resilience")}
+          className={`px-3 py-1.5 text-sm font-medium rounded-md transition-colors ${
+            mode === "resilience"
+              ? "bg-primary text-primary-foreground"
+              : "bg-secondary text-muted-foreground hover:text-foreground"
+          }`}
+        >
           Global Resilience
         </button>
-        <button className="px-3 py-1.5 text-sm font-medium rounded-md bg-secondary text-muted-foreground cursor-not-allowed relative" disabled>
+        <button
+          onClick={() => onModeChange("genz")}
+          className={`px-3 py-1.5 text-sm font-medium rounded-md transition-colors ${
+            mode === "genz"
+              ? "bg-genz text-white"
+              : "bg-secondary text-muted-foreground hover:text-foreground"
+          }`}
+        >
           Gen Z Signal
-          <Badge variant="outline" className="ml-2 text-[10px] py-0 px-1.5 border-muted-foreground/40 text-muted-foreground">
-            Soon
-          </Badge>
         </button>
       </div>
     </header>

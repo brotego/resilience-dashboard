@@ -1,26 +1,36 @@
 import { useState, useEffect, useRef } from "react";
 import { DomainId, MindsetId } from "@/data/types";
+import { GenZCategoryId } from "@/data/genzTypes";
 import { DOMAINS, MINDSETS } from "@/data/domains";
+import { GENZ_CATEGORIES } from "@/data/genzCategories";
 import { Skeleton } from "@/components/ui/skeleton";
 import { supabase } from "@/integrations/supabase/client";
+import { DashboardMode } from "./DashboardLayout";
 
 interface Props {
+  mode: DashboardMode;
   activeDomains: DomainId[];
   activeMindset: MindsetId;
+  activeCategories: GenZCategoryId[];
 }
 
-const AIInsightPanel = ({ activeDomains, activeMindset }: Props) => {
+const AIInsightPanel = ({ mode, activeDomains, activeMindset, activeCategories }: Props) => {
   const [insight, setInsight] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const debounceRef = useRef<ReturnType<typeof setTimeout>>();
 
-  const domainLabels = activeDomains.map((d) => DOMAINS.find((x) => x.id === d)?.label).filter(Boolean).join(", ");
-  const mindsetLabel = MINDSETS.find((m) => m.id === activeMindset)?.label || "";
+  const isResilience = mode === "resilience";
+
+  const contextLabel = isResilience
+    ? `${activeDomains.map((d) => DOMAINS.find((x) => x.id === d)?.label).filter(Boolean).join(", ") || "No domain"} × ${MINDSETS.find((m) => m.id === activeMindset)?.label || ""}`
+    : `${activeCategories.map((c) => GENZ_CATEGORIES.find((x) => x.id === c)?.label).filter(Boolean).join(", ") || "No category"}`;
+
+  const hasSelection = isResilience ? activeDomains.length > 0 : activeCategories.length > 0;
 
   useEffect(() => {
-    if (activeDomains.length === 0) {
-      setInsight("Select at least one domain to generate an AI insight brief.");
+    if (!hasSelection) {
+      setInsight(isResilience ? "Select at least one domain to generate an AI insight brief." : "Select at least one Gen Z category to generate insights.");
       return;
     }
 
@@ -31,9 +41,11 @@ const AIInsightPanel = ({ activeDomains, activeMindset }: Props) => {
       setInsight("");
 
       try {
-        const resp = await supabase.functions.invoke("ai-insight", {
-          body: { domains: activeDomains, mindset: activeMindset },
-        });
+        const body = isResilience
+          ? { domains: activeDomains, mindset: activeMindset, mode: "resilience" }
+          : { categories: activeCategories, mode: "genz" };
+
+        const resp = await supabase.functions.invoke("ai-insight", { body });
 
         if (resp.error) {
           throw new Error(resp.error.message || "Failed to generate insight");
@@ -51,15 +63,17 @@ const AIInsightPanel = ({ activeDomains, activeMindset }: Props) => {
     return () => {
       if (debounceRef.current) clearTimeout(debounceRef.current);
     };
-  }, [activeDomains.join(","), activeMindset]);
+  }, [mode, activeDomains.join(","), activeMindset, activeCategories.join(",")]);
+
+  const accentClass = isResilience ? "text-primary" : "text-genz";
 
   return (
     <div className="h-full flex flex-col bg-card border-l border-border">
       <div className="px-4 py-3 border-b border-border">
-        <h3 className="text-xs font-semibold uppercase tracking-wider text-primary">AI Insight Brief</h3>
-        <p className="text-[11px] text-muted-foreground mt-0.5">
-          {domainLabels || "No domain"} × {mindsetLabel}
-        </p>
+        <h3 className={`text-xs font-semibold uppercase tracking-wider ${accentClass}`}>
+          {isResilience ? "AI Insight Brief" : "Gen Z Insight Brief"}
+        </h3>
+        <p className="text-[11px] text-muted-foreground mt-0.5">{contextLabel}</p>
       </div>
       <div className="flex-1 overflow-y-auto px-4 py-3">
         {loading ? (
@@ -70,7 +84,7 @@ const AIInsightPanel = ({ activeDomains, activeMindset }: Props) => {
             <Skeleton className="h-4 w-full" />
             <Skeleton className="h-4 w-3/6" />
             <div className="flex items-center gap-2 mt-4">
-              <div className="h-2 w-2 rounded-full bg-primary animate-pulse-glow" />
+              <div className={`h-2 w-2 rounded-full animate-pulse-glow ${isResilience ? "bg-primary" : "bg-genz"}`} />
               <span className="text-xs text-muted-foreground">Generating executive brief…</span>
             </div>
           </div>
