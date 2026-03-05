@@ -42,6 +42,7 @@ function stripMarkdown(text: string): string {
   return text
     .replace(/(\*\*|__)(.*?)\1/g, "$2")
     .replace(/(\*|_)(.*?)\1/g, "$2")
+    .replace(/\*+/g, "")
     .replace(/^#+\s+(.*$)/gm, "$1")
     .replace(/^\s*[-*+]\s+(.*$)/gm, "$1")
     .replace(/`([^`]+)`/g, "$1")
@@ -69,7 +70,24 @@ serve(async (req) => {
 
     const formatRules = `
 
-CRITICAL FORMAT RULES: Write ONLY plain prose. No markdown. No asterisks. No bold. No headers. No bullet points. No numbered lists. No hashtags. No special formatting of any kind. Just clean sentences in flowing paragraphs. Keep it under 120 words. Short punchy sentences. Every word must earn its place.`;
+CRITICAL FORMAT RULES:
+You MUST structure your response in EXACTLY this format with these EXACT labels:
+
+GLOBAL SIGNAL
+Two to three short sentences on what is happening worldwide.
+
+JAPAN CONTEXT
+Two to three short sentences on how this manifests in Japan.
+
+CEO IMPLICATION
+One to two sentences, direct and actionable.
+
+Rules:
+- Use ONLY the three labels above in plain uppercase: GLOBAL SIGNAL, JAPAN CONTEXT, CEO IMPLICATION.
+- Put a blank line before each label.
+- No asterisks. No bold. No markdown. No dashes. No bullets. No numbered lists. No hashtags. No special formatting of any kind.
+- Just clean plain sentences. Short and punchy. Every word must earn its place.
+- Keep the entire response under 120 words total.`;
 
     let systemPrompt: string;
     let userPrompt: string;
@@ -85,7 +103,7 @@ Write like a seasoned McKinsey partner in a private boardroom conversation. Dire
 
       userPrompt = `Brief me on Gen Z consumer signals in: ${categories}.${companyInfo ? ` Focus on ${companyInfo.name}.` : ""}
 
-Cover three things in flowing prose: what Gen Z is actually doing right now globally with specific examples, where the strongest market signals are and why, and what this means for ${companyInfo ? companyInfo.name : "Japanese business leaders"} specifically. Be concrete and actionable.`;
+Use the exact three-section format: GLOBAL SIGNAL, JAPAN CONTEXT, CEO IMPLICATION. No markdown. No asterisks. Plain text only.`;
     } else {
       const { domains, mindset } = body;
       const domainNames = (domains as string[])
@@ -99,7 +117,7 @@ Write like a seasoned McKinsey partner in a private boardroom conversation. Dire
 
       userPrompt = `Brief me on global resilience signals. Domains: ${domainNames}. Mindset lens: ${mindsetName}.${companyInfo ? ` Focus on ${companyInfo.name}.` : ""}
 
-Cover three things in flowing prose: what is happening right now globally through these domains with specific data, how the ${mindsetName} lens reveals opportunities others miss, and what this means for ${companyInfo ? companyInfo.name : "Japanese business leaders"} specifically. Be concrete and actionable.`;
+Use the exact three-section format: GLOBAL SIGNAL, JAPAN CONTEXT, CEO IMPLICATION. No markdown. No asterisks. Plain text only.`;
     }
 
     const response = await fetch(

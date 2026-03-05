@@ -16,14 +16,26 @@ interface Props {
   selectedCompany: CompanyId | null;
 }
 
+const cleanText = (text: string): string => {
+  let cleaned = text
+    .replace(/\*\*/g, "")
+    .replace(/\*/g, "")
+    .replace(/#{1,6}\s/g, "")
+    .replace(/^\s*[-•]\s/gm, "")
+    .replace(/_([^_]+)_/g, "$1")
+    .replace(/`([^`]+)`/g, "$1")
+    .trim();
+
+  // Ensure section labels are on their own lines with spacing
+  const sections = ["GLOBAL SIGNAL", "JAPAN CONTEXT", "CEO IMPLICATION"];
+  for (const label of sections) {
+    // Normalize: ensure label is preceded by a blank line (unless at start)
+    cleaned = cleaned.replace(new RegExp(`(?<!\n\n)${label}`, "g"), `\n\n${label}`);
+  }
+  return cleaned.replace(/^\n+/, "").trim();
+};
+
 const AIInsightPanel = ({ mode, activeDomains, activeMindset, activeCategories, selectedCompany }: Props) => {
-  const cleanText = (text: string) =>
-    text
-      .replace(/\*\*/g, "")
-      .replace(/\*/g, "")
-      .replace(/#{1,6}\s/g, "")
-      .replace(/^\s*[-•]\s/gm, "")
-      .trim();
   const [insight, setInsight] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
