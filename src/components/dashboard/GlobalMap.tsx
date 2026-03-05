@@ -20,6 +20,15 @@ interface Props {
 
 const GENZ_COLOR = "hsl(170, 55%, 46%)";
 
+const TOOLTIP_STYLES = `
+  position:absolute;pointer-events:none;z-index:10;
+  background:hsl(213,30%,13%);border:1px solid hsl(213,20%,20%);
+  border-radius:8px;padding:10px 12px;
+  box-shadow:0 10px 30px -10px rgba(0,0,0,0.6);
+  font-family:Inter,system-ui,sans-serif;max-width:280px;
+  white-space:normal;left:20px;top:-40px;
+`;
+
 function isRelevantToCompany(text: string, companyId: CompanyId): boolean {
   const company = COMPANIES.find((c) => c.id === companyId);
   if (!company) return false;
@@ -27,32 +36,47 @@ function isRelevantToCompany(text: string, companyId: CompanyId): boolean {
   return company.keywords.some((kw) => lower.includes(kw.toLowerCase()));
 }
 
+function escapeHtml(str: string): string {
+  return str.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+}
+
+function buildTooltipHtml(title: string, location: string, description: string, accentLabel: string, accentColor: string, isJapan: boolean): string {
+  const shortDesc = description.length > 100 ? `${escapeHtml(description.slice(0, 100))}…` : escapeHtml(description);
+  return `<div>
+    <div style="display:flex;align-items:center;gap:6px;margin-bottom:4px;">
+      ${isJapan ? '<span style="font-size:11px;">🇯🇵</span>' : ""}
+      <strong style="font-size:13px;color:hsl(30,20%,90%);line-height:1.3;">${escapeHtml(title)}</strong>
+    </div>
+    <p style="font-size:11px;color:hsl(30,10%,60%);margin:0 0 4px;">${escapeHtml(location)}</p>
+    <p style="font-size:11px;color:hsl(30,20%,78%);margin:0 0 6px;line-height:1.4;">${shortDesc}</p>
+    <span style="font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:0.5px;color:${accentColor};">${escapeHtml(accentLabel)}</span>
+  </div>`;
+}
+
 const GlobalMap = ({ mode, activeDomains, activeMindset, activeCategories, selectedCompany }: Props) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<maplibregl.Map | null>(null);
   const markersRef = useRef<maplibregl.Marker[]>([]);
   const clickPopupRef = useRef<maplibregl.Popup | null>(null);
-  // Store the active hover tooltip div + its lnglat so we can reposition on map move
-  const hoverElRef = useRef<HTMLDivElement | null>(null);
-  const hoverCoordsRef = useRef<[number, number] | null>(null);
+  const hoverTooltipRef = useRef<HTMLDivElement | null>(null);
 
   const removeHoverTooltip = useCallback(() => {
-    if (hoverElRef.current) {
-      try { hoverElRef.current.remove(); } catch (_) { /* already removed */ }
-      hoverElRef.current = null;
+    if (hoverTooltipRef.current) {
+      try { hoverTooltipRef.current.remove(); } catch (_) { /* noop */ }
+      hoverTooltipRef.current = null;
     }
-    hoverCoordsRef.current = null;
   }, []);
 
-  const repositionHoverTooltip = useCallback(() => {
-    const map = mapRef.current;
-    const el = hoverElRef.current;
-    const coords = hoverCoordsRef.current;
-    if (!map || !el || !coords) return;
-    const point = map.project(new maplibregl.LngLat(coords[0], coords[1]));
-    el.style.left = `${point.x + 20}px`;
-    el.style.top = `${point.y - 40}px`;
-  }, []);
+  const showTooltipOnMarker = useCallback((markerEl: HTMLElement, html: string) => {
+    removeHoverTooltip();
+    const tooltip = document.createElement("div");
+    tooltip.style.cssText = TOOLTIP_STYLES;
+    tooltip.innerHTML = html;
+    markerEl.style.position = "relative";
+    markerEl.style.overflow = "visible";
+    markerEl.appendChild(tooltip);
+    hoverTooltipRef.current = tooltip;
+  }, [removeHoverTooltip]);
 
   // Map init
   useEffect(() => {
@@ -83,15 +107,10 @@ const GlobalMap = ({ mode, activeDomains, activeMindset, activeCategories, selec
     });
 
     map.addControl(new maplibregl.NavigationControl(), "bottom-right");
-
-    const onMapMove = () => repositionHoverTooltip();
-    map.on("move", onMapMove);
-
     mapRef.current = map;
 
     return () => {
       removeHoverTooltip();
-      map.off("move", onMapMove);
       map.remove();
       mapRef.current = null;
     };
@@ -110,25 +129,18 @@ const GlobalMap = ({ mode, activeDomains, activeMindset, activeCategories, selec
       clickPopupRef.current = null;
     }
 
-    const showHoverTooltip = (html: string, coordinates: [number, number]) => {
-      removeHoverTooltip();
-      const tooltip = document.createElement("div");
-      tooltip.style.cssText = `
-        position:absolute;pointer-events:none;z-index:10;
-        background:hsl(213,30%,13%);border:1px solid hsl(213,20%,20%);
-        border-radius:8px;padding:10px 12px;
-        box-shadow:0 10px 30px -10px rgba(0,0,0,0.6);
-        font-family:Inter,system-ui,sans-serif;max-width:280px;
-      `;
-      tooltip.innerHTML = html;
-      // Append to the map container div (which has position:relative)
-      map.getContainer().appendChild(tooltip);
-      hoverElRef.current = tooltip;
-      hoverCoordsRef.current = coordinates;
-      // Position immediately using map.project
-      const point = map.project(new maplibregl.LngLat(coordinates[0], coordinates[1]));
-      tooltip.style.left = `${point.x + 20}px`;
-      tooltip.style.top = `${point.y - 40}px`;
+    const createMarkerEl = (size: number, color: string, borderColor: string, dimmed: boolean, glowColor: string): HTMLDivElement => {
+      const el = document.createElement("div");
+      el.style.width = `${size}px`;
+      el.style.height = `${size}px`;
+      el.style.borderRadius = "50%";
+      el.style.backgroundColor = color;
+      el.style.border = `2px solid ${borderColor}`;
+      el.style.opacity = dimmed ? "0.3" : "1";
+      el.style.boxShadow = dimmed ? "none" : glowColor;
+      el.style.cursor = "pointer";
+      el.style.transition = "transform 0.15s, opacity 0.3s";
+      return el;
     };
 
     if (mode === "resilience") {
@@ -139,40 +151,22 @@ const GlobalMap = ({ mode, activeDomains, activeMindset, activeCategories, selec
         const color = domain?.color || "hsl(38, 78%, 56%)";
         const domainLabel = domain?.label || signal.domain;
         const relevant = selectedCompany ? isRelevantToCompany(`${signal.title} ${signal.description}`, selectedCompany) : false;
-        const dimmed = selectedCompany && !relevant && !signal.isJapan;
+        const dimmed = !!(selectedCompany && !relevant && !signal.isJapan);
         const size = signal.isJapan ? 16 : relevant ? 16 : 10 + signal.intensity;
 
-        const el = document.createElement("div");
-        el.style.width = `${size}px`;
-        el.style.height = `${size}px`;
-        el.style.borderRadius = "50%";
-        el.style.backgroundColor = signal.isJapan ? "hsl(38, 78%, 56%)" : color;
-        el.style.border = signal.isJapan ? "2px solid hsl(38, 78%, 70%)" : `2px solid ${color}`;
-        el.style.opacity = dimmed ? "0.3" : "1";
-        el.style.boxShadow = dimmed
-          ? "none"
-          : signal.isJapan
-            ? "0 0 12px hsla(38, 78%, 56%, 0.6)"
-            : relevant
-              ? `0 0 14px ${color.replace(")", ", 0.7)")}`
-              : `0 0 8px ${color.replace(")", ", 0.4)")}`;
-        el.style.cursor = "pointer";
-        el.style.transition = "transform 0.15s, opacity 0.3s";
+        const bgColor = signal.isJapan ? "hsl(38, 78%, 56%)" : color;
+        const borderColor = signal.isJapan ? "hsl(38, 78%, 70%)" : color;
+        const glow = signal.isJapan
+          ? "0 0 12px hsla(38, 78%, 56%, 0.6)"
+          : relevant
+            ? `0 0 14px ${color.replace(")", ", 0.7)")}`
+            : `0 0 8px ${color.replace(")", ", 0.4)")}`;
+
+        const el = createMarkerEl(size, bgColor, borderColor, dimmed, glow);
 
         el.addEventListener("mouseenter", () => {
           el.style.transform = "scale(1.3)";
-          showHoverTooltip(
-            `<div>
-              <div style="display:flex;align-items:center;gap:6px;margin-bottom:4px;">
-                ${signal.isJapan ? '<span style="font-size:11px;">🇯🇵</span>' : ""}
-                <strong style="font-size:13px;color:hsl(30,20%,90%);line-height:1.3;">${signal.title}</strong>
-              </div>
-              <p style="font-size:11px;color:hsl(30,10%,60%);margin:0 0 4px;">${signal.location}</p>
-              <p style="font-size:11px;color:hsl(30,20%,78%);margin:0 0 6px;line-height:1.4;">${signal.description.length > 100 ? `${signal.description.slice(0, 100)}…` : signal.description}</p>
-              <span style="font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:0.5px;color:${color};">${domainLabel}</span>
-            </div>`,
-            signal.coordinates
-          );
+          showTooltipOnMarker(el, buildTooltipHtml(signal.title, signal.location, signal.description, domainLabel, color, signal.isJapan));
         });
 
         el.addEventListener("mouseleave", () => {
@@ -185,10 +179,7 @@ const GlobalMap = ({ mode, activeDomains, activeMindset, activeCategories, selec
         el.addEventListener("click", (e) => {
           e.stopPropagation();
           removeHoverTooltip();
-          if (clickPopupRef.current) {
-            clickPopupRef.current.remove();
-            clickPopupRef.current = null;
-          }
+          if (clickPopupRef.current) { clickPopupRef.current.remove(); clickPopupRef.current = null; }
 
           const mindsetText = signal.mindsetRelevance[activeMindset];
           const popup = new maplibregl.Popup({ offset: [0, -(size / 2 + 6)], maxWidth: "320px", anchor: "bottom" })
@@ -197,18 +188,17 @@ const GlobalMap = ({ mode, activeDomains, activeMindset, activeCategories, selec
               <div style="font-family:Inter,system-ui,sans-serif;">
                 <div style="display:flex;align-items:center;gap:6px;margin-bottom:8px;">
                   ${signal.isJapan ? '<span style="font-size:12px;">🇯🇵</span>' : ""}
-                  <strong style="font-size:14px;color:hsl(30,20%,90%);">${signal.title}</strong>
+                  <strong style="font-size:14px;color:hsl(30,20%,90%);">${escapeHtml(signal.title)}</strong>
                 </div>
-                <p style="font-size:12px;color:hsl(30,10%,60%);margin:0 0 8px;">${signal.location}</p>
-                <p style="font-size:12px;color:hsl(30,20%,82%);margin:0 0 10px;line-height:1.5;">${signal.description}</p>
+                <p style="font-size:12px;color:hsl(30,10%,60%);margin:0 0 8px;">${escapeHtml(signal.location)}</p>
+                <p style="font-size:12px;color:hsl(30,20%,82%);margin:0 0 10px;line-height:1.5;">${escapeHtml(signal.description)}</p>
                 <div style="border-top:1px solid hsl(213,20%,20%);padding-top:8px;">
                   <div style="font-size:10px;text-transform:uppercase;letter-spacing:0.5px;color:hsl(38,78%,56%);margin-bottom:4px;">Mindset Lens</div>
-                  <p style="font-size:11px;color:hsl(30,20%,82%);line-height:1.4;margin:0;">${mindsetText}</p>
+                  <p style="font-size:11px;color:hsl(30,20%,82%);line-height:1.4;margin:0;">${escapeHtml(mindsetText)}</p>
                 </div>
               </div>
             `)
             .addTo(map);
-
           clickPopupRef.current = popup;
         });
 
@@ -221,40 +211,21 @@ const GlobalMap = ({ mode, activeDomains, activeMindset, activeCategories, selec
         const cat = GENZ_CATEGORIES.find((c) => c.id === signal.category);
         const catLabel = cat?.label || signal.category;
         const relevant = selectedCompany ? isRelevantToCompany(`${signal.title} ${signal.description}`, selectedCompany) : false;
-        const dimmed = selectedCompany && !relevant && !signal.isJapan;
+        const dimmed = !!(selectedCompany && !relevant && !signal.isJapan);
         const size = signal.isJapan ? 16 : relevant ? 16 : 10 + signal.intensity;
 
-        const el = document.createElement("div");
-        el.style.width = `${size}px`;
-        el.style.height = `${size}px`;
-        el.style.borderRadius = "50%";
-        el.style.backgroundColor = GENZ_COLOR;
-        el.style.border = signal.isJapan ? "2px solid hsl(170, 55%, 60%)" : `2px solid ${GENZ_COLOR}`;
-        el.style.opacity = dimmed ? "0.3" : "1";
-        el.style.boxShadow = dimmed
-          ? "none"
-          : signal.isJapan
-            ? "0 0 12px hsla(170, 55%, 46%, 0.6)"
-            : relevant
-              ? "0 0 14px hsla(170, 55%, 46%, 0.7)"
-              : "0 0 8px hsla(170, 55%, 46%, 0.4)";
-        el.style.cursor = "pointer";
-        el.style.transition = "transform 0.15s, opacity 0.3s";
+        const borderColor = signal.isJapan ? "hsl(170, 55%, 60%)" : GENZ_COLOR;
+        const glow = signal.isJapan
+          ? "0 0 12px hsla(170, 55%, 46%, 0.6)"
+          : relevant
+            ? "0 0 14px hsla(170, 55%, 46%, 0.7)"
+            : "0 0 8px hsla(170, 55%, 46%, 0.4)";
+
+        const el = createMarkerEl(size, GENZ_COLOR, borderColor, dimmed, glow);
 
         el.addEventListener("mouseenter", () => {
           el.style.transform = "scale(1.3)";
-          showHoverTooltip(
-            `<div>
-              <div style="display:flex;align-items:center;gap:6px;margin-bottom:4px;">
-                ${signal.isJapan ? '<span style="font-size:11px;">🇯🇵</span>' : ""}
-                <strong style="font-size:13px;color:hsl(30,20%,90%);line-height:1.3;">${signal.title}</strong>
-              </div>
-              <p style="font-size:11px;color:hsl(30,10%,60%);margin:0 0 4px;">${signal.location}</p>
-              <p style="font-size:11px;color:hsl(30,20%,78%);margin:0 0 6px;line-height:1.4;">${signal.description.length > 100 ? `${signal.description.slice(0, 100)}…` : signal.description}</p>
-              <span style="font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:0.5px;color:${GENZ_COLOR};">${catLabel}</span>
-            </div>`,
-            signal.coordinates
-          );
+          showTooltipOnMarker(el, buildTooltipHtml(signal.title, signal.location, signal.description, catLabel, GENZ_COLOR, signal.isJapan));
         });
 
         el.addEventListener("mouseleave", () => {
@@ -267,10 +238,7 @@ const GlobalMap = ({ mode, activeDomains, activeMindset, activeCategories, selec
         el.addEventListener("click", (e) => {
           e.stopPropagation();
           removeHoverTooltip();
-          if (clickPopupRef.current) {
-            clickPopupRef.current.remove();
-            clickPopupRef.current = null;
-          }
+          if (clickPopupRef.current) { clickPopupRef.current.remove(); clickPopupRef.current = null; }
 
           const popup = new maplibregl.Popup({ offset: [0, -(size / 2 + 6)], maxWidth: "320px", anchor: "bottom" })
             .setLngLat(signal.coordinates)
@@ -278,18 +246,17 @@ const GlobalMap = ({ mode, activeDomains, activeMindset, activeCategories, selec
               <div style="font-family:Inter,system-ui,sans-serif;">
                 <div style="display:flex;align-items:center;gap:6px;margin-bottom:8px;">
                   ${signal.isJapan ? '<span style="font-size:12px;">🇯🇵</span>' : ""}
-                  <strong style="font-size:14px;color:hsl(30,20%,90%);">${signal.title}</strong>
+                  <strong style="font-size:14px;color:hsl(30,20%,90%);">${escapeHtml(signal.title)}</strong>
                 </div>
-                <p style="font-size:12px;color:hsl(30,10%,60%);margin:0 0 8px;">${signal.location}</p>
-                <p style="font-size:12px;color:hsl(30,20%,82%);margin:0 0 10px;line-height:1.5;">${signal.description}</p>
+                <p style="font-size:12px;color:hsl(30,10%,60%);margin:0 0 8px;">${escapeHtml(signal.location)}</p>
+                <p style="font-size:12px;color:hsl(30,20%,82%);margin:0 0 10px;line-height:1.5;">${escapeHtml(signal.description)}</p>
                 <div style="border-top:1px solid hsl(213,20%,20%);padding-top:8px;">
                   <div style="font-size:10px;text-transform:uppercase;letter-spacing:0.5px;color:hsl(170,55%,46%);margin-bottom:4px;">Japan Insight</div>
-                  <p style="font-size:11px;color:hsl(30,20%,82%);line-height:1.4;margin:0;">${signal.insight}</p>
+                  <p style="font-size:11px;color:hsl(30,20%,82%);line-height:1.4;margin:0;">${escapeHtml(signal.insight)}</p>
                 </div>
               </div>
             `)
             .addTo(map);
-
           clickPopupRef.current = popup;
         });
 
