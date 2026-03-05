@@ -17,6 +17,13 @@ interface Props {
 }
 
 const AIInsightPanel = ({ mode, activeDomains, activeMindset, activeCategories, selectedCompany }: Props) => {
+  const cleanText = (text: string) =>
+    text
+      .replace(/\*\*/g, "")
+      .replace(/\*/g, "")
+      .replace(/#{1,6}\s/g, "")
+      .replace(/^\s*[-•]\s/gm, "")
+      .trim();
   const [insight, setInsight] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -54,7 +61,7 @@ const AIInsightPanel = ({ mode, activeDomains, activeMindset, activeCategories, 
           throw new Error(resp.error.message || "Failed to generate insight");
         }
 
-        setInsight(resp.data?.insight || "No insight generated.");
+        setInsight(cleanText(resp.data?.insight || "No insight generated."));
       } catch (e: any) {
         console.error("AI Insight error:", e);
         setError(e.message || "Failed to generate insight");
