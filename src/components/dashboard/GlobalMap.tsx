@@ -154,6 +154,7 @@ const GlobalMap = ({ mode, activeDomains, activeMindset, activeCategories, selec
 
     if (mode === "resilience") {
       const filtered = SIGNALS.filter((s) => activeDomains.includes(s.domain));
+      console.log("[MapDebug] Resilience mode — first 5 marker coords:", filtered.slice(0, 5).map(s => ({ title: s.title, location: s.location, coordinates: s.coordinates })));
 
       filtered.forEach((signal) => {
         const domain = DOMAINS.find((d) => d.id === signal.domain);
@@ -215,6 +216,7 @@ const GlobalMap = ({ mode, activeDomains, activeMindset, activeCategories, selec
       });
     } else {
       const filtered = GENZ_SIGNALS.filter((s) => activeCategories.includes(s.category));
+      console.log("[MapDebug] GenZ mode — first 5 marker coords:", filtered.slice(0, 5).map(s => ({ title: s.title, location: s.location, coordinates: s.coordinates })));
 
       filtered.forEach((signal) => {
         const cat = GENZ_CATEGORIES.find((c) => c.id === signal.category);
