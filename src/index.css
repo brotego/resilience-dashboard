@@ -72,3 +72,12 @@
   color: hsl(30 10% 60%) !important;
   font-size: 1.2rem !important;
 }
+
+.hover-tooltip .maplibregl-popup-content {
+  padding: 0.625rem 0.75rem !important;
+  pointer-events: none;
+}
+
+.hover-tooltip .maplibregl-popup-close-button {
+  display: none !important;
+}

@@ -1,20 +1,26 @@
 import { GENZ_FOCUS } from "@/data/genzFocus";
+import { COMPANIES, CompanyId } from "@/data/companies";
 import { GenZCategoryId } from "@/data/genzTypes";
 
 interface Props {
   activeCategories: GenZCategoryId[];
+  selectedCompany: CompanyId | null;
 }
 
-const GenZFocusPanel = ({ activeCategories }: Props) => {
+const GenZFocusPanel = ({ activeCategories, selectedCompany }: Props) => {
   const focusCategory = activeCategories.length > 0 ? activeCategories[activeCategories.length - 1] : "authenticity";
   const data = GENZ_FOCUS.find((f) => f.category === focusCategory);
   if (!data) return null;
+
+  const company = selectedCompany ? COMPANIES.find((c) => c.id === selectedCompany) : null;
 
   return (
     <div className="space-y-3">
       <div className="flex items-center gap-2">
         <div className="w-2 h-2 rounded-full bg-genz" />
-        <h3 className="text-xs font-semibold uppercase tracking-wider text-genz">Japan × Gen Z</h3>
+        <h3 className="text-xs font-semibold uppercase tracking-wider text-genz">
+          {company ? `${company.name} × Gen Z` : "Japan × Gen Z"}
+        </h3>
       </div>
       <p className="text-sm font-semibold text-foreground leading-snug">{data.headline}</p>
 
@@ -37,7 +43,9 @@ const GenZFocusPanel = ({ activeCategories }: Props) => {
       </div>
 
       <div className="bg-genz/10 border border-genz/20 rounded-md p-3">
-        <div className="text-[10px] font-semibold uppercase tracking-wider text-genz mb-1">CEO Insight</div>
+        <div className="text-[10px] font-semibold uppercase tracking-wider text-genz mb-1">
+          {company ? `${company.name} CEO Insight` : "CEO Insight"}
+        </div>
         <p className="text-xs text-foreground leading-relaxed">{data.ceoInsight}</p>
       </div>
     </div>

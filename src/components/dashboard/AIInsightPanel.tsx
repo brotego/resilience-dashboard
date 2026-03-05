@@ -3,6 +3,7 @@ import { DomainId, MindsetId } from "@/data/types";
 import { GenZCategoryId } from "@/data/genzTypes";
 import { DOMAINS, MINDSETS } from "@/data/domains";
 import { GENZ_CATEGORIES } from "@/data/genzCategories";
+import { COMPANIES, CompanyId } from "@/data/companies";
 import { Skeleton } from "@/components/ui/skeleton";
 import { supabase } from "@/integrations/supabase/client";
 import { DashboardMode } from "./DashboardLayout";
@@ -12,15 +13,17 @@ interface Props {
   activeDomains: DomainId[];
   activeMindset: MindsetId;
   activeCategories: GenZCategoryId[];
+  selectedCompany: CompanyId | null;
 }
 
-const AIInsightPanel = ({ mode, activeDomains, activeMindset, activeCategories }: Props) => {
+const AIInsightPanel = ({ mode, activeDomains, activeMindset, activeCategories, selectedCompany }: Props) => {
   const [insight, setInsight] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const debounceRef = useRef<ReturnType<typeof setTimeout>>();
 
   const isResilience = mode === "resilience";
+  const company = selectedCompany ? COMPANIES.find((c) => c.id === selectedCompany) : null;
 
   const contextLabel = isResilience
     ? `${activeDomains.map((d) => DOMAINS.find((x) => x.id === d)?.label).filter(Boolean).join(", ") || "No domain"} × ${MINDSETS.find((m) => m.id === activeMindset)?.label || ""}`
@@ -42,8 +45,8 @@ const AIInsightPanel = ({ mode, activeDomains, activeMindset, activeCategories }
 
       try {
         const body = isResilience
-          ? { domains: activeDomains, mindset: activeMindset, mode: "resilience" }
-          : { categories: activeCategories, mode: "genz" };
+          ? { domains: activeDomains, mindset: activeMindset, mode: "resilience", company: selectedCompany }
+          : { categories: activeCategories, mode: "genz", company: selectedCompany };
 
         const resp = await supabase.functions.invoke("ai-insight", { body });
 
@@ -63,7 +66,7 @@ const AIInsightPanel = ({ mode, activeDomains, activeMindset, activeCategories }
     return () => {
       if (debounceRef.current) clearTimeout(debounceRef.current);
     };
-  }, [mode, activeDomains.join(","), activeMindset, activeCategories.join(",")]);
+  }, [mode, activeDomains.join(","), activeMindset, activeCategories.join(","), selectedCompany]);
 
   const accentClass = isResilience ? "text-primary" : "text-genz";
 
@@ -71,7 +74,7 @@ const AIInsightPanel = ({ mode, activeDomains, activeMindset, activeCategories }
     <div className="h-full flex flex-col bg-card border-l border-border">
       <div className="px-4 py-3 border-b border-border">
         <h3 className={`text-xs font-semibold uppercase tracking-wider ${accentClass}`}>
-          {isResilience ? "AI Insight Brief" : "Gen Z Insight Brief"}
+          {company ? `${company.name} Insight Brief` : isResilience ? "AI Insight Brief" : "Gen Z Insight Brief"}
         </h3>
         <p className="text-[11px] text-muted-foreground mt-0.5">{contextLabel}</p>
       </div>
@@ -85,7 +88,9 @@ const AIInsightPanel = ({ mode, activeDomains, activeMindset, activeCategories }
             <Skeleton className="h-4 w-3/6" />
             <div className="flex items-center gap-2 mt-4">
               <div className={`h-2 w-2 rounded-full animate-pulse-glow ${isResilience ? "bg-primary" : "bg-genz"}`} />
-              <span className="text-xs text-muted-foreground">Generating executive brief…</span>
+              <span className="text-xs text-muted-foreground">
+                {company ? `Generating ${company.name} brief…` : "Generating executive brief…"}
+              </span>
             </div>
           </div>
         ) : error ? (

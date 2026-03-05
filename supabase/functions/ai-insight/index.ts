@@ -29,6 +29,15 @@ const GENZ_CATEGORY_LABELS: Record<string, string> = {
   belonging: "Community & Belonging",
 };
 
+const COMPANY_INFO: Record<string, { name: string; sector: string; context: string }> = {
+  kodansha: { name: "Kodansha", sector: "Publishing & Media", context: "Japan's largest publisher — manga, digital media, IP licensing. Key interests: creator economy, digital identity, content communities, IP monetization." },
+  persol: { name: "PERSOL", sector: "HR & Workforce Solutions", context: "Leading HR and staffing group. Key interests: workforce transformation, talent platforms, reskilling, future of work, labor market data." },
+  ntt_east: { name: "NTT East", sector: "Telecommunications & Infrastructure", context: "Regional telecom giant. Key interests: digital infrastructure, smart cities, rural connectivity, elderly care tech, community platforms." },
+  kikkoman: { name: "Kikkoman", sector: "Food & Beverage", context: "Global soy sauce & food company with 300+ year heritage. Key interests: sustainability, food communities, authentic branding, circular economy." },
+  kirin: { name: "Kirin", sector: "Beverages & Health Sciences", context: "Beverage conglomerate expanding into health sciences. Key interests: longevity, functional foods, carbon neutrality, aging population solutions." },
+  nintendo: { name: "Nintendo", sector: "Gaming & Entertainment", context: "Global gaming powerhouse. Key interests: community through play, cognitive health, creator ecosystems, digital belonging, gamified wellness." },
+};
+
 serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
@@ -37,57 +46,65 @@ serve(async (req) => {
   try {
     const body = await req.json();
     const mode = body.mode || "resilience";
+    const companyId = body.company || null;
     const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
     if (!LOVABLE_API_KEY) throw new Error("LOVABLE_API_KEY is not configured");
+
+    const companyInfo = companyId ? COMPANY_INFO[companyId] : null;
+    const companyContext = companyInfo
+      ? `\n\nIMPORTANT: You are speaking DIRECTLY to the CEO of ${companyInfo.name} (${companyInfo.sector}). ${companyInfo.context}\nEvery insight must be reframed through what matters most to ${companyInfo.name}. Be specific about how trends affect their business, their competitive position, and their strategic options.`
+      : "";
 
     let systemPrompt: string;
     let userPrompt: string;
 
     if (mode === "genz") {
       const categories = (body.categories as string[] || [])
-        .map((c) => GENZ_CATEGORY_LABELS[c] || c)
+        .map((c: string) => GENZ_CATEGORY_LABELS[c] || c)
         .join(", ");
 
-      systemPrompt = `You are a senior strategy analyst for Anchorstar Consulting, specializing in Gen Z consumer behavior and its implications for Japanese business leaders. You are briefing CEOs of major Japanese corporations (Kodansha, PERSOL, NTT East, Kikkoman, Kirin, Nintendo) as part of the Mori Building 49F executive education program in Tokyo.
+      systemPrompt = `You are a senior strategy analyst for Anchorstar Consulting, specializing in Gen Z consumer behavior and its implications for Japanese business leaders. You are briefing CEOs of major Japanese corporations as part of the Mori Building 49F executive education program in Tokyo.
 
 Your framework focuses on where Gen Z consumer demand for resilience-oriented products and experiences is strongest globally, and what this means for Japanese companies.
 
-Write in an executive tone: direct, data-grounded, authoritative. No fluff. Reference specific companies, markets, or data points when possible.`;
+Write in an executive tone: direct, data-grounded, authoritative. No fluff. Reference specific companies, markets, or data points when possible.${companyContext}`;
 
       userPrompt = `Generate a 150-word executive insight brief analyzing Gen Z consumer signals through these categories:
 
 Categories: ${categories}
+${companyInfo ? `Company Focus: ${companyInfo.name} (${companyInfo.sector})` : ""}
 
 Structure:
 1. What Gen Z is demanding globally in these categories right now (2-3 sentences with specific data or examples)
 2. Where the strongest signals are emerging and why (2-3 sentences referencing specific markets)
-3. What this means specifically for Japanese business leaders — actionable, specific, connected to Japanese brands and market dynamics (2-3 sentences)
+3. What this means specifically for ${companyInfo ? companyInfo.name : "Japanese business leaders"} — actionable, specific, connected to ${companyInfo ? `${companyInfo.name}'s` : "Japanese"} market dynamics (2-3 sentences)
 
-Be specific. Name countries, companies, figures. This is for CEOs who will challenge vague thinking.`;
+Be specific. Name countries, companies, figures. This is for ${companyInfo ? `the CEO of ${companyInfo.name}` : "CEOs"} who will challenge vague thinking.`;
     } else {
       const { domains, mindset } = body;
       const domainNames = (domains as string[])
-        .map((d) => DOMAIN_LABELS[d] || d)
+        .map((d: string) => DOMAIN_LABELS[d] || d)
         .join(", ");
       const mindsetName = MINDSET_LABELS[mindset] || mindset;
 
-      systemPrompt = `You are a senior strategy analyst for Anchorstar Consulting, specializing in global resilience trends and their implications for Japanese business leaders. You are briefing CEOs of major Japanese corporations (Kodansha, PERSOL, NTT East, Kikkoman, Kirin, Nintendo) as part of the Mori Building 49F executive education program in Tokyo.
+      systemPrompt = `You are a senior strategy analyst for Anchorstar Consulting, specializing in global resilience trends and their implications for Japanese business leaders. You are briefing CEOs of major Japanese corporations as part of the Mori Building 49F executive education program in Tokyo.
 
 Your framework is "Flourishing Through Resilience" — resilience is not just surviving disruption but actively growing and innovating through it (anchored in the WEF definition).
 
-Write in an executive tone: direct, data-grounded, authoritative. No fluff. No generic statements. Every sentence should earn its place. Reference specific companies, markets, or data points when possible.`;
+Write in an executive tone: direct, data-grounded, authoritative. No fluff. No generic statements. Every sentence should earn its place. Reference specific companies, markets, or data points when possible.${companyContext}`;
 
       userPrompt = `Generate a 150-word executive insight brief analyzing global resilience signals through these lenses:
 
 Domains: ${domainNames}
 Mindset: ${mindsetName}
+${companyInfo ? `Company Focus: ${companyInfo.name} (${companyInfo.sector})` : ""}
 
 Structure:
 1. What is happening globally right now through these domains (2-3 sentences with specific data or examples)
 2. How the "${mindsetName}" mindset reveals opportunities others are missing (2-3 sentences)
-3. What this means specifically for Japanese business leaders in the room — actionable, specific, connected to Japanese market dynamics (2-3 sentences)
+3. What this means specifically for ${companyInfo ? companyInfo.name : "Japanese business leaders in the room"} — actionable, specific, connected to ${companyInfo ? `${companyInfo.name}'s` : "Japanese"} market dynamics (2-3 sentences)
 
-Be specific. Name countries, companies, figures. This is for CEOs who will challenge vague thinking.`;
+Be specific. Name countries, companies, figures. This is for ${companyInfo ? `the CEO of ${companyInfo.name}` : "CEOs"} who will challenge vague thinking.`;
     }
 
     const response = await fetch(
