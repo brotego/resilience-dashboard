@@ -53,6 +53,16 @@ function buildTooltipHtml(title: string, location: string, description: string, 
   </div>`;
 }
 
+function normalizeCoordinates(coordinates: [number, number]): [number, number] | null {
+  const [first, second] = coordinates;
+  const isAsIsValid = Number.isFinite(first) && Number.isFinite(second) && Math.abs(first) <= 180 && Math.abs(second) <= 90;
+  const isSwappedValid = Number.isFinite(first) && Number.isFinite(second) && Math.abs(second) <= 180 && Math.abs(first) <= 90;
+
+  if (isAsIsValid) return [first, second];
+  if (isSwappedValid) return [second, first];
+  return null;
+}
+
 const GlobalMap = ({ mode, activeDomains, activeMindset, activeCategories, selectedCompany }: Props) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<maplibregl.Map | null>(null);
@@ -154,9 +164,25 @@ const GlobalMap = ({ mode, activeDomains, activeMindset, activeCategories, selec
 
     if (mode === "resilience") {
       const filtered = SIGNALS.filter((s) => activeDomains.includes(s.domain));
-      console.log("[MapDebug] Resilience mode — first 5 marker coords:", filtered.slice(0, 5).map(s => ({ title: s.title, location: s.location, coordinates: s.coordinates })));
+      const debugPreview = filtered.slice(0, 5).map((s) => ({
+        title: s.title,
+        location: s.location,
+        raw: s.coordinates,
+        normalized: normalizeCoordinates(s.coordinates),
+      }));
+      console.log("[MapDebug] Resilience mode — first 5 marker coords:", debugPreview);
 
       filtered.forEach((signal) => {
+        const normalizedCoordinates = normalizeCoordinates(signal.coordinates);
+        if (!normalizedCoordinates) {
+          console.warn("[MapDebug] Skipping invalid coordinates", {
+            title: signal.title,
+            location: signal.location,
+            coordinates: signal.coordinates,
+          });
+          return;
+        }
+
         const domain = DOMAINS.find((d) => d.id === signal.domain);
         const color = domain?.color || "hsl(38, 78%, 56%)";
         const domainLabel = domain?.label || signal.domain;
@@ -184,7 +210,7 @@ const GlobalMap = ({ mode, activeDomains, activeMindset, activeCategories, selec
           removeHoverTooltip();
         });
 
-        const marker = new maplibregl.Marker({ element: markerEl, anchor: "center" }).setLngLat(signal.coordinates).addTo(map);
+        const marker = new maplibregl.Marker({ element: markerEl, anchor: "center" }).setLngLat(normalizedCoordinates).addTo(map);
 
         markerEl.addEventListener("click", (e) => {
           e.stopPropagation();
@@ -193,7 +219,7 @@ const GlobalMap = ({ mode, activeDomains, activeMindset, activeCategories, selec
 
           const mindsetText = signal.mindsetRelevance[activeMindset];
           const popup = new maplibregl.Popup({ offset: [0, -(size / 2 + 6)], maxWidth: "320px", anchor: "bottom" })
-            .setLngLat(signal.coordinates)
+            .setLngLat(normalizedCoordinates)
             .setHTML(`
               <div style="font-family:Inter,system-ui,sans-serif;">
                 <div style="display:flex;align-items:center;gap:6px;margin-bottom:8px;">
@@ -216,9 +242,25 @@ const GlobalMap = ({ mode, activeDomains, activeMindset, activeCategories, selec
       });
     } else {
       const filtered = GENZ_SIGNALS.filter((s) => activeCategories.includes(s.category));
-      console.log("[MapDebug] GenZ mode — first 5 marker coords:", filtered.slice(0, 5).map(s => ({ title: s.title, location: s.location, coordinates: s.coordinates })));
+      const debugPreview = filtered.slice(0, 5).map((s) => ({
+        title: s.title,
+        location: s.location,
+        raw: s.coordinates,
+        normalized: normalizeCoordinates(s.coordinates),
+      }));
+      console.log("[MapDebug] GenZ mode — first 5 marker coords:", debugPreview);
 
       filtered.forEach((signal) => {
+        const normalizedCoordinates = normalizeCoordinates(signal.coordinates);
+        if (!normalizedCoordinates) {
+          console.warn("[MapDebug] Skipping invalid coordinates", {
+            title: signal.title,
+            location: signal.location,
+            coordinates: signal.coordinates,
+          });
+          return;
+        }
+
         const cat = GENZ_CATEGORIES.find((c) => c.id === signal.category);
         const catLabel = cat?.label || signal.category;
         const relevant = selectedCompany ? isRelevantToCompany(`${signal.title} ${signal.description}`, selectedCompany) : false;
@@ -244,7 +286,7 @@ const GlobalMap = ({ mode, activeDomains, activeMindset, activeCategories, selec
           removeHoverTooltip();
         });
 
-        const marker = new maplibregl.Marker({ element: markerEl, anchor: "center" }).setLngLat(signal.coordinates).addTo(map);
+        const marker = new maplibregl.Marker({ element: markerEl, anchor: "center" }).setLngLat(normalizedCoordinates).addTo(map);
 
         markerEl.addEventListener("click", (e) => {
           e.stopPropagation();
@@ -252,7 +294,7 @@ const GlobalMap = ({ mode, activeDomains, activeMindset, activeCategories, selec
           if (clickPopupRef.current) { clickPopupRef.current.remove(); clickPopupRef.current = null; }
 
           const popup = new maplibregl.Popup({ offset: [0, -(size / 2 + 6)], maxWidth: "320px", anchor: "bottom" })
-            .setLngLat(signal.coordinates)
+            .setLngLat(normalizedCoordinates)
             .setHTML(`
               <div style="font-family:Inter,system-ui,sans-serif;">
                 <div style="display:flex;align-items:center;gap:6px;margin-bottom:8px;">
