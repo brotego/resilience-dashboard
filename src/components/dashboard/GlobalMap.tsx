@@ -114,7 +114,7 @@ const GlobalMap = ({ mode, activeDomains, activeMindset, activeCategories, selec
       map.remove();
       mapRef.current = null;
     };
-  }, []);
+  }, [removeHoverTooltip]);
 
   // Markers
   useEffect(() => {
@@ -129,18 +129,27 @@ const GlobalMap = ({ mode, activeDomains, activeMindset, activeCategories, selec
       clickPopupRef.current = null;
     }
 
-    const createMarkerEl = (size: number, color: string, borderColor: string, dimmed: boolean, glowColor: string): HTMLDivElement => {
-      const el = document.createElement("div");
-      el.style.width = `${size}px`;
-      el.style.height = `${size}px`;
-      el.style.borderRadius = "50%";
-      el.style.backgroundColor = color;
-      el.style.border = `2px solid ${borderColor}`;
-      el.style.opacity = dimmed ? "0.3" : "1";
-      el.style.boxShadow = dimmed ? "none" : glowColor;
-      el.style.cursor = "pointer";
-      el.style.transition = "transform 0.15s, opacity 0.3s";
-      return el;
+    const createMarkerElements = (size: number, color: string, borderColor: string, dimmed: boolean, glowColor: string) => {
+      const wrapper = document.createElement("div");
+      wrapper.style.width = `${size}px`;
+      wrapper.style.height = `${size}px`;
+      wrapper.style.position = "relative";
+      wrapper.style.overflow = "visible";
+      wrapper.style.cursor = "pointer";
+
+      const dot = document.createElement("div");
+      dot.style.width = "100%";
+      dot.style.height = "100%";
+      dot.style.borderRadius = "50%";
+      dot.style.backgroundColor = color;
+      dot.style.border = `2px solid ${borderColor}`;
+      dot.style.opacity = dimmed ? "0.3" : "1";
+      dot.style.boxShadow = dimmed ? "none" : glowColor;
+      dot.style.transition = "transform 0.15s, opacity 0.3s";
+      dot.style.transformOrigin = "center center";
+
+      wrapper.appendChild(dot);
+      return { wrapper, dot };
     };
 
     if (mode === "resilience") {
@@ -162,21 +171,21 @@ const GlobalMap = ({ mode, activeDomains, activeMindset, activeCategories, selec
             ? `0 0 14px ${color.replace(")", ", 0.7)")}`
             : `0 0 8px ${color.replace(")", ", 0.4)")}`;
 
-        const el = createMarkerEl(size, bgColor, borderColor, dimmed, glow);
+        const { wrapper: markerEl, dot } = createMarkerElements(size, bgColor, borderColor, dimmed, glow);
 
-        el.addEventListener("mouseenter", () => {
-          el.style.transform = "scale(1.3)";
-          showTooltipOnMarker(el, buildTooltipHtml(signal.title, signal.location, signal.description, domainLabel, color, signal.isJapan));
+        markerEl.addEventListener("mouseenter", () => {
+          dot.style.transform = "scale(1.3)";
+          showTooltipOnMarker(markerEl, buildTooltipHtml(signal.title, signal.location, signal.description, domainLabel, color, signal.isJapan));
         });
 
-        el.addEventListener("mouseleave", () => {
-          el.style.transform = "scale(1)";
+        markerEl.addEventListener("mouseleave", () => {
+          dot.style.transform = "scale(1)";
           removeHoverTooltip();
         });
 
-        const marker = new maplibregl.Marker({ element: el, anchor: "center" }).setLngLat(signal.coordinates).addTo(map);
+        const marker = new maplibregl.Marker({ element: markerEl, anchor: "center" }).setLngLat(signal.coordinates).addTo(map);
 
-        el.addEventListener("click", (e) => {
+        markerEl.addEventListener("click", (e) => {
           e.stopPropagation();
           removeHoverTooltip();
           if (clickPopupRef.current) { clickPopupRef.current.remove(); clickPopupRef.current = null; }
@@ -221,21 +230,21 @@ const GlobalMap = ({ mode, activeDomains, activeMindset, activeCategories, selec
             ? "0 0 14px hsla(170, 55%, 46%, 0.7)"
             : "0 0 8px hsla(170, 55%, 46%, 0.4)";
 
-        const el = createMarkerEl(size, GENZ_COLOR, borderColor, dimmed, glow);
+        const { wrapper: markerEl, dot } = createMarkerElements(size, GENZ_COLOR, borderColor, dimmed, glow);
 
-        el.addEventListener("mouseenter", () => {
-          el.style.transform = "scale(1.3)";
-          showTooltipOnMarker(el, buildTooltipHtml(signal.title, signal.location, signal.description, catLabel, GENZ_COLOR, signal.isJapan));
+        markerEl.addEventListener("mouseenter", () => {
+          dot.style.transform = "scale(1.3)";
+          showTooltipOnMarker(markerEl, buildTooltipHtml(signal.title, signal.location, signal.description, catLabel, GENZ_COLOR, signal.isJapan));
         });
 
-        el.addEventListener("mouseleave", () => {
-          el.style.transform = "scale(1)";
+        markerEl.addEventListener("mouseleave", () => {
+          dot.style.transform = "scale(1)";
           removeHoverTooltip();
         });
 
-        const marker = new maplibregl.Marker({ element: el, anchor: "center" }).setLngLat(signal.coordinates).addTo(map);
+        const marker = new maplibregl.Marker({ element: markerEl, anchor: "center" }).setLngLat(signal.coordinates).addTo(map);
 
-        el.addEventListener("click", (e) => {
+        markerEl.addEventListener("click", (e) => {
           e.stopPropagation();
           removeHoverTooltip();
           if (clickPopupRef.current) { clickPopupRef.current.remove(); clickPopupRef.current = null; }
@@ -263,7 +272,7 @@ const GlobalMap = ({ mode, activeDomains, activeMindset, activeCategories, selec
         markersRef.current.push(marker);
       });
     }
-  }, [mode, activeDomains, activeMindset, activeCategories, selectedCompany]);
+  }, [mode, activeDomains, activeMindset, activeCategories, selectedCompany, removeHoverTooltip, showTooltipOnMarker]);
 
   return <div ref={containerRef} className="w-full h-full relative" />;
 };
