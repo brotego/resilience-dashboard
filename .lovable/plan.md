@@ -1,64 +1,44 @@
 
-Yes, this is a good idea. A clean hover-tooltip rewrite using map.project inside the map container is the right fix for this recurring top-left bug.
+Assessment
+- Your proposed mousemove plus position fixed approach will look stable, but it does not satisfy the original UX goal: it follows the cursor, not the marker. If the cursor moves off the point, the tooltip drifts away from the data point.
+- Better fix: avoid both map.project and getBoundingClientRect for hover, and anchor the tooltip directly to the marker DOM element.
 
-Plan
+Implementation plan
 
-1) Rewrite marker hover tooltips in GlobalMap.tsx from scratch
-- Remove all existing hover tooltip state/helpers/event wiring currently tied to the previous approach.
-- Keep click behavior separate; only hover tooltips will be rewritten (no MapLibre Popup for hover).
-- On marker mouseenter:
-  - Read marker lng/lat from the signal coordinates.
-  - Compute pixel position via map.project([lng, lat]).
-  - Create a plain div tooltip and append it to map.getContainer().
-  - Use absolute positioning with fixed offsets: left = x + 20px, top = y - 40px.
-- On mouseleave:
-  - Remove that tooltip div immediately.
-- On map move/zoom while hovered:
-  - Recompute with map.project and reposition the same div.
-- Add robust guards so cleanup never calls .remove on undefined.
-- Ensure only one hover tooltip exists at a time.
-- Keep tooltip content exactly as requested:
-  - Country name
-  - Signal title
-  - One-line description (shortened safely)
-  - Domain or Gen Z category label in accent color
+1) Replace hover system in GlobalMap with marker-local tooltip (clean rewrite)
+- Delete current hover tooltip refs and map move reposition logic.
+- On marker mouseenter, create one plain div tooltip and append it as a child of that marker’s element.
+- Set marker element to position: relative and tooltip to position: absolute with fixed offsets (left: 20px, top: -40px).
+- Tooltip content remains: country, signal title, one-line description, colored domain/category label.
+- On mouseleave, remove tooltip immediately.
 
-2) Stabilize container-relative positioning
-- Confirm map container remains position: relative (already present in className).
-- Ensure tooltip z-index/pointer-events are set so it never captures hover and causes flicker.
-- Clamp optional extreme positions (edge of viewport) only if needed after test.
+2) Enforce single-tooltip lifecycle and hard guards
+- Track current hover tooltip element in a ref.
+- Before creating a new tooltip, safely remove existing one with null checks.
+- On marker refresh/unmount, remove tooltip once and clear refs.
+- Ensure no .remove call is made on undefined.
 
-3) Enforce exact AI response structure in ai-insight edge function
-- Update prompt instructions to require this exact output template for every response:
+3) Keep click behavior isolated
+- Keep click detail popups independent from hover tooltips so hover state never interferes with click state.
+- If click is also unstable, move click detail to the same custom-div pattern (anchored to marker element) in a second pass.
 
-GLOBAL SIGNAL
-2-3 short sentences
+4) Add defensive tooltip rendering
+- Escape/sanitize dynamic text before innerHTML, or build tooltip via createElement/textContent nodes.
+- Keep pointer-events: none on tooltip to prevent hover flicker loops.
 
-JAPAN CONTEXT
-2-3 short sentences
+5) AI response format lock (small hardening)
+- Keep current exact section template in backend prompt.
+- In AIInsightPanel, strengthen client post-processing:
+  - strip markdown tokens
+  - normalize to exactly three labeled sections if model drifts
+- Render with whitespace-pre-line as already implemented.
 
-CEO IMPLICATION
-1-2 short actionable sentences
+Validation checklist
+- Hover marker at different zoom levels and after pan: tooltip stays attached to the same marker.
+- Rapidly move between markers: no orphan tooltip and no console errors.
+- Switch resilience/genz and company lens: hover still stable.
+- Trigger AI generation multiple times: plain uppercase labels, no asterisks, short executive prose.
 
-- Explicitly forbid markdown and special formatting (no asterisks, bullets, headers beyond these exact labels).
-- Keep strict brevity and executive tone.
-
-4) Add client-side output normalization in AIInsightPanel.tsx
-- Keep/strengthen cleanText to strip any residual markdown tokens before render.
-- Add lightweight formatter guard:
-  - If response is missing required section labels, reformat into the 3 labeled blocks from available text fallback.
-- Preserve line breaks with current whitespace-pre-line rendering.
-
-5) Validation pass (end-to-end)
-- Hover test across multiple regions/zoom levels/pan states:
-  - Tooltip remains anchored to marker (never jumps top-left).
-  - Tooltip disappears on mouseleave and on marker set refresh.
-- Mode switching test:
-  - Works in both resilience and Gen Z layers.
-- AI output test:
-  - Multiple generations confirm exact labels, line breaks, short punchy prose, and zero asterisks.
-
-Technical notes
-- Root issue is not MapLibre marker data; it is tooltip lifecycle/positioning strategy.
-- map.project + map-container absolute overlay is the most deterministic fix for hover UI.
-- Keeping hover rendering independent from MapLibre Popup avoids anchor edge cases and CSS side effects.
+Why this should finally work
+- Marker-local absolute positioning removes coordinate conversion and viewport math entirely.
+- Because tooltip is attached to the marker element itself, it moves with the marker automatically as the map moves.
