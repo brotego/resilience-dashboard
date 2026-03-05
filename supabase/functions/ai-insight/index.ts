@@ -38,6 +38,18 @@ const COMPANY_INFO: Record<string, { name: string; sector: string; context: stri
   nintendo: { name: "Nintendo", sector: "Gaming & Entertainment", context: "Global gaming powerhouse. Key interests: community through play, cognitive health, creator ecosystems, digital belonging, gamified wellness." },
 };
 
+function stripMarkdown(text: string): string {
+  return text
+    .replace(/(\*\*|__)(.*?)\1/g, "$2")
+    .replace(/(\*|_)(.*?)\1/g, "$2")
+    .replace(/^#+\s+(.*$)/gm, "$1")
+    .replace(/^\s*[-*+]\s+(.*$)/gm, "$1")
+    .replace(/`([^`]+)`/g, "$1")
+    .replace(/\[([^\]]*)\]\([^)]*\)/g, "$1")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
 serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
@@ -55,6 +67,10 @@ serve(async (req) => {
       ? `\n\nIMPORTANT: You are speaking DIRECTLY to the CEO of ${companyInfo.name} (${companyInfo.sector}). ${companyInfo.context}\nEvery insight must be reframed through what matters most to ${companyInfo.name}. Be specific about how trends affect their business, their competitive position, and their strategic options.`
       : "";
 
+    const formatRules = `
+
+CRITICAL FORMAT RULES: Write ONLY plain prose. No markdown. No asterisks. No bold. No headers. No bullet points. No numbered lists. No hashtags. No special formatting of any kind. Just clean sentences in flowing paragraphs. Keep it under 120 words. Short punchy sentences. Every word must earn its place.`;
+
     let systemPrompt: string;
     let userPrompt: string;
 
@@ -63,23 +79,13 @@ serve(async (req) => {
         .map((c: string) => GENZ_CATEGORY_LABELS[c] || c)
         .join(", ");
 
-      systemPrompt = `You are a senior strategy analyst for Anchorstar Consulting, specializing in Gen Z consumer behavior and its implications for Japanese business leaders. You are briefing CEOs of major Japanese corporations as part of the Mori Building 49F executive education program in Tokyo.
+      systemPrompt = `You are a senior strategy analyst at Anchorstar Consulting briefing CEOs at Mori Building 49F in Tokyo. You specialize in Gen Z consumer behavior and its implications for Japanese business.
 
-Your framework focuses on where Gen Z consumer demand for resilience-oriented products and experiences is strongest globally, and what this means for Japanese companies.
+Write like a seasoned McKinsey partner in a private boardroom conversation. Direct. Sharp. No filler. Name specific companies, markets, and numbers. Sound like you have been in the field, not like you read a report.${companyContext}${formatRules}`;
 
-Write in an executive tone: direct, data-grounded, authoritative. No fluff. Reference specific companies, markets, or data points when possible.${companyContext}`;
+      userPrompt = `Brief me on Gen Z consumer signals in: ${categories}.${companyInfo ? ` Focus on ${companyInfo.name}.` : ""}
 
-      userPrompt = `Generate a 150-word executive insight brief analyzing Gen Z consumer signals through these categories:
-
-Categories: ${categories}
-${companyInfo ? `Company Focus: ${companyInfo.name} (${companyInfo.sector})` : ""}
-
-Structure:
-1. What Gen Z is demanding globally in these categories right now (2-3 sentences with specific data or examples)
-2. Where the strongest signals are emerging and why (2-3 sentences referencing specific markets)
-3. What this means specifically for ${companyInfo ? companyInfo.name : "Japanese business leaders"} — actionable, specific, connected to ${companyInfo ? `${companyInfo.name}'s` : "Japanese"} market dynamics (2-3 sentences)
-
-Be specific. Name countries, companies, figures. This is for ${companyInfo ? `the CEO of ${companyInfo.name}` : "CEOs"} who will challenge vague thinking.`;
+Cover three things in flowing prose: what Gen Z is actually doing right now globally with specific examples, where the strongest market signals are and why, and what this means for ${companyInfo ? companyInfo.name : "Japanese business leaders"} specifically. Be concrete and actionable.`;
     } else {
       const { domains, mindset } = body;
       const domainNames = (domains as string[])
@@ -87,24 +93,13 @@ Be specific. Name countries, companies, figures. This is for ${companyInfo ? `th
         .join(", ");
       const mindsetName = MINDSET_LABELS[mindset] || mindset;
 
-      systemPrompt = `You are a senior strategy analyst for Anchorstar Consulting, specializing in global resilience trends and their implications for Japanese business leaders. You are briefing CEOs of major Japanese corporations as part of the Mori Building 49F executive education program in Tokyo.
+      systemPrompt = `You are a senior strategy analyst at Anchorstar Consulting briefing CEOs at Mori Building 49F in Tokyo. Your framework is Flourishing Through Resilience — resilience as active growth through disruption, not just survival.
 
-Your framework is "Flourishing Through Resilience" — resilience is not just surviving disruption but actively growing and innovating through it (anchored in the WEF definition).
+Write like a seasoned McKinsey partner in a private boardroom conversation. Direct. Sharp. No filler. Name specific companies, markets, and numbers. Sound like you have been in the field, not like you read a report.${companyContext}${formatRules}`;
 
-Write in an executive tone: direct, data-grounded, authoritative. No fluff. No generic statements. Every sentence should earn its place. Reference specific companies, markets, or data points when possible.${companyContext}`;
+      userPrompt = `Brief me on global resilience signals. Domains: ${domainNames}. Mindset lens: ${mindsetName}.${companyInfo ? ` Focus on ${companyInfo.name}.` : ""}
 
-      userPrompt = `Generate a 150-word executive insight brief analyzing global resilience signals through these lenses:
-
-Domains: ${domainNames}
-Mindset: ${mindsetName}
-${companyInfo ? `Company Focus: ${companyInfo.name} (${companyInfo.sector})` : ""}
-
-Structure:
-1. What is happening globally right now through these domains (2-3 sentences with specific data or examples)
-2. How the "${mindsetName}" mindset reveals opportunities others are missing (2-3 sentences)
-3. What this means specifically for ${companyInfo ? companyInfo.name : "Japanese business leaders in the room"} — actionable, specific, connected to ${companyInfo ? `${companyInfo.name}'s` : "Japanese"} market dynamics (2-3 sentences)
-
-Be specific. Name countries, companies, figures. This is for ${companyInfo ? `the CEO of ${companyInfo.name}` : "CEOs"} who will challenge vague thinking.`;
+Cover three things in flowing prose: what is happening right now globally through these domains with specific data, how the ${mindsetName} lens reveals opportunities others miss, and what this means for ${companyInfo ? companyInfo.name : "Japanese business leaders"} specifically. Be concrete and actionable.`;
     }
 
     const response = await fetch(
@@ -145,7 +140,8 @@ Be specific. Name countries, companies, figures. This is for ${companyInfo ? `th
     }
 
     const data = await response.json();
-    const insight = data.choices?.[0]?.message?.content || "Unable to generate insight.";
+    const rawInsight = data.choices?.[0]?.message?.content || "Unable to generate insight.";
+    const insight = stripMarkdown(rawInsight);
 
     return new Response(JSON.stringify({ insight }), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
