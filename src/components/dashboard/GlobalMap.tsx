@@ -26,7 +26,7 @@ const TOOLTIP_STYLES = `
   border-radius:8px;padding:10px 12px;
   box-shadow:0 10px 30px -10px rgba(0,0,0,0.6);
   font-family:Inter,system-ui,sans-serif;max-width:280px;
-  white-space:normal;left:20px;top:-40px;
+  white-space:normal;left:50%;top:50%;transform:translate(50%,-50%);
 `;
 
 function isRelevantToCompany(text: string, companyId: CompanyId): boolean {
@@ -133,8 +133,6 @@ const GlobalMap = ({ mode, activeDomains, activeMindset, activeCategories, selec
       const wrapper = document.createElement("div");
       wrapper.style.width = `${size}px`;
       wrapper.style.height = `${size}px`;
-      wrapper.style.marginLeft = `-${size / 2}px`;
-      wrapper.style.marginTop = `-${size / 2}px`;
       wrapper.style.position = "relative";
       wrapper.style.overflow = "visible";
       wrapper.style.cursor = "pointer";
@@ -185,7 +183,7 @@ const GlobalMap = ({ mode, activeDomains, activeMindset, activeCategories, selec
           removeHoverTooltip();
         });
 
-        const marker = new maplibregl.Marker({ element: markerEl, anchor: "top-left" }).setLngLat(signal.coordinates).addTo(map);
+        const marker = new maplibregl.Marker({ element: markerEl, anchor: "center" }).setLngLat(signal.coordinates).addTo(map);
 
         markerEl.addEventListener("click", (e) => {
           e.stopPropagation();
@@ -244,7 +242,7 @@ const GlobalMap = ({ mode, activeDomains, activeMindset, activeCategories, selec
           removeHoverTooltip();
         });
 
-        const marker = new maplibregl.Marker({ element: markerEl, anchor: "top-left" }).setLngLat(signal.coordinates).addTo(map);
+        const marker = new maplibregl.Marker({ element: markerEl, anchor: "center" }).setLngLat(signal.coordinates).addTo(map);
 
         markerEl.addEventListener("click", (e) => {
           e.stopPropagation();
