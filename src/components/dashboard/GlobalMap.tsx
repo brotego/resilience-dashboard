@@ -40,7 +40,7 @@ const GlobalMap = ({ mode, activeDomains, activeMindset, activeCategories, selec
   const hoverTooltipRef = useRef<HoverTooltipState | null>(null);
 
   const removeHoverTooltip = () => {
-    if (hoverTooltipRef.current) {
+    if (hoverTooltipRef.current && hoverTooltipRef.current.element) {
       hoverTooltipRef.current.element.remove();
       hoverTooltipRef.current = null;
     }
