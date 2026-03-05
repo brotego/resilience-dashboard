@@ -20,6 +20,11 @@ interface Props {
 
 const GENZ_COLOR = "hsl(170, 55%, 46%)";
 
+type HoverTooltipState = {
+  element: HTMLDivElement;
+  coordinates: [number, number];
+};
+
 function isRelevantToCompany(text: string, companyId: CompanyId): boolean {
   const company = COMPANIES.find((c) => c.id === companyId);
   if (!company) return false;
@@ -32,10 +37,28 @@ const GlobalMap = ({ mode, activeDomains, activeMindset, activeCategories, selec
   const mapRef = useRef<maplibregl.Map | null>(null);
   const markersRef = useRef<maplibregl.Marker[]>([]);
   const clickPopupRef = useRef<maplibregl.Popup | null>(null);
-  const hoverTooltipRef = useRef<HTMLDivElement | null>(null);
+  const hoverTooltipRef = useRef<HoverTooltipState | null>(null);
+
+  const removeHoverTooltip = () => {
+    if (hoverTooltipRef.current) {
+      hoverTooltipRef.current.element.remove();
+      hoverTooltipRef.current = null;
+    }
+  };
+
+  const updateHoverTooltipPosition = () => {
+    const map = mapRef.current;
+    const hoverState = hoverTooltipRef.current;
+    if (!map || !hoverState) return;
+
+    const point = map.project(hoverState.coordinates);
+    hoverState.element.style.left = `${point.x + 15}px`;
+    hoverState.element.style.top = `${point.y - 40}px`;
+  };
 
   useEffect(() => {
     if (!containerRef.current || mapRef.current) return;
+
     const map = new maplibregl.Map({
       container: containerRef.current,
       style: {
@@ -48,7 +71,8 @@ const GlobalMap = ({ mode, activeDomains, activeMindset, activeCategories, selec
               "https://b.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}@2x.png",
             ],
             tileSize: 256,
-            attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OSM</a> &copy; <a href="https://carto.com/">CARTO</a>',
+            attribution:
+              '&copy; <a href="https://www.openstreetmap.org/copyright">OSM</a> &copy; <a href="https://carto.com/">CARTO</a>',
           },
         },
         layers: [{ id: "carto-dark-layer", type: "raster", source: "carto-dark", minzoom: 0, maxzoom: 19 }],
@@ -58,32 +82,16 @@ const GlobalMap = ({ mode, activeDomains, activeMindset, activeCategories, selec
       minZoom: 1.5,
       maxZoom: 12,
     });
+
     map.addControl(new maplibregl.NavigationControl(), "bottom-right");
+    map.on("move", updateHoverTooltipPosition);
+    map.on("zoom", updateHoverTooltipPosition);
     mapRef.current = map;
 
-    // Create reusable hover tooltip div
-    const tooltip = document.createElement("div");
-    tooltip.className = "map-hover-tooltip";
-    tooltip.style.cssText = `
-      position: fixed;
-      pointer-events: none;
-      z-index: 9999;
-      display: none;
-      background: hsl(213, 30%, 13%);
-      border: 1px solid hsl(213, 20%, 20%);
-      border-radius: 8px;
-      padding: 10px 12px;
-      box-shadow: 0 10px 30px -10px rgba(0,0,0,0.6);
-      font-family: Inter, system-ui, sans-serif;
-      max-width: 280px;
-      transform: translate(-50%, -100%);
-      margin-top: -12px;
-    `;
-    document.body.appendChild(tooltip);
-    hoverTooltipRef.current = tooltip;
-
     return () => {
-      tooltip.remove();
+      removeHoverTooltip();
+      map.off("move", updateHoverTooltipPosition);
+      map.off("zoom", updateHoverTooltipPosition);
       map.remove();
       mapRef.current = null;
     };
@@ -95,9 +103,32 @@ const GlobalMap = ({ mode, activeDomains, activeMindset, activeCategories, selec
 
     markersRef.current.forEach((m) => m.remove());
     markersRef.current = [];
-    if (clickPopupRef.current) { clickPopupRef.current.remove(); clickPopupRef.current = null; }
+    removeHoverTooltip();
+    if (clickPopupRef.current) {
+      clickPopupRef.current.remove();
+      clickPopupRef.current = null;
+    }
 
-    const tooltip = hoverTooltipRef.current;
+    const createHoverTooltip = (html: string, coordinates: [number, number]) => {
+      removeHoverTooltip();
+
+      const tooltip = document.createElement("div");
+      tooltip.style.position = "absolute";
+      tooltip.style.pointerEvents = "none";
+      tooltip.style.zIndex = "5";
+      tooltip.style.background = "hsl(213, 30%, 13%)";
+      tooltip.style.border = "1px solid hsl(213, 20%, 20%)";
+      tooltip.style.borderRadius = "8px";
+      tooltip.style.padding = "10px 12px";
+      tooltip.style.boxShadow = "0 10px 30px -10px rgba(0,0,0,0.6)";
+      tooltip.style.fontFamily = "Inter, system-ui, sans-serif";
+      tooltip.style.maxWidth = "280px";
+      tooltip.innerHTML = html;
+
+      map.getContainer().appendChild(tooltip);
+      hoverTooltipRef.current = { element: tooltip, coordinates };
+      updateHoverTooltipPosition();
+    };
 
     if (mode === "resilience") {
       const filtered = SIGNALS.filter((s) => activeDomains.includes(s.domain));
@@ -117,53 +148,56 @@ const GlobalMap = ({ mode, activeDomains, activeMindset, activeCategories, selec
         el.style.backgroundColor = signal.isJapan ? "hsl(38, 78%, 56%)" : color;
         el.style.border = signal.isJapan ? "2px solid hsl(38, 78%, 70%)" : `2px solid ${color}`;
         el.style.opacity = dimmed ? "0.3" : "1";
-        el.style.boxShadow = dimmed ? "none" : signal.isJapan
-          ? "0 0 12px hsla(38, 78%, 56%, 0.6)"
-          : relevant ? `0 0 14px ${color.replace(")", ", 0.7)")}` : `0 0 8px ${color.replace(")", ", 0.4)")}`;
+        el.style.boxShadow = dimmed
+          ? "none"
+          : signal.isJapan
+            ? "0 0 12px hsla(38, 78%, 56%, 0.6)"
+            : relevant
+              ? `0 0 14px ${color.replace(")", ", 0.7)")}`
+              : `0 0 8px ${color.replace(")", ", 0.4)")}`;
         el.style.cursor = "pointer";
         el.style.transition = "transform 0.15s, opacity 0.3s";
 
-        // Hover: position tooltip using element's screen position
-        el.addEventListener("mouseenter", (evt) => {
+        el.addEventListener("mouseenter", () => {
           el.style.transform = "scale(1.3)";
-          if (!tooltip) return;
-          const rect = el.getBoundingClientRect();
-          tooltip.innerHTML = `
+          createHoverTooltip(
+            `
             <div>
               <div style="display:flex;align-items:center;gap:6px;margin-bottom:4px;">
-                ${signal.isJapan ? '<span style="font-size:11px;">🇯🇵</span>' : ''}
+                ${signal.isJapan ? '<span style="font-size:11px;">🇯🇵</span>' : ""}
                 <strong style="font-size:13px;color:hsl(30,20%,90%);line-height:1.3;">${signal.title}</strong>
               </div>
               <p style="font-size:11px;color:hsl(30,10%,60%);margin:0 0 4px;">${signal.location}</p>
-              <p style="font-size:11px;color:hsl(30,20%,78%);margin:0 0 6px;line-height:1.4;">${signal.description.length > 100 ? signal.description.slice(0, 100) + '…' : signal.description}</p>
+              <p style="font-size:11px;color:hsl(30,20%,78%);margin:0 0 6px;line-height:1.4;">${signal.description.length > 100 ? `${signal.description.slice(0, 100)}…` : signal.description}</p>
               <span style="font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:0.5px;color:${color};">${domainLabel}</span>
             </div>
-          `;
-          tooltip.style.left = `${rect.left + rect.width / 2}px`;
-          tooltip.style.top = `${rect.top}px`;
-          tooltip.style.display = "block";
+            `,
+            signal.coordinates
+          );
         });
+
         el.addEventListener("mouseleave", () => {
           el.style.transform = "scale(1)";
-          if (tooltip) tooltip.style.display = "none";
+          removeHoverTooltip();
         });
 
-        const marker = new maplibregl.Marker({ element: el, anchor: "center" })
-          .setLngLat(signal.coordinates)
-          .addTo(map);
+        const marker = new maplibregl.Marker({ element: el, anchor: "center" }).setLngLat(signal.coordinates).addTo(map);
 
-        // Click: use setPopup on marker so it anchors correctly
         el.addEventListener("click", (e) => {
           e.stopPropagation();
-          if (tooltip) tooltip.style.display = "none";
-          if (clickPopupRef.current) { clickPopupRef.current.remove(); clickPopupRef.current = null; }
+          removeHoverTooltip();
+          if (clickPopupRef.current) {
+            clickPopupRef.current.remove();
+            clickPopupRef.current = null;
+          }
 
           const mindsetText = signal.mindsetRelevance[activeMindset];
           const popup = new maplibregl.Popup({ offset: [0, -(size / 2 + 6)], maxWidth: "320px", anchor: "bottom" })
+            .setLngLat(signal.coordinates)
             .setHTML(`
               <div style="font-family:Inter,system-ui,sans-serif;">
                 <div style="display:flex;align-items:center;gap:6px;margin-bottom:8px;">
-                  ${signal.isJapan ? '<span style="font-size:12px;">🇯🇵</span>' : ''}
+                  ${signal.isJapan ? '<span style="font-size:12px;">🇯🇵</span>' : ""}
                   <strong style="font-size:14px;color:hsl(30,20%,90%);">${signal.title}</strong>
                 </div>
                 <p style="font-size:12px;color:hsl(30,10%,60%);margin:0 0 8px;">${signal.location}</p>
@@ -173,10 +207,9 @@ const GlobalMap = ({ mode, activeDomains, activeMindset, activeCategories, selec
                   <p style="font-size:11px;color:hsl(30,20%,82%);line-height:1.4;margin:0;">${mindsetText}</p>
                 </div>
               </div>
-            `);
+            `)
+            .addTo(map);
 
-          marker.setPopup(popup);
-          marker.togglePopup();
           clickPopupRef.current = popup;
         });
 
@@ -199,50 +232,55 @@ const GlobalMap = ({ mode, activeDomains, activeMindset, activeCategories, selec
         el.style.backgroundColor = GENZ_COLOR;
         el.style.border = signal.isJapan ? "2px solid hsl(170, 55%, 60%)" : `2px solid ${GENZ_COLOR}`;
         el.style.opacity = dimmed ? "0.3" : "1";
-        el.style.boxShadow = dimmed ? "none" : signal.isJapan
-          ? "0 0 12px hsla(170, 55%, 46%, 0.6)"
-          : relevant ? "0 0 14px hsla(170, 55%, 46%, 0.7)" : "0 0 8px hsla(170, 55%, 46%, 0.4)";
+        el.style.boxShadow = dimmed
+          ? "none"
+          : signal.isJapan
+            ? "0 0 12px hsla(170, 55%, 46%, 0.6)"
+            : relevant
+              ? "0 0 14px hsla(170, 55%, 46%, 0.7)"
+              : "0 0 8px hsla(170, 55%, 46%, 0.4)";
         el.style.cursor = "pointer";
         el.style.transition = "transform 0.15s, opacity 0.3s";
 
         el.addEventListener("mouseenter", () => {
           el.style.transform = "scale(1.3)";
-          if (!tooltip) return;
-          const rect = el.getBoundingClientRect();
-          tooltip.innerHTML = `
+          createHoverTooltip(
+            `
             <div>
               <div style="display:flex;align-items:center;gap:6px;margin-bottom:4px;">
-                ${signal.isJapan ? '<span style="font-size:11px;">🇯🇵</span>' : ''}
+                ${signal.isJapan ? '<span style="font-size:11px;">🇯🇵</span>' : ""}
                 <strong style="font-size:13px;color:hsl(30,20%,90%);line-height:1.3;">${signal.title}</strong>
               </div>
               <p style="font-size:11px;color:hsl(30,10%,60%);margin:0 0 4px;">${signal.location}</p>
-              <p style="font-size:11px;color:hsl(30,20%,78%);margin:0 0 6px;line-height:1.4;">${signal.description.length > 100 ? signal.description.slice(0, 100) + '…' : signal.description}</p>
+              <p style="font-size:11px;color:hsl(30,20%,78%);margin:0 0 6px;line-height:1.4;">${signal.description.length > 100 ? `${signal.description.slice(0, 100)}…` : signal.description}</p>
               <span style="font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:0.5px;color:${GENZ_COLOR};">${catLabel}</span>
             </div>
-          `;
-          tooltip.style.left = `${rect.left + rect.width / 2}px`;
-          tooltip.style.top = `${rect.top}px`;
-          tooltip.style.display = "block";
-        });
-        el.addEventListener("mouseleave", () => {
-          el.style.transform = "scale(1)";
-          if (tooltip) tooltip.style.display = "none";
+            `,
+            signal.coordinates
+          );
         });
 
-        const marker = new maplibregl.Marker({ element: el, anchor: "center" })
-          .setLngLat(signal.coordinates)
-          .addTo(map);
+        el.addEventListener("mouseleave", () => {
+          el.style.transform = "scale(1)";
+          removeHoverTooltip();
+        });
+
+        const marker = new maplibregl.Marker({ element: el, anchor: "center" }).setLngLat(signal.coordinates).addTo(map);
 
         el.addEventListener("click", (e) => {
           e.stopPropagation();
-          if (tooltip) tooltip.style.display = "none";
-          if (clickPopupRef.current) { clickPopupRef.current.remove(); clickPopupRef.current = null; }
+          removeHoverTooltip();
+          if (clickPopupRef.current) {
+            clickPopupRef.current.remove();
+            clickPopupRef.current = null;
+          }
 
           const popup = new maplibregl.Popup({ offset: [0, -(size / 2 + 6)], maxWidth: "320px", anchor: "bottom" })
+            .setLngLat(signal.coordinates)
             .setHTML(`
               <div style="font-family:Inter,system-ui,sans-serif;">
                 <div style="display:flex;align-items:center;gap:6px;margin-bottom:8px;">
-                  ${signal.isJapan ? '<span style="font-size:12px;">🇯🇵</span>' : ''}
+                  ${signal.isJapan ? '<span style="font-size:12px;">🇯🇵</span>' : ""}
                   <strong style="font-size:14px;color:hsl(30,20%,90%);">${signal.title}</strong>
                 </div>
                 <p style="font-size:12px;color:hsl(30,10%,60%);margin:0 0 8px;">${signal.location}</p>
@@ -252,10 +290,9 @@ const GlobalMap = ({ mode, activeDomains, activeMindset, activeCategories, selec
                   <p style="font-size:11px;color:hsl(30,20%,82%);line-height:1.4;margin:0;">${signal.insight}</p>
                 </div>
               </div>
-            `);
+            `)
+            .addTo(map);
 
-          marker.setPopup(popup);
-          marker.togglePopup();
           clickPopupRef.current = popup;
         });
 
@@ -264,7 +301,7 @@ const GlobalMap = ({ mode, activeDomains, activeMindset, activeCategories, selec
     }
   }, [mode, activeDomains, activeMindset, activeCategories, selectedCompany]);
 
-  return <div ref={containerRef} className="w-full h-full" />;
+  return <div ref={containerRef} className="w-full h-full relative" />;
 };
 
 export default GlobalMap;
