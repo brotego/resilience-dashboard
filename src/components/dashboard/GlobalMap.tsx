@@ -195,16 +195,18 @@ const GlobalMap = ({ mode, activeDomains, activeMindset, activeCategories, selec
 
     if (mode === "resilience") {
       const filtered = SIGNALS.filter((s) => activeDomains.includes(s.domain));
+      const preferredOrder = inferPreferredCoordinateOrder(filtered.map((s) => s.coordinates));
+
       const debugPreview = filtered.slice(0, 5).map((s) => ({
         title: s.title,
         location: s.location,
         raw: s.coordinates,
-        normalized: normalizeCoordinates(s.coordinates),
+        normalized: normalizeCoordinates(s.coordinates, preferredOrder),
       }));
-      console.log("[MapDebug] Resilience mode — first 5 marker coords:", debugPreview);
+      console.log("[MapDebug] Resilience mode — preferred order:", preferredOrder, "— first 5 marker coords:", debugPreview);
 
       filtered.forEach((signal) => {
-        const normalizedCoordinates = normalizeCoordinates(signal.coordinates);
+        const normalizedCoordinates = normalizeCoordinates(signal.coordinates, preferredOrder);
         if (!normalizedCoordinates) {
           console.warn("[MapDebug] Skipping invalid coordinates", {
             title: signal.title,
