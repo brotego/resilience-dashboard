@@ -359,6 +359,7 @@ const GlobalMap = memo(({
         <ZoomableGroup
           center={position.coordinates}
           zoom={position.zoom}
+          onMove={handleMove}
           onMoveEnd={handleMoveEnd}
           minZoom={MIN_ZOOM}
           maxZoom={MAX_ZOOM}
