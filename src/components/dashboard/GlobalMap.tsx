@@ -338,7 +338,7 @@ const GlobalMap = memo(({
   return (
     <div
       ref={containerRef}
-      className="w-full h-full bg-background relative touch-none"
+      className="w-full h-full bg-background relative"
     >
       {/* Zoom level indicator */}
       <div className="absolute top-3 left-3 z-10 bg-background/80 backdrop-blur-sm border border-border rounded-md px-2 py-1 text-xs font-mono text-muted-foreground">
