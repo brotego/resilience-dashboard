@@ -9,6 +9,7 @@ import AIInsightPanel from "./AIInsightPanel";
 import CountryOutlookPanel from "./CountryOutlookPanel";
 import GlobalMap from "./GlobalMap";
 import { useGlobalNewsDots } from "@/hooks/useGlobalNewsDots";
+import { useLiveSignals } from "@/hooks/useLiveSignals";
 
 export type DashboardMode = "resilience" | "genz";
 
@@ -21,6 +22,7 @@ const DashboardLayout = () => {
   const [selectedCompany, setSelectedCompany] = useState<CompanyId | null>("mori_building");
   const [selectedSignal, setSelectedSignal] = useState<ResilienceSignal | GenZSignal | null>(null);
   const [selectedCountry, setSelectedCountry] = useState<string | null>(null);
+  const { signals: liveSignals } = useLiveSignals(activeDomains);
 
   const toggleDomain = (id: DomainId) => {
     setActiveDomains((prev) =>
@@ -106,6 +108,7 @@ const DashboardLayout = () => {
             selectedSignalId={selectedSignal?.id || null}
             selectedCountry={selectedCountry}
             newsDots={newsDots}
+            liveSignals={liveSignals}
           />
 
           {/* Bottom-left floating domain/category selector */}

@@ -5,6 +5,14 @@ const corsHeaders = {
 
 const NEWSAPI_BASE = 'https://newsapi.org/v2';
 
+const DOMAIN_KEYWORDS: Record<string, string> = {
+  work: '"workforce" OR "remote work" OR "employment" OR "labor market" OR "AI jobs" OR "future of work"',
+  selfhood: '"mental health" OR "wellness" OR "personal development" OR "identity crisis" OR "self-care"',
+  community: '"community building" OR "social infrastructure" OR "mutual aid" OR "civic engagement" OR "volunteer"',
+  aging: '"aging population" OR "eldercare" OR "longevity" OR "retirement" OR "senior care" OR "dementia"',
+  environment: '"climate change" OR "renewable energy" OR "sustainability" OR "carbon emissions" OR "green energy"',
+};
+
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response('ok', { headers: corsHeaders });
@@ -19,26 +27,42 @@ Deno.serve(async (req) => {
   }
 
   try {
-    const { type, countryCode, countryName } = await req.json();
+    const { type, countryCode, countryName, domain, pageSize } = await req.json();
 
-    if (!type || (!countryCode && !countryName)) {
-      return new Response(JSON.stringify({ error: 'Missing type or country params' }), {
+    if (!type) {
+      return new Response(JSON.stringify({ error: 'Missing type param' }), {
         status: 400,
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       });
     }
 
     let url: string;
+    const size = pageSize || 5;
 
     if (type === 'business') {
-      url = `${NEWSAPI_BASE}/top-headlines?country=${countryCode}&category=business&pageSize=5&apiKey=${apiKey}`;
+      if (!countryCode) {
+        return new Response(JSON.stringify({ error: 'Missing countryCode' }), {
+          status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        });
+      }
+      url = `${NEWSAPI_BASE}/top-headlines?country=${countryCode}&category=business&pageSize=${size}&apiKey=${apiKey}`;
     } else if (type === 'genz') {
       const query = `("Gen Z" OR "TikTok trend" OR "viral" OR "youth culture" OR "sustainability") AND "${countryName}"`;
-      url = `${NEWSAPI_BASE}/everything?q=${encodeURIComponent(query)}&sortBy=publishedAt&pageSize=5&language=en&apiKey=${apiKey}`;
+      url = `${NEWSAPI_BASE}/everything?q=${encodeURIComponent(query)}&sortBy=publishedAt&pageSize=${size}&language=en&apiKey=${apiKey}`;
+    } else if (type === 'domain') {
+      const keywords = DOMAIN_KEYWORDS[domain];
+      if (!keywords) {
+        return new Response(JSON.stringify({ error: `Unknown domain: ${domain}` }), {
+          status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        });
+      }
+      // Use everything endpoint with domain keywords, optionally scoped to country
+      const countryFilter = countryName ? ` AND "${countryName}"` : '';
+      const query = `(${keywords})${countryFilter}`;
+      url = `${NEWSAPI_BASE}/everything?q=${encodeURIComponent(query)}&sortBy=publishedAt&pageSize=${size}&language=en&apiKey=${apiKey}`;
     } else {
-      return new Response(JSON.stringify({ error: 'Invalid type. Use "business" or "genz"' }), {
-        status: 400,
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      return new Response(JSON.stringify({ error: 'Invalid type' }), {
+        status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       });
     }
 

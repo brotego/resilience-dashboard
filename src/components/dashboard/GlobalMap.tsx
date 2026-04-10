@@ -32,6 +32,7 @@ interface Props {
   selectedSignalId: string | null;
   selectedCountry: string | null;
   newsDots?: NewsDot[];
+  liveSignals?: ResilienceSignal[];
 }
 
 const GENZ_COLOR = "#1ab5a5";
@@ -195,6 +196,7 @@ const GlobalMap = memo(({
   selectedSignalId,
   selectedCountry,
   newsDots = [],
+  liveSignals,
 }: Props) => {
   const [position, setPosition] = useState<{ coordinates: [number, number]; zoom: number }>({
     coordinates: [30, 20],
@@ -350,7 +352,7 @@ const GlobalMap = memo(({
   const capitalDotR = Math.max(0.4, 1.2 * dotScale);
 
   const resilienceFiltered = mode === "resilience"
-    ? SIGNALS.filter((s) => activeDomains.includes(s.domain))
+    ? (liveSignals || SIGNALS.filter((s) => activeDomains.includes(s.domain)))
     : [];
   const genzFiltered = mode === "genz"
     ? GENZ_SIGNALS.filter((s) => activeCategories.includes(s.category))
