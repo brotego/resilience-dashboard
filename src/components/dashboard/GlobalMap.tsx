@@ -34,7 +34,7 @@ interface Props {
 
 const GENZ_COLOR = "#1ab5a5";
 const MIN_ZOOM = 1;
-const MAX_ZOOM = 14;
+const MAX_ZOOM = 20;
 const ZOOM_STEP = 1.18;
 
 const LNG_BOUNDS: [number, number] = [-180, 180];
@@ -342,9 +342,9 @@ const GlobalMap = memo(({
   }, [animateZoom]);
 
   const dotScale = 1 / liveZoom;
-  const labelFontSize = Math.max(3, 7 * dotScale);
-  const capitalFontSize = Math.max(2.5, 5.5 * dotScale);
-  const capitalDotR = Math.max(0.8, 1.5 * dotScale);
+  const labelFontSize = Math.max(1.5, 5 / Math.pow(liveZoom, 0.85));
+  const capitalFontSize = Math.max(1.2, 4 / Math.pow(liveZoom, 0.85));
+  const capitalDotR = Math.max(0.4, 1.2 * dotScale);
 
   const resilienceFiltered = mode === "resilience"
     ? SIGNALS.filter((s) => activeDomains.includes(s.domain))
