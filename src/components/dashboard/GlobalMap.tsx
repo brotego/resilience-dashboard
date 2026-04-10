@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef, memo } from "react";
+import { useState, useCallback, useRef, useEffect, memo } from "react";
 import {
   ComposableMap,
   ZoomableGroup,
@@ -258,12 +258,49 @@ const GlobalMap = memo(({
     );
   }, [animateToPosition]);
 
-  const handleWheel = useCallback((e: React.WheelEvent) => {
+  const handleWheel = useCallback((e: WheelEvent) => {
     e.preventDefault();
-    const direction = e.deltaY < 0 ? 1.03 : 0.97;
-    const newTarget = clampZoom(targetZoomRef.current * direction);
-    animateZoom(newTarget);
+    e.stopPropagation();
+    // ctrlKey is set by trackpad pinch-to-zoom in browsers
+    if (e.ctrlKey) {
+      const direction = e.deltaY < 0 ? 1.04 : 0.96;
+      const newTarget = clampZoom(targetZoomRef.current * direction);
+      animateZoom(newTarget);
+    } else {
+      const direction = e.deltaY < 0 ? 1.03 : 0.97;
+      const newTarget = clampZoom(targetZoomRef.current * direction);
+      animateZoom(newTarget);
+    }
   }, [animateZoom]);
+
+  // Prevent native browser pinch-to-zoom and gesture events on the map container
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+
+    const preventGesture = (e: Event) => {
+      e.preventDefault();
+      e.stopPropagation();
+    };
+
+    // Wheel with { passive: false } to allow preventDefault
+    el.addEventListener('wheel', handleWheel, { passive: false });
+    // Safari gesture events
+    el.addEventListener('gesturestart', preventGesture);
+    el.addEventListener('gesturechange', preventGesture);
+    el.addEventListener('gestureend', preventGesture);
+    // Prevent touch zoom (pinch)
+    el.addEventListener('touchmove', (e: TouchEvent) => {
+      if (e.touches.length > 1) e.preventDefault();
+    }, { passive: false });
+
+    return () => {
+      el.removeEventListener('wheel', handleWheel);
+      el.removeEventListener('gesturestart', preventGesture);
+      el.removeEventListener('gesturechange', preventGesture);
+      el.removeEventListener('gestureend', preventGesture);
+    };
+  }, [handleWheel]);
 
   const zoomIn = useCallback(() => {
     const newTarget = clampZoom(targetZoomRef.current * ZOOM_STEP);
@@ -295,8 +332,7 @@ const GlobalMap = memo(({
   return (
     <div
       ref={containerRef}
-      className="w-full h-full bg-background relative"
-      onWheel={handleWheel}
+      className="w-full h-full bg-background relative touch-none"
     >
       {/* Zoom level indicator */}
       <div className="absolute top-3 left-3 z-10 bg-background/80 backdrop-blur-sm border border-border rounded-md px-2 py-1 text-xs font-mono text-muted-foreground">
