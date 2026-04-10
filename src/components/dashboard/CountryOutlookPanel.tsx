@@ -9,6 +9,7 @@ import { ResilienceSignal } from "@/data/types";
 import { GenZSignal } from "@/data/genzTypes";
 import { DashboardMode } from "./DashboardLayout";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import NewsFeedSection from "./NewsFeedSection";
 
 interface Props {
   countryName: string;
