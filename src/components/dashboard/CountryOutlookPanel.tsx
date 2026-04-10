@@ -9,6 +9,7 @@ import { ResilienceSignal } from "@/data/types";
 import { GenZSignal } from "@/data/genzTypes";
 import { DashboardMode } from "./DashboardLayout";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import NewsFeedSection from "./NewsFeedSection";
 
 interface Props {
   countryName: string;
@@ -234,6 +235,12 @@ const CountryOutlookPanel = ({ countryName, mode, selectedCompany, onClose, onSi
               <p className="text-xs text-muted-foreground">No signals tracked in {countryName} yet.</p>
             </div>
           )}
+
+          {/* Business News Feed */}
+          <NewsFeedSection countryName={countryName} type="business" />
+
+          {/* Gen Z Signal Feed */}
+          <NewsFeedSection countryName={countryName} type="genz" />
 
           {/* Japan Perception */}
           <div>
