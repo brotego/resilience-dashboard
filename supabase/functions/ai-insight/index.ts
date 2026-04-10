@@ -36,6 +36,7 @@ const COMPANY_INFO: Record<string, { name: string; sector: string; context: stri
   kikkoman: { name: "Kikkoman", sector: "Food & Beverage", context: "Global soy sauce & food company with 300+ year heritage. Key interests: sustainability, food communities, authentic branding, circular economy." },
   kirin: { name: "Kirin", sector: "Beverages & Health Sciences", context: "Beverage conglomerate expanding into health sciences. Key interests: longevity, functional foods, carbon neutrality, aging population solutions." },
   nintendo: { name: "Nintendo", sector: "Gaming & Entertainment", context: "Global gaming powerhouse. Key interests: community through play, cognitive health, creator ecosystems, digital belonging, gamified wellness." },
+  mori_building: { name: "Mori Building", sector: "Real Estate & Urban Development", context: "Tokyo-based urban developer behind Roppongi Hills, Toranomon Hills, Azabudai Hills. Key interests: vertical garden cities, sustainable urbanism, community infrastructure, smart cities, multigenerational design, tourism, culture." },
 };
 
 function stripMarkdown(text: string): string {
