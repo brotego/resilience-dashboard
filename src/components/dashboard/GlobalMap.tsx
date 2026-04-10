@@ -24,11 +24,13 @@ interface Props {
   activeCategories: GenZCategoryId[];
   selectedCompany: CompanyId | null;
   onSignalClick: (signal: ResilienceSignal | GenZSignal, mode: DashboardMode) => void;
+  onCountryClick: (countryName: string) => void;
   selectedSignalId: string | null;
+  selectedCountry: string | null;
 }
 
 const GENZ_COLOR = "#1ab5a5";
-const MIN_ZOOM = 1;
+const MIN_ZOOM = 1.3;
 const MAX_ZOOM = 20;
 const ZOOM_STEP = 1.4;
 
@@ -39,41 +41,119 @@ function isRelevantToCompany(text: string, companyId: CompanyId): boolean {
   return company.keywords.some((kw) => lower.includes(kw.toLowerCase()));
 }
 
+// Country name aliases for matching signals to countries
+const COUNTRY_ALIASES: Record<string, string[]> = {
+  "United States of America": ["USA", "United States", "US", "San Francisco", "New York", "Los Angeles", "Chicago"],
+  "United Kingdom": ["UK", "London", "England", "Britain"],
+  "Japan": ["Tokyo", "Osaka", "Kyoto", "Nagoya", "Fukuoka", "Sendai", "Sapporo", "Hiroshima", "Akihabara", "Roppongi", "Shibuya"],
+  "Germany": ["Berlin", "Munich"],
+  "France": ["Paris"],
+  "Brazil": ["São Paulo", "Rio"],
+  "India": ["Mumbai", "Bangalore", "Delhi"],
+  "China": ["Beijing", "Shanghai", "Shenzhen"],
+  "South Korea": ["Seoul"],
+  "Australia": ["Melbourne", "Sydney"],
+  "Indonesia": ["Jakarta", "Bali"],
+  "Nigeria": ["Lagos"],
+  "Kenya": ["Nairobi"],
+  "Thailand": ["Bangkok"],
+  "Vietnam": ["Ho Chi Minh"],
+  "Egypt": ["Cairo"],
+  "South Africa": ["Johannesburg", "Cape Town"],
+  "Colombia": ["Bogotá"],
+  "Chile": ["Santiago"],
+  "Argentina": ["Buenos Aires"],
+  "Philippines": ["Manila"],
+  "Singapore": ["Singapore"],
+  "Netherlands": ["Amsterdam"],
+  "Sweden": ["Stockholm"],
+  "Belgium": ["Brussels"],
+  "Denmark": ["Copenhagen"],
+  "Ghana": ["Accra"],
+  "Kazakhstan": ["Almaty"],
+  "United Arab Emirates": ["Dubai", "UAE"],
+  "Peru": ["Lima"],
+};
+
 const COUNTRY_LABELS: Array<{ name: string; coordinates: [number, number] }> = [
   { name: "United States", coordinates: [-98, 39] },
+  { name: "Canada", coordinates: [-106, 56] },
+  { name: "Mexico", coordinates: [-102, 24] },
   { name: "Brazil", coordinates: [-53, -10] },
+  { name: "Argentina", coordinates: [-64, -34] },
+  { name: "Chile", coordinates: [-71, -33] },
+  { name: "Colombia", coordinates: [-73, 4] },
+  { name: "Peru", coordinates: [-76, -10] },
+  { name: "Venezuela", coordinates: [-66, 8] },
+  { name: "Ecuador", coordinates: [-78, -1] },
+  { name: "Bolivia", coordinates: [-65, -17] },
+  { name: "Paraguay", coordinates: [-58, -23] },
+  { name: "Uruguay", coordinates: [-56, -33] },
+  { name: "Cuba", coordinates: [-79, 22] },
   { name: "Japan", coordinates: [138, 37] },
   { name: "China", coordinates: [104, 35] },
   { name: "India", coordinates: [79, 22] },
   { name: "Germany", coordinates: [10, 51] },
-  { name: "Australia", coordinates: [134, -25] },
-  { name: "Nigeria", coordinates: [8, 10] },
+  { name: "France", coordinates: [2, 47] },
   { name: "UK", coordinates: [-2, 54] },
+  { name: "Spain", coordinates: [-4, 40] },
+  { name: "Italy", coordinates: [12, 43] },
+  { name: "Portugal", coordinates: [-8, 40] },
+  { name: "Netherlands", coordinates: [5, 52] },
+  { name: "Belgium", coordinates: [4, 51] },
+  { name: "Switzerland", coordinates: [8, 47] },
+  { name: "Austria", coordinates: [14, 48] },
+  { name: "Poland", coordinates: [20, 52] },
+  { name: "Czech Rep.", coordinates: [15, 50] },
+  { name: "Romania", coordinates: [25, 46] },
+  { name: "Ukraine", coordinates: [32, 49] },
+  { name: "Sweden", coordinates: [16, 63] },
+  { name: "Norway", coordinates: [9, 62] },
+  { name: "Finland", coordinates: [26, 64] },
+  { name: "Denmark", coordinates: [10, 56] },
+  { name: "Ireland", coordinates: [-8, 53] },
+  { name: "Greece", coordinates: [22, 39] },
+  { name: "Turkey", coordinates: [35, 39] },
+  { name: "Russia", coordinates: [100, 60] },
+  { name: "Australia", coordinates: [134, -25] },
+  { name: "New Zealand", coordinates: [174, -41] },
   { name: "Indonesia", coordinates: [118, -2] },
   { name: "South Korea", coordinates: [128, 36] },
-  { name: "Kenya", coordinates: [38, 0] },
-  { name: "France", coordinates: [2, 47] },
-  { name: "Saudi Arabia", coordinates: [45, 24] },
-  { name: "Colombia", coordinates: [-73, 4] },
-  { name: "Chile", coordinates: [-71, -33] },
-  { name: "Argentina", coordinates: [-64, -34] },
   { name: "Thailand", coordinates: [101, 15] },
   { name: "Vietnam", coordinates: [107, 16] },
-  { name: "Egypt", coordinates: [30, 27] },
-  { name: "South Africa", coordinates: [25, -29] },
-  { name: "Ghana", coordinates: [-2, 8] },
+  { name: "Philippines", coordinates: [122, 12] },
   { name: "Malaysia", coordinates: [109, 4] },
   { name: "Singapore", coordinates: [104, 1.3] },
-  { name: "Philippines", coordinates: [122, 12] },
-  { name: "Peru", coordinates: [-76, -10] },
-  { name: "Netherlands", coordinates: [5, 52] },
-  { name: "Sweden", coordinates: [16, 63] },
-  { name: "Finland", coordinates: [26, 64] },
+  { name: "Mongolia", coordinates: [104, 47] },
+  { name: "Pakistan", coordinates: [69, 30] },
+  { name: "Bangladesh", coordinates: [90, 24] },
+  { name: "Myanmar", coordinates: [96, 20] },
+  { name: "Nigeria", coordinates: [8, 10] },
+  { name: "Kenya", coordinates: [38, 0] },
+  { name: "South Africa", coordinates: [25, -29] },
+  { name: "Ghana", coordinates: [-2, 8] },
+  { name: "Egypt", coordinates: [30, 27] },
+  { name: "Ethiopia", coordinates: [40, 9] },
+  { name: "Tanzania", coordinates: [35, -6] },
+  { name: "DR Congo", coordinates: [24, -3] },
+  { name: "Morocco", coordinates: [-6, 32] },
+  { name: "Algeria", coordinates: [3, 28] },
+  { name: "Libya", coordinates: [17, 27] },
+  { name: "Sudan", coordinates: [30, 16] },
+  { name: "Saudi Arabia", coordinates: [45, 24] },
   { name: "UAE", coordinates: [54, 24] },
+  { name: "Iran", coordinates: [53, 33] },
+  { name: "Iraq", coordinates: [44, 33] },
+  { name: "Afghanistan", coordinates: [67, 34] },
   { name: "Kazakhstan", coordinates: [67, 48] },
-  { name: "Belgium", coordinates: [4, 51] },
-  { name: "Denmark", coordinates: [10, 56] },
+  { name: "Uzbekistan", coordinates: [64, 41] },
 ];
+
+function getShortTitle(title: string): string {
+  const words = title.split(" ");
+  if (words.length <= 4) return title;
+  return words.slice(0, 4).join(" ") + "…";
+}
 
 const GlobalMap = memo(({
   mode,
@@ -82,7 +162,9 @@ const GlobalMap = memo(({
   activeCategories,
   selectedCompany,
   onSignalClick,
+  onCountryClick,
   selectedSignalId,
+  selectedCountry,
 }: Props) => {
   const [position, setPosition] = useState<{ coordinates: [number, number]; zoom: number }>({
     coordinates: [30, 20],
@@ -98,19 +180,10 @@ const GlobalMap = memo(({
 
   const handleWheel = useCallback((e: React.WheelEvent) => {
     e.preventDefault();
-    // Pinch gesture (ctrlKey) or trackpad pinch = zoom
-    if (e.ctrlKey || e.metaKey) {
-      setPosition((prev) => ({
-        ...prev,
-        zoom: clampZoom(prev.zoom * (e.deltaY < 0 ? 1.08 : 0.92)),
-      }));
-    } else {
-      // Regular scroll = also zoom (since pan is handled by drag)
-      setPosition((prev) => ({
-        ...prev,
-        zoom: clampZoom(prev.zoom * (e.deltaY < 0 ? 1.08 : 0.92)),
-      }));
-    }
+    setPosition((prev) => ({
+      ...prev,
+      zoom: clampZoom(prev.zoom * (e.deltaY < 0 ? 1.08 : 0.92)),
+    }));
   }, []);
 
   const zoomIn = useCallback(() => {
@@ -122,7 +195,7 @@ const GlobalMap = memo(({
   }, []);
 
   const dotScale = 1 / position.zoom;
-  const showLabels = position.zoom >= 2.5;
+  const labelFontSize = Math.max(6, 8 * dotScale);
 
   const resilienceFiltered = mode === "resilience"
     ? SIGNALS.filter((s) => activeDomains.includes(s.domain))
@@ -130,6 +203,11 @@ const GlobalMap = memo(({
   const genzFiltered = mode === "genz"
     ? GENZ_SIGNALS.filter((s) => activeCategories.includes(s.category))
     : [];
+
+  const handleCountryClick = useCallback((geo: any) => {
+    const name = geo.properties?.name || geo.properties?.NAME;
+    if (name) onCountryClick(name);
+  }, [onCountryClick]);
 
   return (
     <div
@@ -172,49 +250,55 @@ const GlobalMap = memo(({
           minZoom={MIN_ZOOM}
           maxZoom={MAX_ZOOM}
           filterZoomEvent={(evt: any) => {
-            // Disable ZoomableGroup's built-in wheel zoom (we handle it ourselves)
             if (evt?.type === "wheel") return false;
             return true;
           }}
         >
           <Geographies geography={GEO_URL}>
             {({ geographies }) =>
-              geographies.map((geo) => (
-                <Geography
-                  key={geo.rsmKey}
-                  geography={geo}
-                  fill="hsl(220, 14%, 16%)"
-                  stroke="hsl(220, 14%, 22%)"
-                  strokeWidth={0.5}
-                  style={{
-                    default: { outline: "none" },
-                    hover: { fill: "hsl(220, 14%, 20%)", outline: "none" },
-                    pressed: { outline: "none" },
-                  }}
-                />
-              ))
+              geographies.map((geo) => {
+                const geoName = geo.properties?.name || geo.properties?.NAME || "";
+                const isSelected = selectedCountry === geoName ||
+                  (selectedCountry && COUNTRY_ALIASES[geoName]?.some(a => a === selectedCountry));
+                return (
+                  <Geography
+                    key={geo.rsmKey}
+                    geography={geo}
+                    onClick={() => handleCountryClick(geo)}
+                    fill={isSelected ? "hsl(220, 14%, 24%)" : "hsl(220, 14%, 16%)"}
+                    stroke="hsl(220, 14%, 22%)"
+                    strokeWidth={0.5}
+                    style={{
+                      default: { outline: "none", cursor: "pointer" },
+                      hover: { fill: "hsl(220, 14%, 22%)", outline: "none", cursor: "pointer" },
+                      pressed: { fill: "hsl(220, 14%, 26%)", outline: "none" },
+                    }}
+                  />
+                );
+              })
             }
           </Geographies>
 
-          {showLabels &&
-            COUNTRY_LABELS.map((c) => (
-              <Marker key={c.name} coordinates={c.coordinates}>
-                <text
-                  textAnchor="middle"
-                  style={{
-                    fontFamily: "'Noto Sans JP', system-ui, sans-serif",
-                    fill: "hsl(220, 10%, 40%)",
-                    fontSize: `${10 * dotScale}px`,
-                    fontWeight: 500,
-                    pointerEvents: "none",
-                    userSelect: "none",
-                  }}
-                >
-                  {c.name}
-                </text>
-              </Marker>
-            ))}
+          {/* Country labels — always visible */}
+          {COUNTRY_LABELS.map((c) => (
+            <Marker key={c.name} coordinates={c.coordinates}>
+              <text
+                textAnchor="middle"
+                style={{
+                  fontFamily: "'Noto Sans JP', system-ui, sans-serif",
+                  fill: "hsl(220, 10%, 40%)",
+                  fontSize: `${labelFontSize}px`,
+                  fontWeight: 500,
+                  pointerEvents: "none",
+                  userSelect: "none",
+                }}
+              >
+                {c.name}
+              </text>
+            </Marker>
+          ))}
 
+          {/* Resilience signals */}
           {mode === "resilience" &&
             resilienceFiltered.map((signal) => {
               const domain = DOMAINS.find((d) => d.id === signal.domain);
@@ -235,6 +319,7 @@ const GlobalMap = memo(({
                   onClick={() => onSignalClick(signal, "resilience")}
                   style={{ cursor: "pointer" }}
                 >
+                  <title>{getShortTitle(signal.title)}</title>
                   <circle r={r * 2} fill={fillColor} opacity={dimmed ? 0 : 0.15} />
                   <circle
                     r={r}
@@ -242,8 +327,26 @@ const GlobalMap = memo(({
                     stroke={isSelected ? "#ffffff" : fillColor}
                     strokeWidth={isSelected ? 2 * dotScale : 1 * dotScale}
                     opacity={dimmed ? 0.25 : 1}
-                    style={{ transition: "opacity 0.3s" }}
+                    className="transition-all duration-200 hover:opacity-100"
+                    style={{ transition: "opacity 0.3s, r 0.2s" }}
+                    onMouseEnter={(e) => {
+                      const el = e.currentTarget;
+                      el.setAttribute("r", String(r * 1.5));
+                    }}
+                    onMouseLeave={(e) => {
+                      const el = e.currentTarget;
+                      el.setAttribute("r", String(r));
+                    }}
                   />
+                  {isSelected && (
+                    <circle
+                      r={r * 2.5}
+                      fill="none"
+                      stroke="#ffffff"
+                      strokeWidth={0.5 * dotScale}
+                      opacity={0.4}
+                    />
+                  )}
                   {signal.isJapan && (
                     <text
                       textAnchor="middle"
@@ -257,6 +360,7 @@ const GlobalMap = memo(({
               );
             })}
 
+          {/* Gen Z signals */}
           {mode === "genz" &&
             genzFiltered.map((signal) => {
               const relevant = selectedCompany
@@ -274,6 +378,7 @@ const GlobalMap = memo(({
                   onClick={() => onSignalClick(signal, "genz")}
                   style={{ cursor: "pointer" }}
                 >
+                  <title>{getShortTitle(signal.title)}</title>
                   <circle r={r * 2} fill={GENZ_COLOR} opacity={dimmed ? 0 : 0.15} />
                   <circle
                     r={r}
@@ -281,8 +386,25 @@ const GlobalMap = memo(({
                     stroke={isSelected ? "#ffffff" : GENZ_COLOR}
                     strokeWidth={isSelected ? 2 * dotScale : 1 * dotScale}
                     opacity={dimmed ? 0.25 : 1}
-                    style={{ transition: "opacity 0.3s" }}
+                    className="transition-all duration-200 hover:opacity-100"
+                    onMouseEnter={(e) => {
+                      const el = e.currentTarget;
+                      el.setAttribute("r", String(r * 1.5));
+                    }}
+                    onMouseLeave={(e) => {
+                      const el = e.currentTarget;
+                      el.setAttribute("r", String(r));
+                    }}
                   />
+                  {isSelected && (
+                    <circle
+                      r={r * 2.5}
+                      fill="none"
+                      stroke="#ffffff"
+                      strokeWidth={0.5 * dotScale}
+                      opacity={0.4}
+                    />
+                  )}
                   {signal.isJapan && (
                     <text
                       textAnchor="middle"
@@ -304,3 +426,5 @@ const GlobalMap = memo(({
 GlobalMap.displayName = "GlobalMap";
 
 export default GlobalMap;
+
+export { COUNTRY_ALIASES };
