@@ -45,53 +45,12 @@ function buildTooltipHtml(title: string, location: string, description: string, 
   return `<div>
     <div style="display:flex;align-items:center;gap:6px;margin-bottom:4px;">
       ${isJapan ? '<span style="font-size:11px;">🇯🇵</span>' : ""}
-      <strong style="font-size:13px;color:hsl(30,20%,90%);line-height:1.3;">${escapeHtml(title)}</strong>
+      <strong style="font-size:13px;color:hsl(0,0%,100%);line-height:1.3;">${escapeHtml(title)}</strong>
     </div>
-    <p style="font-size:11px;color:hsl(30,10%,60%);margin:0 0 4px;">${escapeHtml(location)}</p>
-    <p style="font-size:11px;color:hsl(30,20%,78%);margin:0 0 6px;line-height:1.4;">${shortDesc}</p>
+    <p style="font-size:11px;color:hsl(220,10%,55%);margin:0 0 4px;">${escapeHtml(location)}</p>
+    <p style="font-size:11px;color:hsl(0,0%,92%);margin:0 0 6px;line-height:1.4;">${shortDesc}</p>
     <span style="font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:0.5px;color:${accentColor};">${escapeHtml(accentLabel)}</span>
   </div>`;
-}
-
-type CoordinateOrder = "lnglat" | "latlng";
-
-function inferPreferredCoordinateOrder(list: Array<[number, number]>): CoordinateOrder {
-  // Strong signals (not ambiguous):
-  // - If the first value is > 90, it's much more likely to be longitude (lng,lat)
-  // - If the second value is > 90, it's much more likely to be longitude (lat,lng)
-  let lngLatVotes = 0;
-  let latLngVotes = 0;
-
-  for (const [a, b] of list) {
-    if (!Number.isFinite(a) || !Number.isFinite(b)) continue;
-
-    const aLooksLikeLngOnly = Math.abs(a) > 90 && Math.abs(a) <= 180 && Math.abs(b) <= 90;
-    const bLooksLikeLngOnly = Math.abs(b) > 90 && Math.abs(b) <= 180 && Math.abs(a) <= 90;
-
-    if (aLooksLikeLngOnly) lngLatVotes += 1;
-    if (bLooksLikeLngOnly) latLngVotes += 1;
-  }
-
-  return latLngVotes > lngLatVotes ? "latlng" : "lnglat";
-}
-
-function normalizeCoordinates(
-  coordinates: [number, number],
-  preferredOrder: CoordinateOrder,
-): [number, number] | null {
-  const [a, b] = coordinates;
-  if (!Number.isFinite(a) || !Number.isFinite(b)) return null;
-
-  const lngLatValid = Math.abs(a) <= 180 && Math.abs(b) <= 90;
-  const latLngValid = Math.abs(b) <= 180 && Math.abs(a) <= 90;
-
-  if (lngLatValid && !latLngValid) return [a, b];
-  if (latLngValid && !lngLatValid) return [b, a];
-
-  // Ambiguous (both numbers within [-90, 90]): follow dataset-level preference.
-  if (lngLatValid && latLngValid) return preferredOrder === "lnglat" ? [a, b] : [b, a];
-
-  return null;
 }
 
 const GlobalMap = ({ mode, activeDomains, activeMindset, activeCategories, selectedCompany }: Props) => {
@@ -119,7 +78,6 @@ const GlobalMap = ({ mode, activeDomains, activeMindset, activeCategories, selec
     hoverTooltipRef.current = tooltip;
   }, [removeHoverTooltip]);
 
-  // Map init
   useEffect(() => {
     if (!containerRef.current || mapRef.current) return;
 
@@ -157,7 +115,6 @@ const GlobalMap = ({ mode, activeDomains, activeMindset, activeCategories, selec
     };
   }, [removeHoverTooltip]);
 
-  // Markers
   useEffect(() => {
     const map = mapRef.current;
     if (!map) return;
@@ -195,38 +152,19 @@ const GlobalMap = ({ mode, activeDomains, activeMindset, activeCategories, selec
 
     if (mode === "resilience") {
       const filtered = SIGNALS.filter((s) => activeDomains.includes(s.domain));
-      const preferredOrder = inferPreferredCoordinateOrder(filtered.map((s) => s.coordinates));
-
-      const debugPreview = filtered.slice(0, 5).map((s) => ({
-        title: s.title,
-        location: s.location,
-        raw: s.coordinates,
-        normalized: normalizeCoordinates(s.coordinates, preferredOrder),
-      }));
-      console.log("[MapDebug] Resilience mode — preferred order:", preferredOrder, "— first 5 marker coords:", debugPreview);
 
       filtered.forEach((signal) => {
-        const normalizedCoordinates = normalizeCoordinates(signal.coordinates, preferredOrder);
-        if (!normalizedCoordinates) {
-          console.warn("[MapDebug] Skipping invalid coordinates", {
-            title: signal.title,
-            location: signal.location,
-            coordinates: signal.coordinates,
-          });
-          return;
-        }
-
         const domain = DOMAINS.find((d) => d.id === signal.domain);
-        const color = domain?.color || "hsl(38, 78%, 56%)";
+        const color = domain?.color || "hsl(38, 90%, 55%)";
         const domainLabel = domain?.label || signal.domain;
         const relevant = selectedCompany ? isRelevantToCompany(`${signal.title} ${signal.description}`, selectedCompany) : false;
         const dimmed = !!(selectedCompany && !relevant && !signal.isJapan);
         const size = signal.isJapan ? 18 : relevant ? 18 : 12 + signal.intensity;
 
-        const bgColor = signal.isJapan ? "hsl(38, 78%, 56%)" : color;
-        const borderColor = signal.isJapan ? "hsl(38, 78%, 70%)" : color;
+        const bgColor = signal.isJapan ? "hsl(226, 89%, 53%)" : color;
+        const borderColor = signal.isJapan ? "hsl(226, 89%, 65%)" : color;
         const glow = signal.isJapan
-          ? "0 0 12px hsla(38, 78%, 56%, 0.6)"
+          ? "0 0 12px hsla(226, 89%, 53%, 0.6)"
           : relevant
             ? `0 0 14px ${color.replace(")", ", 0.7)")}`
             : `0 0 8px ${color.replace(")", ", 0.4)")}`;
@@ -243,7 +181,7 @@ const GlobalMap = ({ mode, activeDomains, activeMindset, activeCategories, selec
           removeHoverTooltip();
         });
 
-        const marker = new maplibregl.Marker({ element: markerEl, anchor: "center" }).setLngLat(normalizedCoordinates).addTo(map);
+        const marker = new maplibregl.Marker({ element: markerEl, anchor: "center" }).setLngLat(signal.coordinates).addTo(map);
 
         markerEl.addEventListener("click", (e) => {
           e.stopPropagation();
@@ -252,18 +190,18 @@ const GlobalMap = ({ mode, activeDomains, activeMindset, activeCategories, selec
 
           const mindsetText = signal.mindsetRelevance[activeMindset];
           const popup = new maplibregl.Popup({ offset: [0, -(size / 2 + 6)], maxWidth: "320px", anchor: "bottom" })
-            .setLngLat(normalizedCoordinates)
+            .setLngLat(signal.coordinates)
             .setHTML(`
               <div style="font-family:'Noto Sans JP',system-ui,sans-serif;">
                 <div style="display:flex;align-items:center;gap:6px;margin-bottom:8px;">
                   ${signal.isJapan ? '<span style="font-size:12px;">🇯🇵</span>' : ""}
-                  <strong style="font-size:14px;color:hsl(30,20%,90%);">${escapeHtml(signal.title)}</strong>
+                  <strong style="font-size:14px;color:hsl(0,0%,100%);">${escapeHtml(signal.title)}</strong>
                 </div>
-                <p style="font-size:12px;color:hsl(30,10%,60%);margin:0 0 8px;">${escapeHtml(signal.location)}</p>
-                <p style="font-size:12px;color:hsl(30,20%,82%);margin:0 0 10px;line-height:1.5;">${escapeHtml(signal.description)}</p>
-                <div style="border-top:1px solid hsl(213,20%,20%);padding-top:8px;">
-                  <div style="font-size:10px;text-transform:uppercase;letter-spacing:0.5px;color:hsl(38,78%,56%);margin-bottom:4px;">Mindset Lens</div>
-                  <p style="font-size:11px;color:hsl(30,20%,82%);line-height:1.4;margin:0;">${escapeHtml(mindsetText)}</p>
+                <p style="font-size:12px;color:hsl(220,10%,55%);margin:0 0 8px;">${escapeHtml(signal.location)}</p>
+                <p style="font-size:12px;color:hsl(0,0%,92%);margin:0 0 10px;line-height:1.5;">${escapeHtml(signal.description)}</p>
+                <div style="border-top:1px solid hsl(220,14%,18%);padding-top:8px;">
+                  <div style="font-size:10px;text-transform:uppercase;letter-spacing:0.5px;color:hsl(226,89%,53%);margin-bottom:4px;">Mindset Lens</div>
+                  <p style="font-size:11px;color:hsl(0,0%,92%);line-height:1.4;margin:0;">${escapeHtml(mindsetText)}</p>
                 </div>
               </div>
             `)
@@ -275,39 +213,20 @@ const GlobalMap = ({ mode, activeDomains, activeMindset, activeCategories, selec
       });
     } else {
       const filtered = GENZ_SIGNALS.filter((s) => activeCategories.includes(s.category));
-      const preferredOrder = inferPreferredCoordinateOrder(filtered.map((s) => s.coordinates));
-
-      const debugPreview = filtered.slice(0, 5).map((s) => ({
-        title: s.title,
-        location: s.location,
-        raw: s.coordinates,
-        normalized: normalizeCoordinates(s.coordinates, preferredOrder),
-      }));
-      console.log("[MapDebug] GenZ mode — preferred order:", preferredOrder, "— first 5 marker coords:", debugPreview);
 
       filtered.forEach((signal) => {
-        const normalizedCoordinates = normalizeCoordinates(signal.coordinates, preferredOrder);
-        if (!normalizedCoordinates) {
-          console.warn("[MapDebug] Skipping invalid coordinates", {
-            title: signal.title,
-            location: signal.location,
-            coordinates: signal.coordinates,
-          });
-          return;
-        }
-
         const cat = GENZ_CATEGORIES.find((c) => c.id === signal.category);
         const catLabel = cat?.label || signal.category;
         const relevant = selectedCompany ? isRelevantToCompany(`${signal.title} ${signal.description}`, selectedCompany) : false;
         const dimmed = !!(selectedCompany && !relevant && !signal.isJapan);
         const size = signal.isJapan ? 18 : relevant ? 18 : 12 + signal.intensity;
 
-        const borderColor = signal.isJapan ? "hsl(170, 55%, 60%)" : GENZ_COLOR;
+        const borderColor = signal.isJapan ? "hsl(170, 70%, 60%)" : GENZ_COLOR;
         const glow = signal.isJapan
-          ? "0 0 12px hsla(170, 55%, 46%, 0.6)"
+          ? "0 0 12px hsla(170, 70%, 48%, 0.6)"
           : relevant
-            ? "0 0 14px hsla(170, 55%, 46%, 0.7)"
-            : "0 0 8px hsla(170, 55%, 46%, 0.4)";
+            ? "0 0 14px hsla(170, 70%, 48%, 0.7)"
+            : "0 0 8px hsla(170, 70%, 48%, 0.4)";
 
         const { wrapper: markerEl, dot } = createMarkerElements(size, GENZ_COLOR, borderColor, dimmed, glow);
 
@@ -321,7 +240,7 @@ const GlobalMap = ({ mode, activeDomains, activeMindset, activeCategories, selec
           removeHoverTooltip();
         });
 
-        const marker = new maplibregl.Marker({ element: markerEl, anchor: "center" }).setLngLat(normalizedCoordinates).addTo(map);
+        const marker = new maplibregl.Marker({ element: markerEl, anchor: "center" }).setLngLat(signal.coordinates).addTo(map);
 
         markerEl.addEventListener("click", (e) => {
           e.stopPropagation();
@@ -329,18 +248,18 @@ const GlobalMap = ({ mode, activeDomains, activeMindset, activeCategories, selec
           if (clickPopupRef.current) { clickPopupRef.current.remove(); clickPopupRef.current = null; }
 
           const popup = new maplibregl.Popup({ offset: [0, -(size / 2 + 6)], maxWidth: "320px", anchor: "bottom" })
-            .setLngLat(normalizedCoordinates)
+            .setLngLat(signal.coordinates)
             .setHTML(`
               <div style="font-family:'Noto Sans JP',system-ui,sans-serif;">
                 <div style="display:flex;align-items:center;gap:6px;margin-bottom:8px;">
                   ${signal.isJapan ? '<span style="font-size:12px;">🇯🇵</span>' : ""}
-                  <strong style="font-size:14px;color:hsl(30,20%,90%);">${escapeHtml(signal.title)}</strong>
+                  <strong style="font-size:14px;color:hsl(0,0%,100%);">${escapeHtml(signal.title)}</strong>
                 </div>
-                <p style="font-size:12px;color:hsl(30,10%,60%);margin:0 0 8px;">${escapeHtml(signal.location)}</p>
-                <p style="font-size:12px;color:hsl(30,20%,82%);margin:0 0 10px;line-height:1.5;">${escapeHtml(signal.description)}</p>
-                <div style="border-top:1px solid hsl(213,20%,20%);padding-top:8px;">
-                  <div style="font-size:10px;text-transform:uppercase;letter-spacing:0.5px;color:hsl(170,55%,46%);margin-bottom:4px;">Japan Insight</div>
-                  <p style="font-size:11px;color:hsl(30,20%,82%);line-height:1.4;margin:0;">${escapeHtml(signal.insight)}</p>
+                <p style="font-size:12px;color:hsl(220,10%,55%);margin:0 0 8px;">${escapeHtml(signal.location)}</p>
+                <p style="font-size:12px;color:hsl(0,0%,92%);margin:0 0 10px;line-height:1.5;">${escapeHtml(signal.description)}</p>
+                <div style="border-top:1px solid hsl(220,14%,18%);padding-top:8px;">
+                  <div style="font-size:10px;text-transform:uppercase;letter-spacing:0.5px;color:hsl(170,70%,48%);margin-bottom:4px;">Japan Insight</div>
+                  <p style="font-size:11px;color:hsl(0,0%,92%);line-height:1.4;margin:0;">${escapeHtml(signal.insight)}</p>
                 </div>
               </div>
             `)
