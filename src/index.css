@@ -4,44 +4,44 @@
 
 @layer base {
   :root {
-    --background: 213 35% 10%;
-    --foreground: 30 20% 90%;
+    --background: 220 20% 8%;
+    --foreground: 0 0% 100%;
 
-    --card: 213 30% 13%;
-    --card-foreground: 30 20% 90%;
+    --card: 220 18% 11%;
+    --card-foreground: 0 0% 100%;
 
-    --popover: 213 30% 13%;
-    --popover-foreground: 30 20% 90%;
+    --popover: 220 18% 11%;
+    --popover-foreground: 0 0% 100%;
 
-    --primary: 38 78% 56%;
-    --primary-foreground: 213 35% 10%;
+    --primary: 226 89% 53%;
+    --primary-foreground: 0 0% 100%;
 
-    --secondary: 213 25% 18%;
-    --secondary-foreground: 30 20% 90%;
+    --secondary: 220 16% 16%;
+    --secondary-foreground: 0 0% 92%;
 
-    --muted: 213 20% 16%;
-    --muted-foreground: 30 10% 60%;
+    --muted: 220 14% 14%;
+    --muted-foreground: 220 10% 55%;
 
-    --accent: 170 55% 46%;
-    --accent-foreground: 213 35% 10%;
+    --accent: 24 100% 50%;
+    --accent-foreground: 0 0% 100%;
 
-    --destructive: 14 55% 49%;
-    --destructive-foreground: 30 20% 90%;
+    --destructive: 0 62% 50%;
+    --destructive-foreground: 0 0% 100%;
 
-    --border: 213 20% 20%;
-    --input: 213 20% 20%;
-    --ring: 38 78% 56%;
+    --border: 220 14% 18%;
+    --input: 220 14% 18%;
+    --ring: 226 89% 53%;
 
-    --radius: 0.5rem;
+    --radius: 0.625rem;
 
-    --sidebar-background: 213 30% 8%;
-    --sidebar-foreground: 30 20% 90%;
-    --sidebar-primary: 38 78% 56%;
-    --sidebar-primary-foreground: 213 35% 10%;
-    --sidebar-accent: 213 25% 15%;
-    --sidebar-accent-foreground: 30 20% 90%;
-    --sidebar-border: 213 20% 18%;
-    --sidebar-ring: 38 78% 56%;
+    --sidebar-background: 220 18% 7%;
+    --sidebar-foreground: 0 0% 100%;
+    --sidebar-primary: 226 89% 53%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 220 16% 14%;
+    --sidebar-accent-foreground: 0 0% 92%;
+    --sidebar-border: 220 14% 16%;
+    --sidebar-ring: 226 89% 53%;
   }
 }
 
@@ -52,24 +52,26 @@
 
   body {
     @apply bg-background text-foreground;
+    font-family: 'Noto Sans JP', system-ui, sans-serif;
   }
 }
 
 .maplibregl-popup-content {
-  background: hsl(213 30% 13%) !important;
-  color: hsl(30 20% 90%) !important;
-  border: 1px solid hsl(213 20% 20%) !important;
-  border-radius: 0.5rem !important;
+  background: hsl(220 18% 11%) !important;
+  color: hsl(0 0% 100%) !important;
+  border: 1px solid hsl(220 14% 18%) !important;
+  border-radius: 12px !important;
   padding: 1rem !important;
-  box-shadow: 0 10px 30px -10px rgba(0,0,0,0.5) !important;
+  box-shadow: 0 10px 30px -10px rgba(0,0,0,0.6) !important;
+  font-family: 'Noto Sans JP', system-ui, sans-serif !important;
 }
 
 .maplibregl-popup-tip {
-  border-top-color: hsl(213 30% 13%) !important;
+  border-top-color: hsl(220 18% 11%) !important;
 }
 
 .maplibregl-popup-close-button {
-  color: hsl(30 10% 60%) !important;
+  color: hsl(220 10% 55%) !important;
   font-size: 1.2rem !important;
 }
 

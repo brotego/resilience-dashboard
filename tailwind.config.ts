@@ -14,8 +14,8 @@ export default {
     },
     extend: {
       fontFamily: {
-        sans: ["Inter", "system-ui", "sans-serif"],
-        display: ["Inter", "system-ui", "sans-serif"],
+        sans: ["'Noto Sans JP'", "system-ui", "sans-serif"],
+        display: ["'Noto Sans JP'", "system-ui", "sans-serif"],
       },
       colors: {
         border: "hsl(var(--border))",
@@ -62,11 +62,14 @@ export default {
           ring: "hsl(var(--sidebar-ring))",
         },
         genz: "hsl(170, 55%, 46%)",
+        "mp-blue": "hsl(226, 89%, 53%)",
+        "mp-orange": "hsl(24, 100%, 50%)",
       },
       borderRadius: {
         lg: "var(--radius)",
         md: "calc(var(--radius) - 2px)",
         sm: "calc(var(--radius) - 4px)",
+        oval: "9999px",
       },
       keyframes: {
         "accordion-down": {

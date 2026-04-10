@@ -57,4 +57,17 @@ export const COMPANY_JAPAN_FOCUS: Record<string, Partial<JapanFocusData>> = {
     headline: "Nintendo's Cognitive Health Frontier",
     ceoInsight: "Brain Age was ahead of its time. With 92,000 centenarians in Japan and a global aging boom, Nintendo's gamified cognitive health platform could become the world's largest preventive care tool.",
   },
+  // Mori Building
+  "mori_building:community": {
+    headline: "Mori Building's Vertical Garden City Vision",
+    ceoInsight: "Roppongi Hills proved that a single development can redefine an entire district's identity. The vertical garden city model — stacking culture, commerce, and community — is the blueprint for urban resilience worldwide.",
+  },
+  "mori_building:environment": {
+    headline: "Mori Building's Sustainable Urbanism Leadership",
+    ceoInsight: "Azabudai Hills achieved Japan's highest sustainability rating for mixed-use development. As cities account for 70% of global carbon emissions, Mori Building's green vertical cities are a $100B exportable model.",
+  },
+  "mori_building:aging": {
+    headline: "Mori Building's Multigenerational City Design",
+    ceoInsight: "Japan's aging population demands cities designed for all ages. Mori Building's integration of healthcare, walkability, and community spaces into developments positions you as the architect of longevity-ready urbanism.",
+  },
 };

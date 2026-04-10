@@ -1,11 +1,11 @@
 import { Domain, Mindset } from "./types";
 
 export const DOMAINS: Domain[] = [
-  { id: "work", label: "Work", description: "Workforce transformation, remote adoption, labor market shifts", icon: "Briefcase", color: "hsl(38, 78%, 56%)" },
-  { id: "selfhood", label: "Selfhood", description: "Mental health, identity, personal development trends", icon: "User", color: "hsl(280, 60%, 65%)" },
-  { id: "community", label: "Community", description: "Community rebuilding, social infrastructure, mutual aid", icon: "Users", color: "hsl(170, 55%, 46%)" },
-  { id: "aging", label: "Aging", description: "Aging population, eldercare innovation, longevity economy", icon: "Heart", color: "hsl(14, 55%, 49%)" },
-  { id: "environment", label: "Environment", description: "Climate adaptation, renewable energy, urban sustainability", icon: "Leaf", color: "hsl(140, 50%, 45%)" },
+  { id: "work", label: "Work", description: "Workforce transformation, remote adoption, labor market shifts", icon: "Briefcase", color: "hsl(38, 90%, 55%)" },
+  { id: "selfhood", label: "Selfhood", description: "Mental health, identity, personal development trends", icon: "User", color: "hsl(280, 75%, 62%)" },
+  { id: "community", label: "Community", description: "Community rebuilding, social infrastructure, mutual aid", icon: "Users", color: "hsl(170, 70%, 48%)" },
+  { id: "aging", label: "Aging", description: "Aging population, eldercare innovation, longevity economy", icon: "Heart", color: "hsl(14, 70%, 52%)" },
+  { id: "environment", label: "Environment", description: "Climate adaptation, renewable energy, urban sustainability", icon: "Leaf", color: "hsl(140, 65%, 48%)" },
 ];
 
 export const MINDSETS: Mindset[] = [

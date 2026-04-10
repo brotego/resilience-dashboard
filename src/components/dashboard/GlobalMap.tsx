@@ -18,14 +18,14 @@ interface Props {
   selectedCompany: CompanyId | null;
 }
 
-const GENZ_COLOR = "hsl(170, 55%, 46%)";
+const GENZ_COLOR = "hsl(170, 70%, 48%)";
 
 const TOOLTIP_STYLES = `
   position:absolute;pointer-events:none;z-index:10;
-  background:hsl(213,30%,13%);border:1px solid hsl(213,20%,20%);
-  border-radius:8px;padding:10px 12px;
+  background:hsl(220,18%,11%);border:1px solid hsl(220,14%,18%);
+  border-radius:12px;padding:10px 12px;
   box-shadow:0 10px 30px -10px rgba(0,0,0,0.6);
-  font-family:Inter,system-ui,sans-serif;max-width:280px;
+  font-family:'Noto Sans JP',system-ui,sans-serif;max-width:280px;
   white-space:normal;left:50%;top:50%;transform:translate(50%,-50%);
 `;
 
@@ -221,7 +221,7 @@ const GlobalMap = ({ mode, activeDomains, activeMindset, activeCategories, selec
         const domainLabel = domain?.label || signal.domain;
         const relevant = selectedCompany ? isRelevantToCompany(`${signal.title} ${signal.description}`, selectedCompany) : false;
         const dimmed = !!(selectedCompany && !relevant && !signal.isJapan);
-        const size = signal.isJapan ? 16 : relevant ? 16 : 10 + signal.intensity;
+        const size = signal.isJapan ? 18 : relevant ? 18 : 12 + signal.intensity;
 
         const bgColor = signal.isJapan ? "hsl(38, 78%, 56%)" : color;
         const borderColor = signal.isJapan ? "hsl(38, 78%, 70%)" : color;
@@ -254,7 +254,7 @@ const GlobalMap = ({ mode, activeDomains, activeMindset, activeCategories, selec
           const popup = new maplibregl.Popup({ offset: [0, -(size / 2 + 6)], maxWidth: "320px", anchor: "bottom" })
             .setLngLat(normalizedCoordinates)
             .setHTML(`
-              <div style="font-family:Inter,system-ui,sans-serif;">
+              <div style="font-family:'Noto Sans JP',system-ui,sans-serif;">
                 <div style="display:flex;align-items:center;gap:6px;margin-bottom:8px;">
                   ${signal.isJapan ? '<span style="font-size:12px;">🇯🇵</span>' : ""}
                   <strong style="font-size:14px;color:hsl(30,20%,90%);">${escapeHtml(signal.title)}</strong>
@@ -300,7 +300,7 @@ const GlobalMap = ({ mode, activeDomains, activeMindset, activeCategories, selec
         const catLabel = cat?.label || signal.category;
         const relevant = selectedCompany ? isRelevantToCompany(`${signal.title} ${signal.description}`, selectedCompany) : false;
         const dimmed = !!(selectedCompany && !relevant && !signal.isJapan);
-        const size = signal.isJapan ? 16 : relevant ? 16 : 10 + signal.intensity;
+        const size = signal.isJapan ? 18 : relevant ? 18 : 12 + signal.intensity;
 
         const borderColor = signal.isJapan ? "hsl(170, 55%, 60%)" : GENZ_COLOR;
         const glow = signal.isJapan
@@ -331,7 +331,7 @@ const GlobalMap = ({ mode, activeDomains, activeMindset, activeCategories, selec
           const popup = new maplibregl.Popup({ offset: [0, -(size / 2 + 6)], maxWidth: "320px", anchor: "bottom" })
             .setLngLat(normalizedCoordinates)
             .setHTML(`
-              <div style="font-family:Inter,system-ui,sans-serif;">
+              <div style="font-family:'Noto Sans JP',system-ui,sans-serif;">
                 <div style="display:flex;align-items:center;gap:6px;margin-bottom:8px;">
                   ${signal.isJapan ? '<span style="font-size:12px;">🇯🇵</span>' : ""}
                   <strong style="font-size:14px;color:hsl(30,20%,90%);">${escapeHtml(signal.title)}</strong>
