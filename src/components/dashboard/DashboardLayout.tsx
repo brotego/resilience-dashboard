@@ -10,6 +10,7 @@ import GenZCategorySelector from "./GenZCategorySelector";
 import GenZFocusPanel from "./GenZFocusPanel";
 import CompanySelector from "./CompanySelector";
 import AIInsightPanel from "./AIInsightPanel";
+import CountryOutlookPanel from "./CountryOutlookPanel";
 import GlobalMap from "./GlobalMap";
 import { ScrollArea } from "@/components/ui/scroll-area";
 
@@ -22,6 +23,7 @@ const DashboardLayout = () => {
   const [activeCategories, setActiveCategories] = useState<GenZCategoryId[]>(["authenticity"]);
   const [selectedCompany, setSelectedCompany] = useState<CompanyId | null>("mori_building");
   const [selectedSignal, setSelectedSignal] = useState<ResilienceSignal | GenZSignal | null>(null);
+  const [selectedCountry, setSelectedCountry] = useState<string | null>(null);
 
   const toggleDomain = (id: DomainId) => {
     setActiveDomains((prev) =>
@@ -37,10 +39,17 @@ const DashboardLayout = () => {
 
   const handleSignalClick = useCallback((signal: ResilienceSignal | GenZSignal, _mode: DashboardMode) => {
     setSelectedSignal(signal);
+    setSelectedCountry(null);
+  }, []);
+
+  const handleCountryClick = useCallback((countryName: string) => {
+    setSelectedCountry(countryName);
+    setSelectedSignal(null);
   }, []);
 
   const handleClosePanel = useCallback(() => {
     setSelectedSignal(null);
+    setSelectedCountry(null);
   }, []);
 
   return (
@@ -79,21 +88,32 @@ const DashboardLayout = () => {
             activeCategories={activeCategories}
             selectedCompany={selectedCompany}
             onSignalClick={handleSignalClick}
+            onCountryClick={handleCountryClick}
             selectedSignalId={selectedSignal?.id || null}
+            selectedCountry={selectedCountry}
           />
         </div>
 
         {/* Right Panel */}
         <div className="w-80 shrink-0">
-          <AIInsightPanel
-            mode={mode}
-            activeDomains={activeDomains}
-            activeMindset={activeMindset}
-            activeCategories={activeCategories}
-            selectedCompany={selectedCompany}
-            selectedSignal={selectedSignal}
-            onClose={handleClosePanel}
-          />
+          {selectedCountry && !selectedSignal ? (
+            <CountryOutlookPanel
+              countryName={selectedCountry}
+              mode={mode}
+              onClose={handleClosePanel}
+              onSignalClick={handleSignalClick}
+            />
+          ) : (
+            <AIInsightPanel
+              mode={mode}
+              activeDomains={activeDomains}
+              activeMindset={activeMindset}
+              activeCategories={activeCategories}
+              selectedCompany={selectedCompany}
+              selectedSignal={selectedSignal}
+              onClose={handleClosePanel}
+            />
+          )}
         </div>
       </div>
     </div>
