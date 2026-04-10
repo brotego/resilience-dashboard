@@ -33,14 +33,14 @@ interface Props {
 const GENZ_COLOR = "#1ab5a5";
 const MIN_ZOOM = 1.3;
 const MAX_ZOOM = 20;
-const ZOOM_STEP = 1.3;
+const ZOOM_STEP = 1.18;
 
 // Pan boundaries (lng/lat) — soft clamp prevents panning beyond Earth
 const LNG_BOUNDS: [number, number] = [-180, 180];
 const LAT_BOUNDS: [number, number] = [-60, 85];
 
-// Soft clamp with elastic resistance instead of hard stop
-function softClamp(value: number, min: number, max: number, elasticity: number = 0.15): number {
+// Soft clamp with elastic resistance instead of a hard stop
+function softClamp(value: number, min: number, max: number, elasticity: number = 0.22): number {
   if (value < min) return min + (value - min) * elasticity;
   if (value > max) return max + (value - max) * elasticity;
   return value;
@@ -188,42 +188,79 @@ const GlobalMap = memo(({
     coordinates: [30, 20],
     zoom: 1.5,
   });
+  const positionRef = useRef<{ coordinates: [number, number]; zoom: number }>({
+    coordinates: [30, 20],
+    zoom: 1.5,
+  });
   const targetZoomRef = useRef(1.5);
   const animFrameRef = useRef<number | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
 
   const clampZoom = (z: number) => Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, z));
 
-  // Smooth animated zoom transition
-  const animateZoom = useCallback((targetZoom: number) => {
-    targetZoomRef.current = targetZoom;
+  const animateToPosition = useCallback((target: { coordinates: [number, number]; zoom: number }, easing: number = 0.08) => {
     if (animFrameRef.current) cancelAnimationFrame(animFrameRef.current);
 
     const step = () => {
       setPosition((prev) => {
-        const diff = targetZoomRef.current - prev.zoom;
-        if (Math.abs(diff) < 0.01) {
+        const lngDiff = target.coordinates[0] - prev.coordinates[0];
+        const latDiff = target.coordinates[1] - prev.coordinates[1];
+        const zoomDiff = target.zoom - prev.zoom;
+
+        if (Math.abs(lngDiff) < 0.02 && Math.abs(latDiff) < 0.02 && Math.abs(zoomDiff) < 0.005) {
           animFrameRef.current = null;
-          return { coordinates: clampCoords(prev.coordinates, targetZoomRef.current), zoom: targetZoomRef.current };
+          positionRef.current = target;
+          return target;
         }
-        // Ease toward target (lerp factor 0.15 for smooth feel)
-        const newZoom = prev.zoom + diff * 0.15;
+
+        const next = {
+          coordinates: [
+            prev.coordinates[0] + lngDiff * easing,
+            prev.coordinates[1] + latDiff * easing,
+          ] as [number, number],
+          zoom: prev.zoom + zoomDiff * easing,
+        };
+
+        positionRef.current = next;
         animFrameRef.current = requestAnimationFrame(step);
-        return { coordinates: clampCoords(prev.coordinates, newZoom), zoom: newZoom };
+        return next;
       });
     };
+
     animFrameRef.current = requestAnimationFrame(step);
   }, []);
 
   const handleMoveEnd = useCallback((pos: { coordinates: [number, number]; zoom: number }) => {
-    const clamped = clampCoords(pos.coordinates, pos.zoom);
-    setPosition({ coordinates: clamped, zoom: pos.zoom });
+    const clampedCoords = clampCoords(pos.coordinates, pos.zoom);
+    const next = { coordinates: pos.coordinates, zoom: pos.zoom };
+    positionRef.current = next;
+    setPosition(next);
     targetZoomRef.current = pos.zoom;
-  }, []);
+
+    const needsSettle =
+      Math.abs(clampedCoords[0] - pos.coordinates[0]) > 0.02 ||
+      Math.abs(clampedCoords[1] - pos.coordinates[1]) > 0.02;
+
+    if (needsSettle) {
+      animateToPosition({ coordinates: clampedCoords, zoom: pos.zoom }, 0.07);
+    }
+  }, [animateToPosition]);
+
+  const animateZoom = useCallback((targetZoom: number) => {
+    targetZoomRef.current = targetZoom;
+    const current = positionRef.current;
+    animateToPosition(
+      {
+        coordinates: clampCoords(current.coordinates, targetZoom),
+        zoom: targetZoom,
+      },
+      0.07,
+    );
+  }, [animateToPosition]);
 
   const handleWheel = useCallback((e: React.WheelEvent) => {
     e.preventDefault();
-    const direction = e.deltaY < 0 ? 1.06 : 0.94;
+    const direction = e.deltaY < 0 ? 1.03 : 0.97;
     const newTarget = clampZoom(targetZoomRef.current * direction);
     animateZoom(newTarget);
   }, [animateZoom]);
