@@ -194,6 +194,7 @@ const GlobalMap = memo(({
   onCountryClick,
   selectedSignalId,
   selectedCountry,
+  newsDots = [],
 }: Props) => {
   const [position, setPosition] = useState<{ coordinates: [number, number]; zoom: number }>({
     coordinates: [30, 20],
