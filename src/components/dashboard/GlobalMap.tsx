@@ -663,6 +663,35 @@ const GlobalMap = memo(({
                 </Marker>
               );
             })}
+
+          {/* Live news dots from API */}
+          {newsDots.map((dot) => {
+            const isBiz = dot.type === "business";
+            const color = isBiz ? "#3b82f6" : "#ff6701";
+            const r = 2.2 * dotScale;
+
+            return (
+              <Marker key={dot.id} coordinates={dot.coordinates}>
+                <title>{`${dot.title} — ${dot.source}`}</title>
+                {/* Pulsing ring */}
+                <circle r={r * 3} fill={color} opacity={0.08}>
+                  <animate attributeName="r" from={String(r * 2)} to={String(r * 4)} dur="2.5s" repeatCount="indefinite" />
+                  <animate attributeName="opacity" from="0.12" to="0" dur="2.5s" repeatCount="indefinite" />
+                </circle>
+                {/* Dot */}
+                <circle
+                  r={r}
+                  fill={color}
+                  opacity={0.85}
+                  stroke={color}
+                  strokeWidth={0.5 * dotScale}
+                  className="transition-all duration-200"
+                  onMouseEnter={(e) => e.currentTarget.setAttribute("r", String(r * 1.6))}
+                  onMouseLeave={(e) => e.currentTarget.setAttribute("r", String(r))}
+                />
+              </Marker>
+            );
+          })}
         </ZoomableGroup>
       </ComposableMap>
     </div>
