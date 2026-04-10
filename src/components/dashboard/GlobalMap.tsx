@@ -158,11 +158,12 @@ function getMinZoomForTier(tier: number): number {
   }
 }
 
-function getCapitalMinZoom(tier: 1 | 2 | 3): number {
+function getCityMinZoom(tier: 1 | 2 | 3 | 4): number {
   switch (tier) {
     case 1: return 3;
     case 2: return 4;
-    case 3: return 5.5;
+    case 3: return 5;
+    case 4: return 6.5;
   }
 }
 
