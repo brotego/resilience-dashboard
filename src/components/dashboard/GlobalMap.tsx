@@ -1,4 +1,4 @@
-import { useState, useCallback, memo } from "react";
+import { useState, useCallback, useRef, memo } from "react";
 import {
   ComposableMap,
   ZoomableGroup,
@@ -9,11 +9,11 @@ import {
 import { SIGNALS } from "@/data/signals";
 import { GENZ_SIGNALS } from "@/data/genzSignals";
 import { DOMAINS } from "@/data/domains";
-import { GENZ_CATEGORIES } from "@/data/genzCategories";
 import { COMPANIES, CompanyId } from "@/data/companies";
 import { DomainId, MindsetId, ResilienceSignal } from "@/data/types";
 import { GenZCategoryId, GenZSignal } from "@/data/genzTypes";
 import { DashboardMode } from "./DashboardLayout";
+import { Plus, Minus } from "lucide-react";
 
 const GEO_URL = "https://cdn.jsdelivr.net/npm/world-atlas@2/countries-110m.json";
 
@@ -28,6 +28,9 @@ interface Props {
 }
 
 const GENZ_COLOR = "#1ab5a5";
+const MIN_ZOOM = 1;
+const MAX_ZOOM = 20;
+const ZOOM_STEP = 1.4;
 
 function isRelevantToCompany(text: string, companyId: CompanyId): boolean {
   const company = COMPANIES.find((c) => c.id === companyId);
@@ -85,9 +88,37 @@ const GlobalMap = memo(({
     coordinates: [30, 20],
     zoom: 1.5,
   });
+  const containerRef = useRef<HTMLDivElement>(null);
 
   const handleMoveEnd = useCallback((pos: { coordinates: [number, number]; zoom: number }) => {
     setPosition(pos);
+  }, []);
+
+  const clampZoom = (z: number) => Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, z));
+
+  const handleWheel = useCallback((e: React.WheelEvent) => {
+    e.preventDefault();
+    // Pinch gesture (ctrlKey) or trackpad pinch = zoom
+    if (e.ctrlKey || e.metaKey) {
+      setPosition((prev) => ({
+        ...prev,
+        zoom: clampZoom(prev.zoom * (e.deltaY < 0 ? 1.08 : 0.92)),
+      }));
+    } else {
+      // Regular scroll = also zoom (since pan is handled by drag)
+      setPosition((prev) => ({
+        ...prev,
+        zoom: clampZoom(prev.zoom * (e.deltaY < 0 ? 1.08 : 0.92)),
+      }));
+    }
+  }, []);
+
+  const zoomIn = useCallback(() => {
+    setPosition((prev) => ({ ...prev, zoom: clampZoom(prev.zoom * ZOOM_STEP) }));
+  }, []);
+
+  const zoomOut = useCallback(() => {
+    setPosition((prev) => ({ ...prev, zoom: clampZoom(prev.zoom / ZOOM_STEP) }));
   }, []);
 
   const dotScale = 1 / position.zoom;
@@ -101,7 +132,34 @@ const GlobalMap = memo(({
     : [];
 
   return (
-    <div className="w-full h-full bg-background">
+    <div
+      ref={containerRef}
+      className="w-full h-full bg-background relative"
+      onWheel={handleWheel}
+    >
+      {/* Zoom level indicator */}
+      <div className="absolute top-3 left-3 z-10 bg-background/80 backdrop-blur-sm border border-border rounded-md px-2 py-1 text-xs font-mono text-muted-foreground">
+        {position.zoom.toFixed(1)}x
+      </div>
+
+      {/* Zoom controls */}
+      <div className="absolute bottom-4 right-4 z-10 flex flex-col gap-1">
+        <button
+          onClick={zoomIn}
+          className="w-8 h-8 flex items-center justify-center bg-background/80 backdrop-blur-sm border border-border rounded-md text-foreground hover:bg-accent transition-colors"
+          aria-label="Zoom in"
+        >
+          <Plus size={16} />
+        </button>
+        <button
+          onClick={zoomOut}
+          className="w-8 h-8 flex items-center justify-center bg-background/80 backdrop-blur-sm border border-border rounded-md text-foreground hover:bg-accent transition-colors"
+          aria-label="Zoom out"
+        >
+          <Minus size={16} />
+        </button>
+      </div>
+
       <ComposableMap
         projection="geoMercator"
         projectionConfig={{ scale: 140, center: [0, 20] }}
@@ -111,8 +169,13 @@ const GlobalMap = memo(({
           center={position.coordinates}
           zoom={position.zoom}
           onMoveEnd={handleMoveEnd}
-          minZoom={1}
-          maxZoom={12}
+          minZoom={MIN_ZOOM}
+          maxZoom={MAX_ZOOM}
+          filterZoomEvent={(evt: any) => {
+            // Disable ZoomableGroup's built-in wheel zoom (we handle it ourselves)
+            if (evt?.type === "wheel") return false;
+            return true;
+          }}
         >
           <Geographies geography={GEO_URL}>
             {({ geographies }) =>
@@ -133,7 +196,6 @@ const GlobalMap = memo(({
             }
           </Geographies>
 
-          {/* Country labels */}
           {showLabels &&
             COUNTRY_LABELS.map((c) => (
               <Marker key={c.name} coordinates={c.coordinates}>
@@ -153,7 +215,6 @@ const GlobalMap = memo(({
               </Marker>
             ))}
 
-          {/* Resilience markers */}
           {mode === "resilience" &&
             resilienceFiltered.map((signal) => {
               const domain = DOMAINS.find((d) => d.id === signal.domain);
@@ -174,13 +235,7 @@ const GlobalMap = memo(({
                   onClick={() => onSignalClick(signal, "resilience")}
                   style={{ cursor: "pointer" }}
                 >
-                  {/* Glow */}
-                  <circle
-                    r={r * 2}
-                    fill={fillColor}
-                    opacity={dimmed ? 0 : 0.15}
-                  />
-                  {/* Main dot */}
+                  <circle r={r * 2} fill={fillColor} opacity={dimmed ? 0 : 0.15} />
                   <circle
                     r={r}
                     fill={fillColor}
@@ -189,15 +244,11 @@ const GlobalMap = memo(({
                     opacity={dimmed ? 0.25 : 1}
                     style={{ transition: "opacity 0.3s" }}
                   />
-                  {/* Japan flag indicator */}
                   {signal.isJapan && (
                     <text
                       textAnchor="middle"
                       y={-r - 4 * dotScale}
-                      style={{
-                        fontSize: `${10 * dotScale}px`,
-                        pointerEvents: "none",
-                      }}
+                      style={{ fontSize: `${10 * dotScale}px`, pointerEvents: "none" }}
                     >
                       🇯🇵
                     </text>
@@ -206,7 +257,6 @@ const GlobalMap = memo(({
               );
             })}
 
-          {/* Gen Z markers */}
           {mode === "genz" &&
             genzFiltered.map((signal) => {
               const relevant = selectedCompany
@@ -224,11 +274,7 @@ const GlobalMap = memo(({
                   onClick={() => onSignalClick(signal, "genz")}
                   style={{ cursor: "pointer" }}
                 >
-                  <circle
-                    r={r * 2}
-                    fill={GENZ_COLOR}
-                    opacity={dimmed ? 0 : 0.15}
-                  />
+                  <circle r={r * 2} fill={GENZ_COLOR} opacity={dimmed ? 0 : 0.15} />
                   <circle
                     r={r}
                     fill={GENZ_COLOR}
@@ -241,10 +287,7 @@ const GlobalMap = memo(({
                     <text
                       textAnchor="middle"
                       y={-r - 4 * dotScale}
-                      style={{
-                        fontSize: `${10 * dotScale}px`,
-                        pointerEvents: "none",
-                      }}
+                      style={{ fontSize: `${10 * dotScale}px`, pointerEvents: "none" }}
                     >
                       🇯🇵
                     </text>
