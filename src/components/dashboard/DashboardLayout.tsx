@@ -2,7 +2,6 @@ import { useState, useCallback } from "react";
 import { DomainId, MindsetId, ResilienceSignal } from "@/data/types";
 import { GenZCategoryId, GenZSignal } from "@/data/genzTypes";
 import { CompanyId } from "@/data/companies";
-import ModeToggle from "./ModeToggle";
 import DomainSelector from "./DomainSelector";
 import GenZCategorySelector from "./GenZCategorySelector";
 import CompanySelector from "./CompanySelector";
@@ -38,7 +37,7 @@ const DashboardLayout = () => {
     setSelectedCountry(null);
   }, []);
 
-  const handleCountryClick = useCallback((countryName: string) => {
+  const handleCountryClick = useCallback((countryName: string, _geo: any) => {
     setSelectedCountry(countryName);
     setSelectedSignal(null);
   }, []);
@@ -62,12 +61,10 @@ const DashboardLayout = () => {
         </div>
 
         <div className="flex items-center gap-4">
-          {/* Company Lens inline */}
           <div className="w-52">
             <CompanySelector selectedCompany={selectedCompany} onSelect={setSelectedCompany} />
           </div>
 
-          {/* Mode buttons */}
           <div className="flex items-center gap-2">
             <button
               onClick={() => setMode("resilience")}
@@ -95,7 +92,6 @@ const DashboardLayout = () => {
 
       {/* Main area: map + right panel */}
       <div className="flex-1 flex overflow-hidden relative">
-        {/* Map */}
         <div className="flex-1 relative">
           <GlobalMap
             mode={mode}
@@ -125,6 +121,7 @@ const DashboardLayout = () => {
             <CountryOutlookPanel
               countryName={selectedCountry}
               mode={mode}
+              selectedCompany={selectedCompany}
               onClose={handleClosePanel}
               onSignalClick={handleSignalClick}
             />

@@ -6,7 +6,7 @@ import {
   Geography,
   Marker,
 } from "react-simple-maps";
-import { geoCentroid } from "d3-geo";
+import { geoCentroid, geoBounds } from "d3-geo";
 import { SIGNALS } from "@/data/signals";
 import { GENZ_SIGNALS } from "@/data/genzSignals";
 import { DOMAINS } from "@/data/domains";
@@ -25,7 +25,7 @@ interface Props {
   activeCategories: GenZCategoryId[];
   selectedCompany: CompanyId | null;
   onSignalClick: (signal: ResilienceSignal | GenZSignal, mode: DashboardMode) => void;
-  onCountryClick: (countryName: string) => void;
+  onCountryClick: (countryName: string, geo: any) => void;
   selectedSignalId: string | null;
   selectedCountry: string | null;
 }
@@ -35,11 +35,9 @@ const MIN_ZOOM = 1;
 const MAX_ZOOM = 20;
 const ZOOM_STEP = 1.18;
 
-// Pan boundaries (lng/lat) — soft clamp prevents panning beyond Earth
 const LNG_BOUNDS: [number, number] = [-180, 180];
 const LAT_BOUNDS: [number, number] = [-60, 85];
 
-// Soft clamp with elastic resistance instead of a hard stop
 function softClamp(value: number, min: number, max: number, elasticity: number = 0.22): number {
   if (value < min) return min + (value - min) * elasticity;
   if (value > max) return max + (value - max) * elasticity;
@@ -120,16 +118,9 @@ const DISPLAY_NAMES: Record<string, string> = {
   "Democratic Republic of the Congo": "DR Congo",
 };
 
-// Tier system: countries appear at different zoom levels based on size/importance
-// Tier 1 (zoom >= 1.3): Major countries always visible
-// Tier 2 (zoom >= 2): Medium countries
-// Tier 3 (zoom >= 3.5): Smaller countries
-// Tier 4 (zoom >= 6): Tiny countries
 const COUNTRY_TIERS: Record<string, number> = {
-  // Tier 1 — always visible
   "Russia": 1, "China": 1, "United States of America": 1, "Canada": 1,
   "Brazil": 1, "Australia": 1, "India": 1, "Japan": 1,
-  // Tier 2
   "Argentina": 2, "Mexico": 2, "Indonesia": 2, "Saudi Arabia": 2,
   "Germany": 2, "France": 2, "United Kingdom": 2, "Turkey": 2,
   "Iran": 2, "Egypt": 2, "South Africa": 2, "Nigeria": 2,
@@ -140,7 +131,6 @@ const COUNTRY_TIERS: Record<string, number> = {
   "Chad": 2, "Tanzania": 2, "Mozambique": 2, "Zambia": 2,
   "Myanmar": 2, "Afghanistan": 2, "Somalia": 2, "Madagascar": 2,
   "Kenya": 2, "Morocco": 2,
-  // Tier 3
   "Spain": 3, "Italy": 3, "Poland": 3, "Ukraine": 3, "Romania": 3,
   "Sweden": 3, "Norway": 3, "Finland": 3, "Thailand": 3, "Vietnam": 3,
   "Philippines": 3, "Malaysia": 3, "South Korea": 3, "Iraq": 3,
@@ -151,7 +141,6 @@ const COUNTRY_TIERS: Record<string, number> = {
   "Guinea": 3, "Uganda": 3, "Uzbekistan": 3, "Turkmenistan": 3,
   "Bangladesh": 3, "Nepal": 3, "Sri Lanka": 3, "Laos": 3, "Cambodia": 3,
   "Papua New Guinea": 3, "Gabon": 3,
-  // Tier 4 — everything else
 };
 
 function getCountryTier(name: string): number {
@@ -173,6 +162,17 @@ function getShortTitle(title: string): string {
   return words.slice(0, 4).join(" ") + "…";
 }
 
+/** Calculate zoom level to fit a country's bounding box */
+function calcCountryZoom(geo: any): number {
+  const bounds = geoBounds(geo);
+  const lngSpan = Math.abs(bounds[1][0] - bounds[0][0]);
+  const latSpan = Math.abs(bounds[1][1] - bounds[0][1]);
+  const maxSpan = Math.max(lngSpan, latSpan);
+  // Map projection is ~280deg wide at zoom 1, we want the country to fill ~60% of viewport
+  const targetZoom = Math.min(MAX_ZOOM, Math.max(2, 120 / maxSpan));
+  return targetZoom;
+}
+
 const GlobalMap = memo(({
   mode,
   activeDomains,
@@ -188,7 +188,7 @@ const GlobalMap = memo(({
     coordinates: [30, 20],
     zoom: 1.5,
   });
-  const [liveZoom, setLiveZoom] = useState(1.5); // lightweight zoom for labels during gestures
+  const [liveZoom, setLiveZoom] = useState(1.5);
   const positionRef = useRef<{ coordinates: [number, number]; zoom: number }>({
     coordinates: [30, 20],
     zoom: 1.5,
@@ -211,6 +211,7 @@ const GlobalMap = memo(({
         if (Math.abs(lngDiff) < 0.02 && Math.abs(latDiff) < 0.02 && Math.abs(zoomDiff) < 0.005) {
           animFrameRef.current = null;
           positionRef.current = target;
+          setLiveZoom(target.zoom);
           return target;
         }
 
@@ -223,6 +224,7 @@ const GlobalMap = memo(({
         };
 
         positionRef.current = next;
+        setLiveZoom(next.zoom);
         animFrameRef.current = requestAnimationFrame(step);
         return next;
       });
@@ -231,7 +233,26 @@ const GlobalMap = memo(({
     animFrameRef.current = requestAnimationFrame(step);
   }, []);
 
-  // Only update liveZoom during gestures — don't touch position (avoids feedback loop)
+  // Expose zoom-to-country method
+  const zoomToCountry = useCallback((geo: any) => {
+    const centroid = geoCentroid(geo) as [number, number];
+    const zoom = calcCountryZoom(geo);
+    targetZoomRef.current = zoom;
+    animateToPosition({ coordinates: centroid, zoom }, 0.06);
+  }, [animateToPosition]);
+
+  const zoomToGlobal = useCallback(() => {
+    const target = { coordinates: [30, 20] as [number, number], zoom: 1.5 };
+    targetZoomRef.current = 1.5;
+    animateToPosition(target, 0.06);
+  }, [animateToPosition]);
+
+  // Store refs for external access
+  const zoomToCountryRef = useRef(zoomToCountry);
+  const zoomToGlobalRef = useRef(zoomToGlobal);
+  zoomToCountryRef.current = zoomToCountry;
+  zoomToGlobalRef.current = zoomToGlobal;
+
   const handleMove = useCallback((pos: any) => {
     const zoom = pos.zoom ?? pos.k ?? positionRef.current.zoom;
     setLiveZoom(zoom);
@@ -267,8 +288,6 @@ const GlobalMap = memo(({
     );
   }, [animateToPosition]);
 
-  // Prevent native browser pinch-to-zoom (gesture events on Safari/Mac) 
-  // but let ZoomableGroup handle all wheel/scroll zoom natively
   useEffect(() => {
     const el = containerRef.current;
     if (!el) return;
@@ -278,7 +297,6 @@ const GlobalMap = memo(({
       e.stopPropagation();
     };
 
-    // Only prevent ctrlKey wheel events (trackpad pinch in Chrome) from zooming the browser page
     const handleWheel = (e: WheelEvent) => {
       if (e.ctrlKey) {
         e.preventDefault();
@@ -320,7 +338,10 @@ const GlobalMap = memo(({
 
   const handleCountryClickCb = useCallback((geo: any) => {
     const name = geo.properties?.name || geo.properties?.NAME;
-    if (name) onCountryClick(name);
+    if (name) {
+      zoomToCountryRef.current(geo);
+      onCountryClick(name, geo);
+    }
   }, [onCountryClick]);
 
   const currentZoom = liveZoom;
@@ -380,20 +401,19 @@ const GlobalMap = memo(({
                       key={geo.rsmKey}
                       geography={geo}
                       onClick={() => handleCountryClickCb(geo)}
-                      fill={isSelected ? "hsl(220, 14%, 24%)" : "hsl(220, 14%, 16%)"}
-                      stroke="hsl(220, 14%, 22%)"
-                      strokeWidth={0.5}
+                      fill={isSelected ? "#1a2a35" : "hsl(220, 14%, 16%)"}
+                      stroke={isSelected ? "rgba(18, 65, 234, 0.6)" : "hsl(220, 14%, 22%)"}
+                      strokeWidth={isSelected ? 1.5 / currentZoom : 0.5}
                       style={{
                         default: { outline: "none", cursor: "pointer" },
-                        hover: { fill: "hsl(220, 14%, 22%)", outline: "none", cursor: "pointer" },
+                        hover: { fill: isSelected ? "#1a2a35" : "hsl(220, 14%, 22%)", outline: "none", cursor: "pointer" },
                         pressed: { fill: "hsl(220, 14%, 26%)", outline: "none" },
                       }}
                     />
                   );
                 })}
-                {/* Country labels — progressive reveal with collision detection */}
+                {/* Country labels */}
                 {(() => {
-                  // Collect all visible labels with their positions
                   const candidates = geographies
                     .map((geo) => {
                       const geoName = geo.properties?.name || geo.properties?.NAME || "";
@@ -418,11 +438,8 @@ const GlobalMap = memo(({
                       centroid: [number, number]; displayName: string; opacity: number;
                     }>;
 
-                  // Sort by tier (lower tier = more important = placed first)
                   candidates.sort((a, b) => a.tier - b.tier);
 
-                  // Simple collision detection in geo-coordinates
-                  // Approximate label width/height in degrees based on zoom
                   const charWidthDeg = (labelFontSize * 0.6) / currentZoom;
                   const labelHeightDeg = (labelFontSize * 1.4) / currentZoom;
 
