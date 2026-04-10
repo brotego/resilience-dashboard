@@ -258,55 +258,36 @@ const GlobalMap = memo(({
     );
   }, [animateToPosition]);
 
-  const handleWheel = useCallback((e: WheelEvent) => {
-    // ctrlKey is set by trackpad pinch-to-zoom in browsers
-    if (e.ctrlKey) {
-      e.preventDefault();
-      e.stopPropagation();
-      const direction = e.deltaY < 0 ? 1.04 : 0.96;
-      const newTarget = clampZoom(targetZoomRef.current * direction);
-      animateZoom(newTarget);
-    } else {
-      // Normal scroll-wheel zoom: only intercept if we can actually zoom further
-      const isZoomingIn = e.deltaY < 0;
-      const isZoomingOut = e.deltaY > 0;
-      const atMin = targetZoomRef.current <= MIN_ZOOM;
-      const atMax = targetZoomRef.current >= MAX_ZOOM;
-
-      if ((isZoomingOut && atMin) || (isZoomingIn && atMax)) {
-        // Let the page scroll normally
-        return;
-      }
-
-      e.preventDefault();
-      const direction = isZoomingIn ? 1.03 : 0.97;
-      const newTarget = clampZoom(targetZoomRef.current * direction);
-      animateZoom(newTarget);
-    }
-  }, [animateZoom]);
-
-  // Prevent native browser pinch-to-zoom and gesture events on the map container
+  // Prevent native browser pinch-to-zoom (gesture events on Safari/Mac) 
+  // but let ZoomableGroup handle all wheel/scroll zoom natively
   useEffect(() => {
     const el = containerRef.current;
     if (!el) return;
 
-    const preventGesture = (e: Event) => {
+    const preventBrowserZoom = (e: Event) => {
       e.preventDefault();
       e.stopPropagation();
     };
 
+    // Only prevent ctrlKey wheel events (trackpad pinch in Chrome) from zooming the browser page
+    const handleWheel = (e: WheelEvent) => {
+      if (e.ctrlKey) {
+        e.preventDefault();
+      }
+    };
+
     el.addEventListener('wheel', handleWheel, { passive: false });
-    el.addEventListener('gesturestart', preventGesture);
-    el.addEventListener('gesturechange', preventGesture);
-    el.addEventListener('gestureend', preventGesture);
+    el.addEventListener('gesturestart', preventBrowserZoom);
+    el.addEventListener('gesturechange', preventBrowserZoom);
+    el.addEventListener('gestureend', preventBrowserZoom);
 
     return () => {
       el.removeEventListener('wheel', handleWheel);
-      el.removeEventListener('gesturestart', preventGesture);
-      el.removeEventListener('gesturechange', preventGesture);
-      el.removeEventListener('gestureend', preventGesture);
+      el.removeEventListener('gesturestart', preventBrowserZoom);
+      el.removeEventListener('gesturechange', preventBrowserZoom);
+      el.removeEventListener('gestureend', preventBrowserZoom);
     };
-  }, [handleWheel]);
+  }, []);
 
   const zoomIn = useCallback(() => {
     const newTarget = clampZoom(targetZoomRef.current * ZOOM_STEP);
@@ -375,10 +356,7 @@ const GlobalMap = memo(({
           minZoom={MIN_ZOOM}
           maxZoom={MAX_ZOOM}
           translateExtent={[[-200, -100], [1200, 700]]}
-          filterZoomEvent={(evt: any) => {
-            if (evt?.type === "wheel") return false;
-            return true;
-          }}
+          filterZoomEvent={() => true}
         >
           <Geographies geography={GEO_URL}>
             {({ geographies }) => (
