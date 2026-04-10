@@ -439,8 +439,7 @@ const GlobalMap = memo(({
 
                       const tier = getCountryTier(geoName);
                       const minZoom = getMinZoomForTier(tier);
-                      const maxZoom = tier === 1 ? 12 : tier === 2 ? 10 : 8;
-                      if (currentZoom < minZoom || currentZoom > maxZoom) return null;
+                      if (currentZoom < minZoom) return null;
 
                       const override = LABEL_OVERRIDES[geoName];
                       const centroid = override || geoCentroid(geo) as [number, number];
