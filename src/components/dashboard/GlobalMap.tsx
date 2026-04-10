@@ -16,6 +16,7 @@ import { DomainId, MindsetId, ResilienceSignal } from "@/data/types";
 import { GenZCategoryId, GenZSignal } from "@/data/genzTypes";
 import { DashboardMode } from "./DashboardLayout";
 import { Plus, Minus } from "lucide-react";
+import { NewsDot } from "@/hooks/useGlobalNewsDots";
 
 // Higher resolution TopoJSON for smoother borders when zoomed
 const GEO_URL = "https://cdn.jsdelivr.net/npm/world-atlas@2/countries-50m.json";
@@ -30,6 +31,7 @@ interface Props {
   onCountryClick: (countryName: string, geo: any) => void;
   selectedSignalId: string | null;
   selectedCountry: string | null;
+  newsDots?: NewsDot[];
 }
 
 const GENZ_COLOR = "#1ab5a5";
