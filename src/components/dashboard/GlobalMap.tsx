@@ -188,6 +188,7 @@ const GlobalMap = memo(({
     coordinates: [30, 20],
     zoom: 1.5,
   });
+  const [liveZoom, setLiveZoom] = useState(1.5); // lightweight zoom for labels during gestures
   const positionRef = useRef<{ coordinates: [number, number]; zoom: number }>({
     coordinates: [30, 20],
     zoom: 1.5,
