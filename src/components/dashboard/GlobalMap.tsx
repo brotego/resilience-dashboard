@@ -1,14 +1,21 @@
-import { useEffect, useRef, useCallback } from "react";
-import maplibregl from "maplibre-gl";
-import "maplibre-gl/dist/maplibre-gl.css";
+import { useState, useCallback, memo } from "react";
+import {
+  ComposableMap,
+  ZoomableGroup,
+  Geographies,
+  Geography,
+  Marker,
+} from "react-simple-maps";
 import { SIGNALS } from "@/data/signals";
 import { GENZ_SIGNALS } from "@/data/genzSignals";
 import { DOMAINS } from "@/data/domains";
 import { GENZ_CATEGORIES } from "@/data/genzCategories";
 import { COMPANIES, CompanyId } from "@/data/companies";
-import { DomainId, MindsetId } from "@/data/types";
-import { GenZCategoryId } from "@/data/genzTypes";
+import { DomainId, MindsetId, ResilienceSignal } from "@/data/types";
+import { GenZCategoryId, GenZSignal } from "@/data/genzTypes";
 import { DashboardMode } from "./DashboardLayout";
+
+const GEO_URL = "https://cdn.jsdelivr.net/npm/world-atlas@2/countries-110m.json";
 
 interface Props {
   mode: DashboardMode;
@@ -16,18 +23,11 @@ interface Props {
   activeMindset: MindsetId;
   activeCategories: GenZCategoryId[];
   selectedCompany: CompanyId | null;
+  onSignalClick: (signal: ResilienceSignal | GenZSignal, mode: DashboardMode) => void;
+  selectedSignalId: string | null;
 }
 
-const GENZ_COLOR = "hsl(170, 70%, 48%)";
-
-const TOOLTIP_STYLES = `
-  position:absolute;pointer-events:none;z-index:10;
-  background:hsl(220,18%,11%);border:1px solid hsl(220,14%,18%);
-  border-radius:12px;padding:10px 12px;
-  box-shadow:0 10px 30px -10px rgba(0,0,0,0.6);
-  font-family:'Noto Sans JP',system-ui,sans-serif;max-width:280px;
-  white-space:normal;left:50%;top:50%;transform:translate(50%,-50%);
-`;
+const GENZ_COLOR = "#1ab5a5";
 
 function isRelevantToCompany(text: string, companyId: CompanyId): boolean {
   const company = COMPANIES.find((c) => c.id === companyId);
@@ -36,243 +36,228 @@ function isRelevantToCompany(text: string, companyId: CompanyId): boolean {
   return company.keywords.some((kw) => lower.includes(kw.toLowerCase()));
 }
 
-function escapeHtml(str: string): string {
-  return str.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
-}
+const COUNTRY_LABELS: Array<{ name: string; coordinates: [number, number] }> = [
+  { name: "United States", coordinates: [-98, 39] },
+  { name: "Brazil", coordinates: [-53, -10] },
+  { name: "Japan", coordinates: [138, 37] },
+  { name: "China", coordinates: [104, 35] },
+  { name: "India", coordinates: [79, 22] },
+  { name: "Germany", coordinates: [10, 51] },
+  { name: "Australia", coordinates: [134, -25] },
+  { name: "Nigeria", coordinates: [8, 10] },
+  { name: "UK", coordinates: [-2, 54] },
+  { name: "Indonesia", coordinates: [118, -2] },
+  { name: "South Korea", coordinates: [128, 36] },
+  { name: "Kenya", coordinates: [38, 0] },
+  { name: "France", coordinates: [2, 47] },
+  { name: "Saudi Arabia", coordinates: [45, 24] },
+  { name: "Colombia", coordinates: [-73, 4] },
+  { name: "Chile", coordinates: [-71, -33] },
+  { name: "Argentina", coordinates: [-64, -34] },
+  { name: "Thailand", coordinates: [101, 15] },
+  { name: "Vietnam", coordinates: [107, 16] },
+  { name: "Egypt", coordinates: [30, 27] },
+  { name: "South Africa", coordinates: [25, -29] },
+  { name: "Ghana", coordinates: [-2, 8] },
+  { name: "Malaysia", coordinates: [109, 4] },
+  { name: "Singapore", coordinates: [104, 1.3] },
+  { name: "Philippines", coordinates: [122, 12] },
+  { name: "Peru", coordinates: [-76, -10] },
+  { name: "Netherlands", coordinates: [5, 52] },
+  { name: "Sweden", coordinates: [16, 63] },
+  { name: "Finland", coordinates: [26, 64] },
+  { name: "UAE", coordinates: [54, 24] },
+  { name: "Kazakhstan", coordinates: [67, 48] },
+  { name: "Belgium", coordinates: [4, 51] },
+  { name: "Denmark", coordinates: [10, 56] },
+];
 
-function buildTooltipHtml(title: string, location: string, description: string, accentLabel: string, accentColor: string, isJapan: boolean): string {
-  const shortDesc = description.length > 100 ? `${escapeHtml(description.slice(0, 100))}…` : escapeHtml(description);
-  return `<div>
-    <div style="display:flex;align-items:center;gap:6px;margin-bottom:4px;">
-      ${isJapan ? '<span style="font-size:11px;">🇯🇵</span>' : ""}
-      <strong style="font-size:13px;color:hsl(0,0%,100%);line-height:1.3;">${escapeHtml(title)}</strong>
-    </div>
-    <p style="font-size:11px;color:hsl(220,10%,55%);margin:0 0 4px;">${escapeHtml(location)}</p>
-    <p style="font-size:11px;color:hsl(0,0%,92%);margin:0 0 6px;line-height:1.4;">${shortDesc}</p>
-    <span style="font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:0.5px;color:${accentColor};">${escapeHtml(accentLabel)}</span>
-  </div>`;
-}
+const GlobalMap = memo(({
+  mode,
+  activeDomains,
+  activeMindset,
+  activeCategories,
+  selectedCompany,
+  onSignalClick,
+  selectedSignalId,
+}: Props) => {
+  const [position, setPosition] = useState<{ coordinates: [number, number]; zoom: number }>({
+    coordinates: [30, 20],
+    zoom: 1.5,
+  });
 
-const GlobalMap = ({ mode, activeDomains, activeMindset, activeCategories, selectedCompany }: Props) => {
-  const containerRef = useRef<HTMLDivElement>(null);
-  const mapRef = useRef<maplibregl.Map | null>(null);
-  const markersRef = useRef<maplibregl.Marker[]>([]);
-  const clickPopupRef = useRef<maplibregl.Popup | null>(null);
-  const hoverTooltipRef = useRef<HTMLDivElement | null>(null);
-
-  const removeHoverTooltip = useCallback(() => {
-    if (hoverTooltipRef.current) {
-      try { hoverTooltipRef.current.remove(); } catch (_) { /* noop */ }
-      hoverTooltipRef.current = null;
-    }
+  const handleMoveEnd = useCallback((pos: { coordinates: [number, number]; zoom: number }) => {
+    setPosition(pos);
   }, []);
 
-  const showTooltipOnMarker = useCallback((markerEl: HTMLElement, html: string) => {
-    removeHoverTooltip();
-    const tooltip = document.createElement("div");
-    tooltip.style.cssText = TOOLTIP_STYLES;
-    tooltip.innerHTML = html;
-    markerEl.style.position = "relative";
-    markerEl.style.overflow = "visible";
-    markerEl.appendChild(tooltip);
-    hoverTooltipRef.current = tooltip;
-  }, [removeHoverTooltip]);
+  const dotScale = 1 / position.zoom;
+  const showLabels = position.zoom >= 2.5;
 
-  useEffect(() => {
-    if (!containerRef.current || mapRef.current) return;
+  const resilienceFiltered = mode === "resilience"
+    ? SIGNALS.filter((s) => activeDomains.includes(s.domain))
+    : [];
+  const genzFiltered = mode === "genz"
+    ? GENZ_SIGNALS.filter((s) => activeCategories.includes(s.category))
+    : [];
 
-    const map = new maplibregl.Map({
-      container: containerRef.current,
-      style: {
-        version: 8,
-        sources: {
-          "carto-dark": {
-            type: "raster",
-            tiles: [
-              "https://a.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}@2x.png",
-              "https://b.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}@2x.png",
-            ],
-            tileSize: 256,
-            attribution:
-              '&copy; <a href="https://www.openstreetmap.org/copyright">OSM</a> &copy; <a href="https://carto.com/">CARTO</a>',
-          },
-        },
-        layers: [{ id: "carto-dark-layer", type: "raster", source: "carto-dark", minzoom: 0, maxzoom: 19 }],
-      },
-      center: [100, 30],
-      zoom: 2.2,
-      minZoom: 1.5,
-      maxZoom: 12,
-    });
+  return (
+    <div className="w-full h-full bg-background">
+      <ComposableMap
+        projection="geoMercator"
+        projectionConfig={{ scale: 140, center: [0, 20] }}
+        style={{ width: "100%", height: "100%" }}
+      >
+        <ZoomableGroup
+          center={position.coordinates}
+          zoom={position.zoom}
+          onMoveEnd={handleMoveEnd}
+          minZoom={1}
+          maxZoom={12}
+        >
+          <Geographies geography={GEO_URL}>
+            {({ geographies }) =>
+              geographies.map((geo) => (
+                <Geography
+                  key={geo.rsmKey}
+                  geography={geo}
+                  fill="hsl(220, 14%, 16%)"
+                  stroke="hsl(220, 14%, 22%)"
+                  strokeWidth={0.5}
+                  style={{
+                    default: { outline: "none" },
+                    hover: { fill: "hsl(220, 14%, 20%)", outline: "none" },
+                    pressed: { outline: "none" },
+                  }}
+                />
+              ))
+            }
+          </Geographies>
 
-    map.addControl(new maplibregl.NavigationControl(), "bottom-right");
-    mapRef.current = map;
+          {/* Country labels */}
+          {showLabels &&
+            COUNTRY_LABELS.map((c) => (
+              <Marker key={c.name} coordinates={c.coordinates}>
+                <text
+                  textAnchor="middle"
+                  style={{
+                    fontFamily: "'Noto Sans JP', system-ui, sans-serif",
+                    fill: "hsl(220, 10%, 40%)",
+                    fontSize: `${10 * dotScale}px`,
+                    fontWeight: 500,
+                    pointerEvents: "none",
+                    userSelect: "none",
+                  }}
+                >
+                  {c.name}
+                </text>
+              </Marker>
+            ))}
 
-    return () => {
-      removeHoverTooltip();
-      map.remove();
-      mapRef.current = null;
-    };
-  }, [removeHoverTooltip]);
+          {/* Resilience markers */}
+          {mode === "resilience" &&
+            resilienceFiltered.map((signal) => {
+              const domain = DOMAINS.find((d) => d.id === signal.domain);
+              const color = domain?.color || "hsl(38, 90%, 55%)";
+              const relevant = selectedCompany
+                ? isRelevantToCompany(`${signal.title} ${signal.description}`, selectedCompany)
+                : false;
+              const dimmed = !!(selectedCompany && !relevant && !signal.isJapan);
+              const baseR = signal.isJapan ? 6 : relevant ? 6 : 3 + signal.intensity * 0.4;
+              const r = baseR * dotScale;
+              const isSelected = selectedSignalId === signal.id;
+              const fillColor = signal.isJapan ? "#1241ea" : color;
 
-  useEffect(() => {
-    const map = mapRef.current;
-    if (!map) return;
+              return (
+                <Marker
+                  key={signal.id}
+                  coordinates={signal.coordinates}
+                  onClick={() => onSignalClick(signal, "resilience")}
+                  style={{ cursor: "pointer" }}
+                >
+                  {/* Glow */}
+                  <circle
+                    r={r * 2}
+                    fill={fillColor}
+                    opacity={dimmed ? 0 : 0.15}
+                  />
+                  {/* Main dot */}
+                  <circle
+                    r={r}
+                    fill={fillColor}
+                    stroke={isSelected ? "#ffffff" : fillColor}
+                    strokeWidth={isSelected ? 2 * dotScale : 1 * dotScale}
+                    opacity={dimmed ? 0.25 : 1}
+                    style={{ transition: "opacity 0.3s" }}
+                  />
+                  {/* Japan flag indicator */}
+                  {signal.isJapan && (
+                    <text
+                      textAnchor="middle"
+                      y={-r - 4 * dotScale}
+                      style={{
+                        fontSize: `${10 * dotScale}px`,
+                        pointerEvents: "none",
+                      }}
+                    >
+                      🇯🇵
+                    </text>
+                  )}
+                </Marker>
+              );
+            })}
 
-    markersRef.current.forEach((m) => m.remove());
-    markersRef.current = [];
-    removeHoverTooltip();
-    if (clickPopupRef.current) {
-      clickPopupRef.current.remove();
-      clickPopupRef.current = null;
-    }
+          {/* Gen Z markers */}
+          {mode === "genz" &&
+            genzFiltered.map((signal) => {
+              const relevant = selectedCompany
+                ? isRelevantToCompany(`${signal.title} ${signal.description}`, selectedCompany)
+                : false;
+              const dimmed = !!(selectedCompany && !relevant && !signal.isJapan);
+              const baseR = signal.isJapan ? 6 : relevant ? 6 : 3 + signal.intensity * 0.4;
+              const r = baseR * dotScale;
+              const isSelected = selectedSignalId === signal.id;
 
-    const createMarkerElements = (size: number, color: string, borderColor: string, dimmed: boolean, glowColor: string) => {
-      const wrapper = document.createElement("div");
-      wrapper.style.width = `${size}px`;
-      wrapper.style.height = `${size}px`;
-      wrapper.style.position = "relative";
-      wrapper.style.overflow = "visible";
-      wrapper.style.cursor = "pointer";
+              return (
+                <Marker
+                  key={signal.id}
+                  coordinates={signal.coordinates}
+                  onClick={() => onSignalClick(signal, "genz")}
+                  style={{ cursor: "pointer" }}
+                >
+                  <circle
+                    r={r * 2}
+                    fill={GENZ_COLOR}
+                    opacity={dimmed ? 0 : 0.15}
+                  />
+                  <circle
+                    r={r}
+                    fill={GENZ_COLOR}
+                    stroke={isSelected ? "#ffffff" : GENZ_COLOR}
+                    strokeWidth={isSelected ? 2 * dotScale : 1 * dotScale}
+                    opacity={dimmed ? 0.25 : 1}
+                    style={{ transition: "opacity 0.3s" }}
+                  />
+                  {signal.isJapan && (
+                    <text
+                      textAnchor="middle"
+                      y={-r - 4 * dotScale}
+                      style={{
+                        fontSize: `${10 * dotScale}px`,
+                        pointerEvents: "none",
+                      }}
+                    >
+                      🇯🇵
+                    </text>
+                  )}
+                </Marker>
+              );
+            })}
+        </ZoomableGroup>
+      </ComposableMap>
+    </div>
+  );
+});
 
-      const dot = document.createElement("div");
-      dot.style.width = "100%";
-      dot.style.height = "100%";
-      dot.style.borderRadius = "50%";
-      dot.style.backgroundColor = color;
-      dot.style.border = `2px solid ${borderColor}`;
-      dot.style.opacity = dimmed ? "0.3" : "1";
-      dot.style.boxShadow = dimmed ? "none" : glowColor;
-      dot.style.transition = "transform 0.15s, opacity 0.3s";
-      dot.style.transformOrigin = "center center";
-
-      wrapper.appendChild(dot);
-      return { wrapper, dot };
-    };
-
-    if (mode === "resilience") {
-      const filtered = SIGNALS.filter((s) => activeDomains.includes(s.domain));
-
-      filtered.forEach((signal) => {
-        const domain = DOMAINS.find((d) => d.id === signal.domain);
-        const color = domain?.color || "hsl(38, 90%, 55%)";
-        const domainLabel = domain?.label || signal.domain;
-        const relevant = selectedCompany ? isRelevantToCompany(`${signal.title} ${signal.description}`, selectedCompany) : false;
-        const dimmed = !!(selectedCompany && !relevant && !signal.isJapan);
-        const size = signal.isJapan ? 18 : relevant ? 18 : 12 + signal.intensity;
-
-        const bgColor = signal.isJapan ? "hsl(226, 89%, 53%)" : color;
-        const borderColor = signal.isJapan ? "hsl(226, 89%, 65%)" : color;
-        const glow = signal.isJapan
-          ? "0 0 12px hsla(226, 89%, 53%, 0.6)"
-          : relevant
-            ? `0 0 14px ${color.replace(")", ", 0.7)")}`
-            : `0 0 8px ${color.replace(")", ", 0.4)")}`;
-
-        const { wrapper: markerEl, dot } = createMarkerElements(size, bgColor, borderColor, dimmed, glow);
-
-        markerEl.addEventListener("mouseenter", () => {
-          dot.style.transform = "scale(1.3)";
-          showTooltipOnMarker(markerEl, buildTooltipHtml(signal.title, signal.location, signal.description, domainLabel, color, signal.isJapan));
-        });
-
-        markerEl.addEventListener("mouseleave", () => {
-          dot.style.transform = "scale(1)";
-          removeHoverTooltip();
-        });
-
-        const marker = new maplibregl.Marker({ element: markerEl, anchor: "center" }).setLngLat(signal.coordinates).addTo(map);
-
-        markerEl.addEventListener("click", (e) => {
-          e.stopPropagation();
-          removeHoverTooltip();
-          if (clickPopupRef.current) { clickPopupRef.current.remove(); clickPopupRef.current = null; }
-
-          const mindsetText = signal.mindsetRelevance[activeMindset];
-          const popup = new maplibregl.Popup({ offset: [0, -(size / 2 + 6)], maxWidth: "320px", anchor: "bottom" })
-            .setLngLat(signal.coordinates)
-            .setHTML(`
-              <div style="font-family:'Noto Sans JP',system-ui,sans-serif;">
-                <div style="display:flex;align-items:center;gap:6px;margin-bottom:8px;">
-                  ${signal.isJapan ? '<span style="font-size:12px;">🇯🇵</span>' : ""}
-                  <strong style="font-size:14px;color:hsl(0,0%,100%);">${escapeHtml(signal.title)}</strong>
-                </div>
-                <p style="font-size:12px;color:hsl(220,10%,55%);margin:0 0 8px;">${escapeHtml(signal.location)}</p>
-                <p style="font-size:12px;color:hsl(0,0%,92%);margin:0 0 10px;line-height:1.5;">${escapeHtml(signal.description)}</p>
-                <div style="border-top:1px solid hsl(220,14%,18%);padding-top:8px;">
-                  <div style="font-size:10px;text-transform:uppercase;letter-spacing:0.5px;color:hsl(226,89%,53%);margin-bottom:4px;">Mindset Lens</div>
-                  <p style="font-size:11px;color:hsl(0,0%,92%);line-height:1.4;margin:0;">${escapeHtml(mindsetText)}</p>
-                </div>
-              </div>
-            `)
-            .addTo(map);
-          clickPopupRef.current = popup;
-        });
-
-        markersRef.current.push(marker);
-      });
-    } else {
-      const filtered = GENZ_SIGNALS.filter((s) => activeCategories.includes(s.category));
-
-      filtered.forEach((signal) => {
-        const cat = GENZ_CATEGORIES.find((c) => c.id === signal.category);
-        const catLabel = cat?.label || signal.category;
-        const relevant = selectedCompany ? isRelevantToCompany(`${signal.title} ${signal.description}`, selectedCompany) : false;
-        const dimmed = !!(selectedCompany && !relevant && !signal.isJapan);
-        const size = signal.isJapan ? 18 : relevant ? 18 : 12 + signal.intensity;
-
-        const borderColor = signal.isJapan ? "hsl(170, 70%, 60%)" : GENZ_COLOR;
-        const glow = signal.isJapan
-          ? "0 0 12px hsla(170, 70%, 48%, 0.6)"
-          : relevant
-            ? "0 0 14px hsla(170, 70%, 48%, 0.7)"
-            : "0 0 8px hsla(170, 70%, 48%, 0.4)";
-
-        const { wrapper: markerEl, dot } = createMarkerElements(size, GENZ_COLOR, borderColor, dimmed, glow);
-
-        markerEl.addEventListener("mouseenter", () => {
-          dot.style.transform = "scale(1.3)";
-          showTooltipOnMarker(markerEl, buildTooltipHtml(signal.title, signal.location, signal.description, catLabel, GENZ_COLOR, signal.isJapan));
-        });
-
-        markerEl.addEventListener("mouseleave", () => {
-          dot.style.transform = "scale(1)";
-          removeHoverTooltip();
-        });
-
-        const marker = new maplibregl.Marker({ element: markerEl, anchor: "center" }).setLngLat(signal.coordinates).addTo(map);
-
-        markerEl.addEventListener("click", (e) => {
-          e.stopPropagation();
-          removeHoverTooltip();
-          if (clickPopupRef.current) { clickPopupRef.current.remove(); clickPopupRef.current = null; }
-
-          const popup = new maplibregl.Popup({ offset: [0, -(size / 2 + 6)], maxWidth: "320px", anchor: "bottom" })
-            .setLngLat(signal.coordinates)
-            .setHTML(`
-              <div style="font-family:'Noto Sans JP',system-ui,sans-serif;">
-                <div style="display:flex;align-items:center;gap:6px;margin-bottom:8px;">
-                  ${signal.isJapan ? '<span style="font-size:12px;">🇯🇵</span>' : ""}
-                  <strong style="font-size:14px;color:hsl(0,0%,100%);">${escapeHtml(signal.title)}</strong>
-                </div>
-                <p style="font-size:12px;color:hsl(220,10%,55%);margin:0 0 8px;">${escapeHtml(signal.location)}</p>
-                <p style="font-size:12px;color:hsl(0,0%,92%);margin:0 0 10px;line-height:1.5;">${escapeHtml(signal.description)}</p>
-                <div style="border-top:1px solid hsl(220,14%,18%);padding-top:8px;">
-                  <div style="font-size:10px;text-transform:uppercase;letter-spacing:0.5px;color:hsl(170,70%,48%);margin-bottom:4px;">Japan Insight</div>
-                  <p style="font-size:11px;color:hsl(0,0%,92%);line-height:1.4;margin:0;">${escapeHtml(signal.insight)}</p>
-                </div>
-              </div>
-            `)
-            .addTo(map);
-          clickPopupRef.current = popup;
-        });
-
-        markersRef.current.push(marker);
-      });
-    }
-  }, [mode, activeDomains, activeMindset, activeCategories, selectedCompany, removeHoverTooltip, showTooltipOnMarker]);
-
-  return <div ref={containerRef} className="w-full h-full relative" />;
-};
+GlobalMap.displayName = "GlobalMap";
 
 export default GlobalMap;

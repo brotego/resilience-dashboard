@@ -1,6 +1,6 @@
-import { useState } from "react";
-import { DomainId, MindsetId } from "@/data/types";
-import { GenZCategoryId } from "@/data/genzTypes";
+import { useState, useCallback } from "react";
+import { DomainId, MindsetId, ResilienceSignal } from "@/data/types";
+import { GenZCategoryId, GenZSignal } from "@/data/genzTypes";
 import { CompanyId } from "@/data/companies";
 import ModeToggle from "./ModeToggle";
 import DomainSelector from "./DomainSelector";
@@ -20,7 +20,8 @@ const DashboardLayout = () => {
   const [activeDomains, setActiveDomains] = useState<DomainId[]>(["work"]);
   const [activeMindset, setActiveMindset] = useState<MindsetId>("cracks");
   const [activeCategories, setActiveCategories] = useState<GenZCategoryId[]>(["authenticity"]);
-  const [selectedCompany, setSelectedCompany] = useState<CompanyId | null>(null);
+  const [selectedCompany, setSelectedCompany] = useState<CompanyId | null>("mori_building");
+  const [selectedSignal, setSelectedSignal] = useState<ResilienceSignal | GenZSignal | null>(null);
 
   const toggleDomain = (id: DomainId) => {
     setActiveDomains((prev) =>
@@ -33,6 +34,14 @@ const DashboardLayout = () => {
       prev.includes(id) ? prev.filter((c) => c !== id) : [...prev, id]
     );
   };
+
+  const handleSignalClick = useCallback((signal: ResilienceSignal | GenZSignal, _mode: DashboardMode) => {
+    setSelectedSignal(signal);
+  }, []);
+
+  const handleClosePanel = useCallback(() => {
+    setSelectedSignal(null);
+  }, []);
 
   return (
     <div className="h-screen flex flex-col bg-background overflow-hidden">
@@ -69,6 +78,8 @@ const DashboardLayout = () => {
             activeMindset={activeMindset}
             activeCategories={activeCategories}
             selectedCompany={selectedCompany}
+            onSignalClick={handleSignalClick}
+            selectedSignalId={selectedSignal?.id || null}
           />
         </div>
 
@@ -80,6 +91,8 @@ const DashboardLayout = () => {
             activeMindset={activeMindset}
             activeCategories={activeCategories}
             selectedCompany={selectedCompany}
+            selectedSignal={selectedSignal}
+            onClose={handleClosePanel}
           />
         </div>
       </div>

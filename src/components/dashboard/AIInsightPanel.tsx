@@ -1,13 +1,12 @@
-import { useState, useEffect, useRef } from "react";
-import { DomainId, MindsetId } from "@/data/types";
-import { GenZCategoryId } from "@/data/genzTypes";
-import { DOMAINS, MINDSETS } from "@/data/domains";
+import { X, ChevronDown, ChevronUp } from "lucide-react";
+import { useState } from "react";
+import { DomainId, MindsetId, ResilienceSignal } from "@/data/types";
+import { GenZCategoryId, GenZSignal } from "@/data/genzTypes";
+import { DOMAINS } from "@/data/domains";
 import { GENZ_CATEGORIES } from "@/data/genzCategories";
 import { COMPANIES, CompanyId } from "@/data/companies";
-import { Skeleton } from "@/components/ui/skeleton";
-import { supabase } from "@/integrations/supabase/client";
+import { SIGNAL_INSIGHTS, getDefaultInsight, SignalInsight } from "@/data/signalInsights";
 import { DashboardMode } from "./DashboardLayout";
-import { ChevronDown, ChevronUp } from "lucide-react";
 
 interface Props {
   mode: DashboardMode;
@@ -15,51 +14,22 @@ interface Props {
   activeMindset: MindsetId;
   activeCategories: GenZCategoryId[];
   selectedCompany: CompanyId | null;
+  selectedSignal: ResilienceSignal | GenZSignal | null;
+  onClose: () => void;
 }
 
-interface StructuredInsight {
-  eventTitle: string;
-  source: string;
-  date: string;
-  location: string;
-  domainTags: string[];
-  patternTag: string;
-  genzTags: string[];
-  actions: string[];
-  companyNote: string;
-  risks: string[];
-  opportunities: string[];
-  globalContext: string;
-  genzSignal: string;
-  generationalContrast: string;
-}
-
-function parseInsight(raw: string): StructuredInsight {
-  const getSection = (label: string): string => {
-    const regex = new RegExp(`${label}[:\\s]*([\\s\\S]*?)(?=(?:EVENT_TITLE|SOURCE|DATE|LOCATION|DOMAIN_TAGS|PATTERN_TAG|GENZ_TAGS|ACTIONS|COMPANY_NOTE|RISKS|OPPORTUNITIES|GLOBAL_CONTEXT|GENZ_SIGNAL|GENERATIONAL_CONTRAST):|$)`, "i");
-    const match = raw.match(regex);
-    return match?.[1]?.trim() || "";
+const UrgencyBadge = ({ level }: { level: string }) => {
+  const colors: Record<string, string> = {
+    high: "bg-red-500/20 text-red-400 border-red-500/30",
+    medium: "bg-yellow-500/20 text-yellow-400 border-yellow-500/30",
+    low: "bg-green-500/20 text-green-400 border-green-500/30",
   };
-
-  const splitLines = (s: string) => s.split(/\n/).map(l => l.replace(/^[\d①②③④⑤.\-•]\s*/, "").trim()).filter(Boolean);
-
-  return {
-    eventTitle: getSection("EVENT_TITLE") || "Intelligence Brief",
-    source: getSection("SOURCE") || "Anchorstar Research",
-    date: getSection("DATE") || new Date().toLocaleDateString("en-US", { month: "short", year: "numeric" }),
-    location: getSection("LOCATION") || "Global",
-    domainTags: getSection("DOMAIN_TAGS").split(",").map(s => s.trim()).filter(Boolean),
-    patternTag: getSection("PATTERN_TAG") || "",
-    genzTags: getSection("GENZ_TAGS").split(",").map(s => s.trim()).filter(Boolean),
-    actions: splitLines(getSection("ACTIONS")).slice(0, 3),
-    companyNote: getSection("COMPANY_NOTE"),
-    risks: splitLines(getSection("RISKS")).slice(0, 1),
-    opportunities: splitLines(getSection("OPPORTUNITIES")).slice(0, 2),
-    globalContext: getSection("GLOBAL_CONTEXT"),
-    genzSignal: getSection("GENZ_SIGNAL"),
-    generationalContrast: getSection("GENERATIONAL_CONTRAST"),
-  };
-}
+  return (
+    <span className={`text-[10px] font-bold uppercase tracking-wider px-2.5 py-0.5 rounded-oval border ${colors[level] || colors.medium}`}>
+      {level} urgency
+    </span>
+  );
+};
 
 const Tag = ({ label, color }: { label: string; color: string }) => (
   <span
@@ -70,198 +40,195 @@ const Tag = ({ label, color }: { label: string; color: string }) => (
   </span>
 );
 
-const AIInsightPanel = ({ mode, activeDomains, activeMindset, activeCategories, selectedCompany }: Props) => {
-  const [insight, setInsight] = useState<StructuredInsight | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [contextOpen, setContextOpen] = useState(false);
-  const debounceRef = useRef<ReturnType<typeof setTimeout>>();
+const SectionHeader = ({ children, color = "text-primary" }: { children: React.ReactNode; color?: string }) => (
+  <h4 className={`text-xs font-bold uppercase tracking-wider ${color} mb-1.5`}>{children}</h4>
+);
 
-  const isResilience = mode === "resilience";
+const AIInsightPanel = ({
+  mode,
+  activeDomains,
+  activeMindset,
+  activeCategories,
+  selectedCompany,
+  selectedSignal,
+  onClose,
+}: Props) => {
+  const [contextOpen, setContextOpen] = useState(true);
+
   const company = selectedCompany ? COMPANIES.find((c) => c.id === selectedCompany) : null;
+  const isResilience = mode === "resilience";
 
-  const contextLabel = isResilience
-    ? `${activeDomains.map((d) => DOMAINS.find((x) => x.id === d)?.label).filter(Boolean).join(", ") || "No domain"} × ${MINDSETS.find((m) => m.id === activeMindset)?.label || ""}`
-    : `${activeCategories.map((c) => GENZ_CATEGORIES.find((x) => x.id === c)?.label).filter(Boolean).join(", ") || "No category"}`;
+  // No signal selected — show placeholder
+  if (!selectedSignal) {
+    return (
+      <div className="h-full flex flex-col bg-card border-l border-border">
+        <div className="px-4 py-3 border-b border-border">
+          <h3 className="text-sm font-bold uppercase tracking-wider text-primary">
+            Intelligence Panel
+          </h3>
+        </div>
+        <div className="flex-1 flex items-center justify-center px-6">
+          <div className="text-center space-y-2">
+            <div className="text-3xl">🗺️</div>
+            <p className="text-sm font-semibold text-foreground">Click a signal on the map</p>
+            <p className="text-xs text-muted-foreground leading-relaxed">
+              Select a dot to view its structured intelligence brief
+              {company ? ` tailored for ${company.name}` : ""}. 
+              {!company && " Choose a company from the lens for tailored insights."}
+            </p>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
-  const hasSelection = isResilience ? activeDomains.length > 0 : activeCategories.length > 0;
+  // Get insight data
+  const signalId = selectedSignal.id;
+  const companyId = selectedCompany || "mori_building";
+  const companyForInsight = COMPANIES.find((c) => c.id === companyId)!;
+  const insightKey = `${signalId}:${companyId}`;
+  
+  const domainOrCategory = isResilience 
+    ? DOMAINS.find((d) => d.id === (selectedSignal as ResilienceSignal).domain)
+    : GENZ_CATEGORIES.find((c) => c.id === (selectedSignal as GenZSignal).category);
+  
+  const insight: SignalInsight = SIGNAL_INSIGHTS[insightKey] 
+    || getDefaultInsight(
+      selectedSignal.title,
+      selectedSignal.description,
+      domainOrCategory?.label || "",
+      companyForInsight.name,
+    );
 
-  useEffect(() => {
-    if (!hasSelection) {
-      setInsight(null);
-      return;
-    }
-
-    if (debounceRef.current) clearTimeout(debounceRef.current);
-    debounceRef.current = setTimeout(async () => {
-      setLoading(true);
-      setError(null);
-      setInsight(null);
-      setContextOpen(false);
-
-      try {
-        const body = isResilience
-          ? { domains: activeDomains, mindset: activeMindset, mode: "resilience", company: selectedCompany }
-          : { categories: activeCategories, mode: "genz", company: selectedCompany };
-
-        const resp = await supabase.functions.invoke("ai-insight", { body });
-
-        if (resp.error) {
-          throw new Error(resp.error.message || "Failed to generate insight");
-        }
-
-        const raw = resp.data?.insight || "";
-        setInsight(parseInsight(raw));
-      } catch (e: any) {
-        console.error("AI Insight error:", e);
-        setError(e.message || "Failed to generate insight");
-      } finally {
-        setLoading(false);
-      }
-    }, 800);
-
-    return () => {
-      if (debounceRef.current) clearTimeout(debounceRef.current);
-    };
-  }, [mode, activeDomains.join(","), activeMindset, activeCategories.join(","), selectedCompany]);
+  const domainTags: string[] = [];
+  if (isResilience) {
+    const sig = selectedSignal as ResilienceSignal;
+    const d = DOMAINS.find((x) => x.id === sig.domain);
+    if (d) domainTags.push(d.label);
+  } else {
+    const sig = selectedSignal as GenZSignal;
+    const c = GENZ_CATEGORIES.find((x) => x.id === sig.category);
+    if (c) domainTags.push(c.label);
+  }
 
   const numberedIcon = (i: number) => ["①", "②", "③"][i] || `${i + 1}`;
 
   return (
     <div className="h-full flex flex-col bg-card border-l border-border">
-      <div className="px-4 py-3 border-b border-border">
-        <h3 className="text-xs font-bold uppercase tracking-wider text-primary">
-          {company ? `${company.name} Intel` : isResilience ? "Intelligence Brief" : "Gen Z Intel"}
-        </h3>
-        <p className="text-[11px] text-muted-foreground mt-0.5">{contextLabel}</p>
+      {/* Header */}
+      <div className="px-4 py-3 border-b border-border flex items-start justify-between gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
+          <UrgencyBadge level={insight.urgency} />
+        </div>
+        <button
+          onClick={onClose}
+          className="text-muted-foreground hover:text-foreground transition-colors p-0.5 shrink-0"
+        >
+          <X className="h-4 w-4" />
+        </button>
       </div>
-      <div className="flex-1 overflow-y-auto px-4 py-3 space-y-4">
-        {loading ? (
-          <div className="space-y-3">
-            <Skeleton className="h-5 w-3/4" />
-            <Skeleton className="h-3 w-full" />
-            <Skeleton className="h-3 w-5/6" />
-            <div className="flex gap-1.5 mt-2">
-              <Skeleton className="h-5 w-16 rounded-oval" />
-              <Skeleton className="h-5 w-20 rounded-oval" />
-              <Skeleton className="h-5 w-14 rounded-oval" />
-            </div>
-            <Skeleton className="h-4 w-full mt-3" />
-            <Skeleton className="h-4 w-4/5" />
-            <Skeleton className="h-4 w-full" />
-            <div className="flex items-center gap-2 mt-4">
-              <div className="h-2 w-2 rounded-full animate-pulse-glow bg-primary" />
-              <span className="text-xs text-muted-foreground">
-                {company ? `Analyzing for ${company.name}…` : "Generating intelligence…"}
-              </span>
-            </div>
+
+      {/* Scrollable content */}
+      <div className="flex-1 overflow-y-auto px-4 py-4 space-y-4">
+        {/* Event title */}
+        <h2 className="text-lg font-bold text-foreground leading-snug">{selectedSignal.title}</h2>
+
+        {/* Source line */}
+        <p className="text-[11px] text-muted-foreground">
+          {selectedSignal.location} · Anchorstar Research · {new Date().toLocaleDateString("en-US", { month: "short", year: "numeric" })}
+        </p>
+
+        <div className="border-t border-border" />
+
+        {/* Tags */}
+        <div className="flex flex-wrap gap-1.5">
+          {domainTags.map((t) => (
+            <Tag key={t} label={t} color="#1241ea" />
+          ))}
+          {insight.patternTag && <Tag label={insight.patternTag} color="hsl(220, 14%, 30%)" />}
+          {insight.genzArchetypes.map((t) => (
+            <Tag key={t} label={t} color="#1ab5a5" />
+          ))}
+        </div>
+
+        <div className="border-t border-border" />
+
+        {/* Why This Matters Globally */}
+        <div>
+          <SectionHeader>Why This Matters Globally</SectionHeader>
+          <p className="text-[12px] text-foreground/80 leading-relaxed">{insight.globalContext}</p>
+        </div>
+
+        {/* Gen Z Signal */}
+        <div>
+          <SectionHeader color="text-genz">Gen Z Signal</SectionHeader>
+          <p className="text-[12px] text-foreground/80 leading-relaxed">{insight.genzSignal}</p>
+        </div>
+
+        {/* Generational Contrast */}
+        <div>
+          <SectionHeader color="text-muted-foreground">Generational Contrast</SectionHeader>
+          <p className="text-[12px] text-foreground/70 leading-relaxed italic">{insight.generationalContrast}</p>
+        </div>
+
+        <div className="border-t border-border" />
+
+        {/* Company Implication */}
+        <div className="rounded-xl bg-primary/10 border border-primary/20 p-3">
+          <h4 className="text-xs font-bold uppercase tracking-wider text-primary mb-1.5">
+            For {companyForInsight.name}
+          </h4>
+          <p className="text-[12px] text-foreground leading-relaxed">{insight.companyImplication}</p>
+        </div>
+
+        {/* Risks & Opportunities side by side */}
+        <div className="grid grid-cols-2 gap-3">
+          <div>
+            <SectionHeader color="text-red-400">Risks</SectionHeader>
+            {insight.risks.map((r, i) => (
+              <div key={i} className="flex items-start gap-1.5 mb-1">
+                <span className="mt-1.5 h-1.5 w-1.5 rounded-full bg-red-400 shrink-0" />
+                <p className="text-[11px] text-foreground/70 leading-snug">{r}</p>
+              </div>
+            ))}
           </div>
-        ) : error ? (
-          <div className="text-xs text-destructive bg-destructive/10 border border-destructive/20 rounded-lg p-3">
-            {error}
+          <div>
+            <SectionHeader color="text-green-400">Opportunities</SectionHeader>
+            {insight.opportunities.map((o, i) => (
+              <div key={i} className="flex items-start gap-1.5 mb-1">
+                <span className="mt-1.5 h-1.5 w-1.5 rounded-full bg-green-400 shrink-0" />
+                <p className="text-[11px] text-foreground/70 leading-snug">{o}</p>
+              </div>
+            ))}
           </div>
-        ) : !insight ? (
-          <p className="text-sm text-muted-foreground">
-            {isResilience ? "Select at least one domain to generate intelligence." : "Select at least one Gen Z category to generate insights."}
-          </p>
-        ) : (
-          <>
-            {/* Event Title */}
-            <h2 className="text-base font-bold text-foreground leading-snug">{insight.eventTitle}</h2>
+        </div>
 
-            {/* Source + Date + Location */}
-            <p className="text-[11px] text-muted-foreground">
-              {[insight.source, insight.date, insight.location].filter(Boolean).join(" · ")}
-            </p>
-
-            {/* Tags */}
-            <div className="flex flex-wrap gap-1.5">
-              {insight.domainTags.map((t) => (
-                <Tag key={t} label={t} color="hsl(226, 89%, 53%)" />
-              ))}
-              {insight.patternTag && <Tag label={insight.patternTag} color="hsl(220, 14%, 30%)" />}
-              {insight.genzTags.map((t) => (
-                <Tag key={t} label={t} color="hsl(170, 55%, 40%)" />
-              ))}
-            </div>
-
-            {/* Recommended Actions */}
-            <div className="rounded-xl bg-accent/10 border border-accent/20 p-3">
-              <h4 className="text-xs font-bold uppercase tracking-wider text-accent mb-2">Recommended Actions</h4>
-              <div className="space-y-1.5">
-                {insight.actions.map((a, i) => (
-                  <div key={i} className="flex gap-2 text-[12px] text-foreground leading-snug">
-                    <span className="text-accent font-bold shrink-0">{numberedIcon(i)}</span>
-                    <span>{a}</span>
-                  </div>
-                ))}
+        {/* Recommended Actions */}
+        <div className="rounded-xl bg-accent/10 border border-accent/20 p-3">
+          <h4 className="text-xs font-bold uppercase tracking-wider text-accent mb-2">Recommended Actions</h4>
+          <div className="space-y-2">
+            {insight.actions.map((a, i) => (
+              <div key={i} className="flex gap-2 text-[12px] text-foreground leading-snug">
+                <span className="text-accent font-bold shrink-0">{numberedIcon(i)}</span>
+                <span>{a}</span>
               </div>
-            </div>
+            ))}
+          </div>
+        </div>
 
-            {/* Company Note */}
-            {insight.companyNote && company && (
-              <div className="rounded-xl bg-primary/10 border border-primary/20 p-3">
-                <h4 className="text-xs font-bold uppercase tracking-wider text-primary mb-1">For {company.name}</h4>
-                <p className="text-[12px] text-foreground leading-snug">{insight.companyNote}</p>
-              </div>
-            )}
-
-            {/* Risks */}
-            {insight.risks.length > 0 && (
-              <div>
-                <h4 className="text-xs font-bold uppercase tracking-wider text-destructive mb-1">Risks</h4>
-                {insight.risks.map((r, i) => (
-                  <p key={i} className="text-[12px] text-foreground/80 leading-snug">• {r}</p>
-                ))}
-              </div>
-            )}
-
-            {/* Opportunities */}
-            {insight.opportunities.length > 0 && (
-              <div>
-                <h4 className="text-xs font-bold uppercase tracking-wider text-accent mb-1">Opportunities</h4>
-                {insight.opportunities.map((o, i) => (
-                  <p key={i} className="text-[12px] text-foreground/80 leading-snug">• {o}</p>
-                ))}
-              </div>
-            )}
-
-            {/* Collapsible Context */}
-            {(insight.globalContext || insight.genzSignal || insight.generationalContrast) && (
-              <div className="border-t border-border pt-2">
-                <button
-                  onClick={() => setContextOpen(!contextOpen)}
-                  className="flex items-center gap-1 text-[11px] font-semibold text-muted-foreground hover:text-foreground transition-colors w-full"
-                >
-                  {contextOpen ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
-                  Deeper Context
-                </button>
-                {contextOpen && (
-                  <div className="mt-2 space-y-2.5">
-                    {insight.globalContext && (
-                      <div>
-                        <h5 className="text-[10px] font-bold uppercase tracking-wider text-primary mb-0.5">Why This Matters Globally</h5>
-                        <p className="text-[11px] text-foreground/70 leading-snug">{insight.globalContext}</p>
-                      </div>
-                    )}
-                    {insight.genzSignal && (
-                      <div>
-                        <h5 className="text-[10px] font-bold uppercase tracking-wider text-genz mb-0.5">Gen Z Signal</h5>
-                        <p className="text-[11px] text-foreground/70 leading-snug">{insight.genzSignal}</p>
-                      </div>
-                    )}
-                    {insight.generationalContrast && (
-                      <div>
-                        <h5 className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground mb-0.5">Generational Contrast</h5>
-                        <p className="text-[11px] text-foreground/70 leading-snug">{insight.generationalContrast}</p>
-                      </div>
-                    )}
-                  </div>
-                )}
-              </div>
-            )}
-          </>
-        )}
+        {/* Signal description (collapsible) */}
+        <div className="border-t border-border pt-2">
+          <button
+            onClick={() => setContextOpen(!contextOpen)}
+            className="flex items-center gap-1 text-[11px] font-semibold text-muted-foreground hover:text-foreground transition-colors w-full"
+          >
+            {contextOpen ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
+            Original Signal
+          </button>
+          {contextOpen && (
+            <p className="mt-2 text-[11px] text-foreground/60 leading-relaxed">{selectedSignal.description}</p>
+          )}
+        </div>
       </div>
     </div>
   );
