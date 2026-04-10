@@ -356,10 +356,7 @@ const GlobalMap = memo(({
           minZoom={MIN_ZOOM}
           maxZoom={MAX_ZOOM}
           translateExtent={[[-200, -100], [1200, 700]]}
-          filterZoomEvent={(evt: any) => {
-            if (evt?.type === "wheel") return false;
-            return true;
-          }}
+          filterZoomEvent={() => true}
         >
           <Geographies geography={GEO_URL}>
             {({ geographies }) => (
