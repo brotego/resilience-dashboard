@@ -39,19 +39,6 @@ const COMPANY_INFO: Record<string, { name: string; sector: string; context: stri
   mori_building: { name: "Mori Building", sector: "Real Estate & Urban Development", context: "Tokyo-based urban developer behind Roppongi Hills, Toranomon Hills, Azabudai Hills. Key interests: vertical garden cities, sustainable urbanism, community infrastructure, smart cities, multigenerational design, tourism, culture." },
 };
 
-function stripMarkdown(text: string): string {
-  return text
-    .replace(/(\*\*|__)(.*?)\1/g, "$2")
-    .replace(/(\*|_)(.*?)\1/g, "$2")
-    .replace(/\*+/g, "")
-    .replace(/^#+\s+(.*$)/gm, "$1")
-    .replace(/^\s*[-*+]\s+(.*$)/gm, "$1")
-    .replace(/`([^`]+)`/g, "$1")
-    .replace(/\[([^\]]*)\]\([^)]*\)/g, "$1")
-    .replace(/\n{3,}/g, "\n\n")
-    .trim();
-}
-
 serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
@@ -66,29 +53,39 @@ serve(async (req) => {
 
     const companyInfo = companyId ? COMPANY_INFO[companyId] : null;
     const companyContext = companyInfo
-      ? `\n\nIMPORTANT: You are speaking DIRECTLY to the CEO of ${companyInfo.name} (${companyInfo.sector}). ${companyInfo.context}\nEvery insight must be reframed through what matters most to ${companyInfo.name}. Be specific about how trends affect their business, their competitive position, and their strategic options.`
+      ? `\n\nYou are briefing the CEO of ${companyInfo.name} (${companyInfo.sector}). ${companyInfo.context}\nFrame every insight through what matters most to ${companyInfo.name}.`
       : "";
 
     const formatRules = `
 
-CRITICAL FORMAT RULES:
-You MUST structure your response in EXACTLY this format with these EXACT labels:
+CRITICAL: You MUST output in EXACTLY this labeled format. Each label on its own line followed by the content. No markdown, no bold, no bullets, no dashes, no hashtags. Just clean plain text.
 
-GLOBAL SIGNAL
-Two to three short sentences on what is happening worldwide.
-
-JAPAN CONTEXT
-Two to three short sentences on how this manifests in Japan.
-
-CEO IMPLICATION
-One to two sentences, direct and actionable.
+EVENT_TITLE: A compelling 5-8 word title for this intelligence event
+SOURCE: Name a plausible research source (e.g. McKinsey Global Institute, Nikkei Asia, WHO)
+DATE: ${new Date().toLocaleDateString("en-US", { month: "short", year: "numeric" })}
+LOCATION: Primary geographic focus (city or region)
+DOMAIN_TAGS: 1-3 relevant domain tags, comma separated (e.g. Community, Sustainability)
+PATTERN_TAG: One pattern label (e.g. Structural Shift, Early Signal, Accelerating Trend)
+GENZ_TAGS: 0-2 Gen Z archetype tags if relevant, comma separated (e.g. Digital Native, Climate Activist)
+ACTIONS:
+1 First recommended action (one sentence)
+2 Second recommended action (one sentence)
+3 Third recommended action (one sentence)
+COMPANY_NOTE: ${companyInfo ? `1-2 sentences on what this means specifically for ${companyInfo.name}` : "Skip this section"}
+RISKS:
+One key risk in one sentence
+OPPORTUNITIES:
+First opportunity in one sentence
+Second opportunity in one sentence
+GLOBAL_CONTEXT: Two sentences on why this matters at a global scale
+GENZ_SIGNAL: Two sentences on how Gen Z specifically responds to or drives this trend
+GENERATIONAL_CONTRAST: One sentence comparing Gen Z vs older generational response
 
 Rules:
-- Use ONLY the three labels above in plain uppercase: GLOBAL SIGNAL, JAPAN CONTEXT, CEO IMPLICATION.
-- Put a blank line before each label.
-- No asterisks. No bold. No markdown. No dashes. No bullets. No numbered lists. No hashtags. No special formatting of any kind.
-- Just clean plain sentences. Short and punchy. Every word must earn its place.
-- Keep the entire response under 120 words total.`;
+- No asterisks, no markdown, no formatting. Plain text only.
+- Keep entire response under 250 words.
+- Be specific: name companies, cite numbers, reference real markets.
+- Sound like a seasoned strategy consultant, not an AI.`;
 
     let systemPrompt: string;
     let userPrompt: string;
@@ -98,13 +95,9 @@ Rules:
         .map((c: string) => GENZ_CATEGORY_LABELS[c] || c)
         .join(", ");
 
-      systemPrompt = `You are a senior strategy analyst at Anchorstar Consulting briefing CEOs at Mori Building 49F in Tokyo. You specialize in Gen Z consumer behavior and its implications for Japanese business.
+      systemPrompt = `You are a senior strategy analyst at Anchorstar Consulting briefing CEOs at Mori Building 49F in Tokyo. You specialize in Gen Z consumer behavior and its implications for Japanese business.${companyContext}${formatRules}`;
 
-Write like a seasoned McKinsey partner in a private boardroom conversation. Direct. Sharp. No filler. Name specific companies, markets, and numbers. Sound like you have been in the field, not like you read a report.${companyContext}${formatRules}`;
-
-      userPrompt = `Brief me on Gen Z consumer signals in: ${categories}.${companyInfo ? ` Focus on ${companyInfo.name}.` : ""}
-
-Use the exact three-section format: GLOBAL SIGNAL, JAPAN CONTEXT, CEO IMPLICATION. No markdown. No asterisks. Plain text only.`;
+      userPrompt = `Generate a structured intelligence brief on Gen Z signals in: ${categories}.${companyInfo ? ` Focus on ${companyInfo.name}.` : ""} Use the exact labeled format specified.`;
     } else {
       const { domains, mindset } = body;
       const domainNames = (domains as string[])
@@ -112,13 +105,9 @@ Use the exact three-section format: GLOBAL SIGNAL, JAPAN CONTEXT, CEO IMPLICATIO
         .join(", ");
       const mindsetName = MINDSET_LABELS[mindset] || mindset;
 
-      systemPrompt = `You are a senior strategy analyst at Anchorstar Consulting briefing CEOs at Mori Building 49F in Tokyo. Your framework is Flourishing Through Resilience — resilience as active growth through disruption, not just survival.
+      systemPrompt = `You are a senior strategy analyst at Anchorstar Consulting briefing CEOs at Mori Building 49F in Tokyo. Your framework is Flourishing Through Resilience — resilience as active growth through disruption.${companyContext}${formatRules}`;
 
-Write like a seasoned McKinsey partner in a private boardroom conversation. Direct. Sharp. No filler. Name specific companies, markets, and numbers. Sound like you have been in the field, not like you read a report.${companyContext}${formatRules}`;
-
-      userPrompt = `Brief me on global resilience signals. Domains: ${domainNames}. Mindset lens: ${mindsetName}.${companyInfo ? ` Focus on ${companyInfo.name}.` : ""}
-
-Use the exact three-section format: GLOBAL SIGNAL, JAPAN CONTEXT, CEO IMPLICATION. No markdown. No asterisks. Plain text only.`;
+      userPrompt = `Generate a structured intelligence brief. Domains: ${domainNames}. Mindset lens: ${mindsetName}.${companyInfo ? ` Focus on ${companyInfo.name}.` : ""} Use the exact labeled format specified.`;
     }
 
     const response = await fetch(
@@ -159,8 +148,7 @@ Use the exact three-section format: GLOBAL SIGNAL, JAPAN CONTEXT, CEO IMPLICATIO
     }
 
     const data = await response.json();
-    const rawInsight = data.choices?.[0]?.message?.content || "Unable to generate insight.";
-    const insight = stripMarkdown(rawInsight);
+    const insight = data.choices?.[0]?.message?.content || "Unable to generate insight.";
 
     return new Response(JSON.stringify({ insight }), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
