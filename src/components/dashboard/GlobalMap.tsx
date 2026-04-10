@@ -11,12 +11,14 @@ import { SIGNALS } from "@/data/signals";
 import { GENZ_SIGNALS } from "@/data/genzSignals";
 import { DOMAINS } from "@/data/domains";
 import { COMPANIES, CompanyId } from "@/data/companies";
+import { WORLD_CAPITALS } from "@/data/capitals";
 import { DomainId, MindsetId, ResilienceSignal } from "@/data/types";
 import { GenZCategoryId, GenZSignal } from "@/data/genzTypes";
 import { DashboardMode } from "./DashboardLayout";
 import { Plus, Minus } from "lucide-react";
 
-const GEO_URL = "https://cdn.jsdelivr.net/npm/world-atlas@2/countries-110m.json";
+// Higher resolution TopoJSON for smoother borders when zoomed
+const GEO_URL = "https://cdn.jsdelivr.net/npm/world-atlas@2/countries-50m.json";
 
 interface Props {
   mode: DashboardMode;
@@ -32,7 +34,7 @@ interface Props {
 
 const GENZ_COLOR = "#1ab5a5";
 const MIN_ZOOM = 1;
-const MAX_ZOOM = 20;
+const MAX_ZOOM = 8; // Capped — SVG has no tile detail beyond this
 const ZOOM_STEP = 1.18;
 
 const LNG_BOUNDS: [number, number] = [-180, 180];
@@ -156,19 +158,25 @@ function getMinZoomForTier(tier: number): number {
   }
 }
 
+function getCapitalMinZoom(tier: 1 | 2 | 3): number {
+  switch (tier) {
+    case 1: return 3;
+    case 2: return 4;
+    case 3: return 5.5;
+  }
+}
+
 function getShortTitle(title: string): string {
   const words = title.split(" ");
   if (words.length <= 4) return title;
   return words.slice(0, 4).join(" ") + "…";
 }
 
-/** Calculate zoom level to fit a country's bounding box */
 function calcCountryZoom(geo: any): number {
   const bounds = geoBounds(geo);
   const lngSpan = Math.abs(bounds[1][0] - bounds[0][0]);
   const latSpan = Math.abs(bounds[1][1] - bounds[0][1]);
   const maxSpan = Math.max(lngSpan, latSpan);
-  // Map projection is ~280deg wide at zoom 1, we want the country to fill ~60% of viewport
   const targetZoom = Math.min(MAX_ZOOM, Math.max(2, 120 / maxSpan));
   return targetZoom;
 }
@@ -233,7 +241,6 @@ const GlobalMap = memo(({
     animFrameRef.current = requestAnimationFrame(step);
   }, []);
 
-  // Expose zoom-to-country method
   const zoomToCountry = useCallback((geo: any) => {
     const centroid = geoCentroid(geo) as [number, number];
     const zoom = calcCountryZoom(geo);
@@ -247,13 +254,11 @@ const GlobalMap = memo(({
     animateToPosition(target, 0.06);
   }, [animateToPosition]);
 
-  // Store refs for external access
   const zoomToCountryRef = useRef(zoomToCountry);
   const zoomToGlobalRef = useRef(zoomToGlobal);
   zoomToCountryRef.current = zoomToCountry;
   zoomToGlobalRef.current = zoomToGlobal;
 
-  // When selectedCountry is cleared externally (e.g. "Back to Global"), zoom out
   const prevSelectedCountry = useRef(selectedCountry);
   useEffect(() => {
     if (prevSelectedCountry.current && !selectedCountry) {
@@ -337,6 +342,8 @@ const GlobalMap = memo(({
 
   const dotScale = 1 / liveZoom;
   const labelFontSize = Math.max(3, 7 * dotScale);
+  const capitalFontSize = Math.max(2.5, 5.5 * dotScale);
+  const capitalDotR = Math.max(0.8, 1.5 * dotScale);
 
   const resilienceFiltered = mode === "resilience"
     ? SIGNALS.filter((s) => activeDomains.includes(s.domain))
@@ -412,7 +419,7 @@ const GlobalMap = memo(({
                       onClick={() => handleCountryClickCb(geo)}
                       fill={isSelected ? "#1a2a35" : "hsl(220, 14%, 16%)"}
                       stroke={isSelected ? "rgba(18, 65, 234, 0.6)" : "hsl(220, 14%, 22%)"}
-                      strokeWidth={isSelected ? 1.5 / currentZoom : 0.5}
+                      strokeWidth={isSelected ? 1.5 / currentZoom : 0.5 / Math.max(1, currentZoom * 0.5)}
                       style={{
                         default: { outline: "none", cursor: "pointer" },
                         hover: { fill: isSelected ? "#1a2a35" : "hsl(220, 14%, 22%)", outline: "none", cursor: "pointer" },
@@ -421,7 +428,8 @@ const GlobalMap = memo(({
                     />
                   );
                 })}
-                {/* Country labels */}
+
+                {/* Country labels — progressive reveal with collision detection */}
                 {(() => {
                   const candidates = geographies
                     .map((geo) => {
@@ -495,6 +503,42 @@ const GlobalMap = memo(({
               </>
             )}
           </Geographies>
+
+          {/* Capital city markers — appear at zoom 3+ */}
+          {currentZoom >= 3 && WORLD_CAPITALS.map((capital) => {
+            const minZoom = getCapitalMinZoom(capital.tier);
+            if (currentZoom < minZoom) return null;
+
+            const fadeProgress = Math.min(1, (currentZoom - minZoom) / 1);
+
+            return (
+              <Marker key={`cap-${capital.name}`} coordinates={capital.coordinates}>
+                <circle
+                  r={capitalDotR}
+                  fill="hsl(220, 10%, 55%)"
+                  opacity={fadeProgress * 0.8}
+                />
+                <text
+                  textAnchor="start"
+                  x={capitalDotR + 1.5 * dotScale}
+                  dy="0.3em"
+                  style={{
+                    fontFamily: "'Noto Sans JP', system-ui, sans-serif",
+                    fill: "hsl(220, 10%, 55%)",
+                    fontSize: `${capitalFontSize}px`,
+                    fontWeight: 400,
+                    fontStyle: "italic",
+                    pointerEvents: "none",
+                    userSelect: "none",
+                    opacity: fadeProgress * 0.7,
+                    transition: "opacity 0.3s",
+                  }}
+                >
+                  {capital.name}
+                </text>
+              </Marker>
+            );
+          })}
 
           {/* Resilience signals */}
           {mode === "resilience" &&
