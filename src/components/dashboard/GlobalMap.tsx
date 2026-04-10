@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef, memo, useMemo } from "react";
+import { useState, useCallback, useRef, memo } from "react";
 import {
   ComposableMap,
   ZoomableGroup,
@@ -35,6 +35,20 @@ const MIN_ZOOM = 1.3;
 const MAX_ZOOM = 20;
 const ZOOM_STEP = 1.4;
 
+// Pan boundaries (lng/lat) — prevents panning beyond Earth
+const LNG_BOUNDS: [number, number] = [-180, 180];
+const LAT_BOUNDS: [number, number] = [-60, 85];
+
+function clampCoords(coords: [number, number], zoom: number): [number, number] {
+  // At higher zoom the visible area is smaller, so allow more panning range
+  const lngRange = 180 / zoom;
+  const latRange = 70 / zoom;
+  return [
+    Math.max(LNG_BOUNDS[0] + lngRange, Math.min(LNG_BOUNDS[1] - lngRange, coords[0])),
+    Math.max(LAT_BOUNDS[0] + latRange, Math.min(LAT_BOUNDS[1] - latRange, coords[1])),
+  ];
+}
+
 function isRelevantToCompany(text: string, companyId: CompanyId): boolean {
   const company = COMPANIES.find((c) => c.id === companyId);
   if (!company) return false;
@@ -42,7 +56,6 @@ function isRelevantToCompany(text: string, companyId: CompanyId): boolean {
   return company.keywords.some((kw) => lower.includes(kw.toLowerCase()));
 }
 
-// Country name aliases for matching signals to countries
 const COUNTRY_ALIASES: Record<string, string[]> = {
   "United States of America": ["USA", "United States", "US", "San Francisco", "New York", "Los Angeles", "Chicago"],
   "United Kingdom": ["UK", "London", "England", "Britain"],
@@ -76,7 +89,6 @@ const COUNTRY_ALIASES: Record<string, string[]> = {
   "Peru": ["Lima"],
 };
 
-// Manual centroid overrides for countries whose computed centroid is off
 const LABEL_OVERRIDES: Record<string, [number, number]> = {
   "United States of America": [-98, 39],
   "Russia": [100, 60],
@@ -89,7 +101,6 @@ const LABEL_OVERRIDES: Record<string, [number, number]> = {
   "New Zealand": [174, -41],
 };
 
-// Short display names
 const DISPLAY_NAMES: Record<string, string> = {
   "United States of America": "United States",
   "United Kingdom": "UK",
@@ -101,8 +112,54 @@ const DISPLAY_NAMES: Record<string, string> = {
   "Czech Republic": "Czech Rep.",
   "Republic of the Congo": "Congo",
   "Democratic Republic of the Congo": "DR Congo",
-  "S. Sudan": "S. Sudan",
 };
+
+// Tier system: countries appear at different zoom levels based on size/importance
+// Tier 1 (zoom >= 1.3): Major countries always visible
+// Tier 2 (zoom >= 2): Medium countries
+// Tier 3 (zoom >= 3.5): Smaller countries
+// Tier 4 (zoom >= 6): Tiny countries
+const COUNTRY_TIERS: Record<string, number> = {
+  // Tier 1 — always visible
+  "Russia": 1, "China": 1, "United States of America": 1, "Canada": 1,
+  "Brazil": 1, "Australia": 1, "India": 1, "Japan": 1,
+  // Tier 2
+  "Argentina": 2, "Mexico": 2, "Indonesia": 2, "Saudi Arabia": 2,
+  "Germany": 2, "France": 2, "United Kingdom": 2, "Turkey": 2,
+  "Iran": 2, "Egypt": 2, "South Africa": 2, "Nigeria": 2,
+  "Kazakhstan": 2, "Algeria": 2, "Libya": 2, "Sudan": 2,
+  "Colombia": 2, "Peru": 2, "Mongolia": 2, "Pakistan": 2,
+  "Congo": 2, "Dem. Rep. Congo": 2, "Democratic Republic of the Congo": 2,
+  "Ethiopia": 2, "Angola": 2, "Mali": 2, "Niger": 2,
+  "Chad": 2, "Tanzania": 2, "Mozambique": 2, "Zambia": 2,
+  "Myanmar": 2, "Afghanistan": 2, "Somalia": 2, "Madagascar": 2,
+  "Kenya": 2, "Morocco": 2,
+  // Tier 3
+  "Spain": 3, "Italy": 3, "Poland": 3, "Ukraine": 3, "Romania": 3,
+  "Sweden": 3, "Norway": 3, "Finland": 3, "Thailand": 3, "Vietnam": 3,
+  "Philippines": 3, "Malaysia": 3, "South Korea": 3, "Iraq": 3,
+  "Chile": 3, "Venezuela": 3, "Ecuador": 3, "Bolivia": 3,
+  "Paraguay": 3, "Uruguay": 3, "Cuba": 3, "New Zealand": 3,
+  "Ghana": 3, "Ivory Coast": 3, "Côte d'Ivoire": 3, "Cameroon": 3,
+  "Zimbabwe": 3, "Botswana": 3, "Namibia": 3, "Senegal": 3,
+  "Guinea": 3, "Uganda": 3, "Uzbekistan": 3, "Turkmenistan": 3,
+  "Bangladesh": 3, "Nepal": 3, "Sri Lanka": 3, "Laos": 3, "Cambodia": 3,
+  "Papua New Guinea": 3, "Gabon": 3,
+  // Tier 4 — everything else
+};
+
+function getCountryTier(name: string): number {
+  return COUNTRY_TIERS[name] || 4;
+}
+
+function getMinZoomForTier(tier: number): number {
+  switch (tier) {
+    case 1: return 1.3;
+    case 2: return 2;
+    case 3: return 3.5;
+    default: return 6;
+  }
+}
 
 function getShortTitle(title: string): string {
   const words = title.split(" ");
@@ -128,25 +185,35 @@ const GlobalMap = memo(({
   const containerRef = useRef<HTMLDivElement>(null);
 
   const handleMoveEnd = useCallback((pos: { coordinates: [number, number]; zoom: number }) => {
-    setPosition(pos);
+    const clamped = clampCoords(pos.coordinates, pos.zoom);
+    setPosition({ coordinates: clamped, zoom: pos.zoom });
   }, []);
 
   const clampZoom = (z: number) => Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, z));
 
   const handleWheel = useCallback((e: React.WheelEvent) => {
     e.preventDefault();
-    setPosition((prev) => ({
-      ...prev,
-      zoom: clampZoom(prev.zoom * (e.deltaY < 0 ? 1.08 : 0.92)),
-    }));
+    setPosition((prev) => {
+      const newZoom = clampZoom(prev.zoom * (e.deltaY < 0 ? 1.08 : 0.92));
+      return {
+        coordinates: clampCoords(prev.coordinates, newZoom),
+        zoom: newZoom,
+      };
+    });
   }, []);
 
   const zoomIn = useCallback(() => {
-    setPosition((prev) => ({ ...prev, zoom: clampZoom(prev.zoom * ZOOM_STEP) }));
+    setPosition((prev) => {
+      const newZoom = clampZoom(prev.zoom * ZOOM_STEP);
+      return { coordinates: clampCoords(prev.coordinates, newZoom), zoom: newZoom };
+    });
   }, []);
 
   const zoomOut = useCallback(() => {
-    setPosition((prev) => ({ ...prev, zoom: clampZoom(prev.zoom / ZOOM_STEP) }));
+    setPosition((prev) => {
+      const newZoom = clampZoom(prev.zoom / ZOOM_STEP);
+      return { coordinates: clampCoords(prev.coordinates, newZoom), zoom: newZoom };
+    });
   }, []);
 
   const dotScale = 1 / position.zoom;
@@ -163,6 +230,8 @@ const GlobalMap = memo(({
     const name = geo.properties?.name || geo.properties?.NAME;
     if (name) onCountryClick(name);
   }, [onCountryClick]);
+
+  const currentZoom = position.zoom;
 
   return (
     <div
@@ -204,6 +273,7 @@ const GlobalMap = memo(({
           onMoveEnd={handleMoveEnd}
           minZoom={MIN_ZOOM}
           maxZoom={MAX_ZOOM}
+          translateExtent={[[-200, -100], [1200, 700]]}
           filterZoomEvent={(evt: any) => {
             if (evt?.type === "wheel") return false;
             return true;
@@ -232,15 +302,24 @@ const GlobalMap = memo(({
                     />
                   );
                 })}
-                {/* Country labels from geography centroids */}
+                {/* Country labels — progressive reveal based on zoom */}
                 {geographies.map((geo) => {
                   const geoName = geo.properties?.name || geo.properties?.NAME || "";
                   if (!geoName) return null;
+
+                  const tier = getCountryTier(geoName);
+                  const minZoom = getMinZoomForTier(tier);
+                  if (currentZoom < minZoom) return null;
+
                   const override = LABEL_OVERRIDES[geoName];
                   const centroid = override || geoCentroid(geo) as [number, number];
-                  // Skip labels at extreme latitudes or invalid centroids
                   if (!centroid || (centroid[0] === 0 && centroid[1] === 0)) return null;
                   const displayName = DISPLAY_NAMES[geoName] || geoName;
+
+                  // Fade in: labels that just appeared are slightly transparent
+                  const fadeRange = minZoom * 0.3;
+                  const opacity = Math.min(1, (currentZoom - minZoom) / fadeRange + 0.5);
+
                   return (
                     <Marker key={`label-${geo.rsmKey}`} coordinates={centroid}>
                       <text
@@ -253,6 +332,8 @@ const GlobalMap = memo(({
                           fontWeight: 500,
                           pointerEvents: "none",
                           userSelect: "none",
+                          opacity,
+                          transition: "opacity 0.3s",
                         }}
                       >
                         {displayName}
