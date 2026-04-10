@@ -9,6 +9,7 @@ import AIInsightPanel from "./AIInsightPanel";
 import CountryOutlookPanel from "./CountryOutlookPanel";
 import GlobalMap from "./GlobalMap";
 import { useGlobalNewsDots } from "@/hooks/useGlobalNewsDots";
+import { useLiveSignals } from "@/hooks/useLiveSignals";
 
 export type DashboardMode = "resilience" | "genz";
 
