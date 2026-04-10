@@ -34,7 +34,7 @@ interface Props {
 
 const GENZ_COLOR = "#1ab5a5";
 const MIN_ZOOM = 1;
-const MAX_ZOOM = 8; // Capped — SVG has no tile detail beyond this
+const MAX_ZOOM = 14;
 const ZOOM_STEP = 1.18;
 
 const LNG_BOUNDS: [number, number] = [-180, 180];
