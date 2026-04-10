@@ -230,6 +230,13 @@ const GlobalMap = memo(({
     animFrameRef.current = requestAnimationFrame(step);
   }, []);
 
+  // Real-time position updates during zoom/pan gestures (labels update live)
+  const handleMove = useCallback((pos: { coordinates: [number, number]; zoom: number }) => {
+    positionRef.current = pos;
+    setPosition(pos);
+    targetZoomRef.current = pos.zoom;
+  }, []);
+
   const handleMoveEnd = useCallback((pos: { coordinates: [number, number]; zoom: number }) => {
     const clampedCoords = clampCoords(pos.coordinates, pos.zoom);
     const next = { coordinates: pos.coordinates, zoom: pos.zoom };
@@ -352,6 +359,7 @@ const GlobalMap = memo(({
         <ZoomableGroup
           center={position.coordinates}
           zoom={position.zoom}
+          onMove={handleMove}
           onMoveEnd={handleMoveEnd}
           minZoom={MIN_ZOOM}
           maxZoom={MAX_ZOOM}
