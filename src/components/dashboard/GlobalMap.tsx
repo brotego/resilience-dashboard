@@ -254,7 +254,7 @@ const GlobalMap = ({ mode, activeDomains, activeMindset, activeCategories, selec
           const popup = new maplibregl.Popup({ offset: [0, -(size / 2 + 6)], maxWidth: "320px", anchor: "bottom" })
             .setLngLat(normalizedCoordinates)
             .setHTML(`
-              <div style="font-family:Inter,system-ui,sans-serif;">
+              <div style="font-family:'Noto Sans JP',system-ui,sans-serif;">
                 <div style="display:flex;align-items:center;gap:6px;margin-bottom:8px;">
                   ${signal.isJapan ? '<span style="font-size:12px;">🇯🇵</span>' : ""}
                   <strong style="font-size:14px;color:hsl(30,20%,90%);">${escapeHtml(signal.title)}</strong>
@@ -331,7 +331,7 @@ const GlobalMap = ({ mode, activeDomains, activeMindset, activeCategories, selec
           const popup = new maplibregl.Popup({ offset: [0, -(size / 2 + 6)], maxWidth: "320px", anchor: "bottom" })
             .setLngLat(normalizedCoordinates)
             .setHTML(`
-              <div style="font-family:Inter,system-ui,sans-serif;">
+              <div style="font-family:'Noto Sans JP',system-ui,sans-serif;">
                 <div style="display:flex;align-items:center;gap:6px;margin-bottom:8px;">
                   ${signal.isJapan ? '<span style="font-size:12px;">🇯🇵</span>' : ""}
                   <strong style="font-size:14px;color:hsl(30,20%,90%);">${escapeHtml(signal.title)}</strong>
