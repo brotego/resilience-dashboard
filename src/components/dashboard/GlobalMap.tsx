@@ -253,6 +253,15 @@ const GlobalMap = memo(({
   zoomToCountryRef.current = zoomToCountry;
   zoomToGlobalRef.current = zoomToGlobal;
 
+  // When selectedCountry is cleared externally (e.g. "Back to Global"), zoom out
+  const prevSelectedCountry = useRef(selectedCountry);
+  useEffect(() => {
+    if (prevSelectedCountry.current && !selectedCountry) {
+      zoomToGlobalRef.current();
+    }
+    prevSelectedCountry.current = selectedCountry;
+  }, [selectedCountry]);
+
   const handleMove = useCallback((pos: any) => {
     const zoom = pos.zoom ?? pos.k ?? positionRef.current.zoom;
     setLiveZoom(zoom);
