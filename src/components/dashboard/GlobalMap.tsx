@@ -259,15 +259,27 @@ const GlobalMap = memo(({
   }, [animateToPosition]);
 
   const handleWheel = useCallback((e: WheelEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
     // ctrlKey is set by trackpad pinch-to-zoom in browsers
     if (e.ctrlKey) {
+      e.preventDefault();
+      e.stopPropagation();
       const direction = e.deltaY < 0 ? 1.04 : 0.96;
       const newTarget = clampZoom(targetZoomRef.current * direction);
       animateZoom(newTarget);
     } else {
-      const direction = e.deltaY < 0 ? 1.03 : 0.97;
+      // Normal scroll-wheel zoom: only intercept if we can actually zoom further
+      const isZoomingIn = e.deltaY < 0;
+      const isZoomingOut = e.deltaY > 0;
+      const atMin = targetZoomRef.current <= MIN_ZOOM;
+      const atMax = targetZoomRef.current >= MAX_ZOOM;
+
+      if ((isZoomingOut && atMin) || (isZoomingIn && atMax)) {
+        // Let the page scroll normally
+        return;
+      }
+
+      e.preventDefault();
+      const direction = isZoomingIn ? 1.03 : 0.97;
       const newTarget = clampZoom(targetZoomRef.current * direction);
       animateZoom(newTarget);
     }
@@ -283,16 +295,10 @@ const GlobalMap = memo(({
       e.stopPropagation();
     };
 
-    // Wheel with { passive: false } to allow preventDefault
     el.addEventListener('wheel', handleWheel, { passive: false });
-    // Safari gesture events
     el.addEventListener('gesturestart', preventGesture);
     el.addEventListener('gesturechange', preventGesture);
     el.addEventListener('gestureend', preventGesture);
-    // Prevent touch zoom (pinch)
-    el.addEventListener('touchmove', (e: TouchEvent) => {
-      if (e.touches.length > 1) e.preventDefault();
-    }, { passive: false });
 
     return () => {
       el.removeEventListener('wheel', handleWheel);
