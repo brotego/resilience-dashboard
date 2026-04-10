@@ -22,6 +22,7 @@ const DashboardLayout = () => {
   const [selectedCompany, setSelectedCompany] = useState<CompanyId | null>("mori_building");
   const [selectedSignal, setSelectedSignal] = useState<ResilienceSignal | GenZSignal | null>(null);
   const [selectedCountry, setSelectedCountry] = useState<string | null>(null);
+  const { signals: liveSignals } = useLiveSignals(activeDomains);
 
   const toggleDomain = (id: DomainId) => {
     setActiveDomains((prev) =>
