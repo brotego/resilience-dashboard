@@ -109,8 +109,8 @@ const DashboardLayout = () => {
             selectedCountry={selectedCountry}
           />
 
-          {/* Bottom-right floating domain/category selector */}
-          <div className="absolute bottom-4 right-[340px] z-10 bg-card/90 backdrop-blur-md border border-border rounded-xl p-3 shadow-lg max-w-[280px]">
+          {/* Bottom-left floating domain/category selector */}
+          <div className="absolute bottom-4 left-4 z-10 bg-card/80 backdrop-blur-md border border-border/50 rounded-lg p-2 shadow-md">
             {mode === "resilience" ? (
               <DomainSelector activeDomains={activeDomains} onToggle={toggleDomain} />
             ) : (

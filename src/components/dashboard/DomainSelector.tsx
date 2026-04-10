@@ -1,6 +1,5 @@
 import { DOMAINS } from "@/data/domains";
 import { DomainId } from "@/data/types";
-import { Switch } from "@/components/ui/switch";
 import { Briefcase, User, Users, Heart, Leaf } from "lucide-react";
 
 const ICONS: Record<string, React.ElementType> = {
@@ -14,23 +13,23 @@ interface Props {
 
 const DomainSelector = ({ activeDomains, onToggle }: Props) => {
   return (
-    <div className="space-y-1">
-      <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-2">Domains</h3>
+    <div className="flex flex-wrap gap-1.5">
       {DOMAINS.map((d) => {
         const Icon = ICONS[d.icon];
         const active = activeDomains.includes(d.id);
         return (
-          <label
+          <button
             key={d.id}
-            className="flex items-center gap-3 px-2 py-2 rounded-md cursor-pointer hover:bg-secondary/60 transition-colors"
+            onClick={() => onToggle(d.id)}
+            className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-medium transition-all border ${
+              active
+                ? "bg-primary/15 border-primary/40 text-foreground"
+                : "bg-secondary/30 border-transparent text-muted-foreground hover:bg-secondary/60"
+            }`}
           >
-            <Switch checked={active} onCheckedChange={() => onToggle(d.id)} />
-            {Icon && <Icon className="h-4 w-4 shrink-0" style={{ color: d.color }} />}
-            <div className="flex-1 min-w-0">
-              <span className="text-sm font-medium text-foreground">{d.label}</span>
-              <p className="text-[11px] text-muted-foreground leading-tight">{d.description}</p>
-            </div>
-          </label>
+            {Icon && <Icon className="h-3 w-3 shrink-0" style={{ color: d.color }} />}
+            <span>{d.label}</span>
+          </button>
         );
       })}
     </div>
