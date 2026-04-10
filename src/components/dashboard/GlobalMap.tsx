@@ -11,7 +11,7 @@ import { SIGNALS } from "@/data/signals";
 import { GENZ_SIGNALS } from "@/data/genzSignals";
 import { DOMAINS } from "@/data/domains";
 import { COMPANIES, CompanyId } from "@/data/companies";
-import { WORLD_CAPITALS } from "@/data/capitals";
+import { WORLD_CITIES } from "@/data/capitals";
 import { DomainId, MindsetId, ResilienceSignal } from "@/data/types";
 import { GenZCategoryId, GenZSignal } from "@/data/genzTypes";
 import { DashboardMode } from "./DashboardLayout";
@@ -34,7 +34,7 @@ interface Props {
 
 const GENZ_COLOR = "#1ab5a5";
 const MIN_ZOOM = 1;
-const MAX_ZOOM = 8; // Capped — SVG has no tile detail beyond this
+const MAX_ZOOM = 14;
 const ZOOM_STEP = 1.18;
 
 const LNG_BOUNDS: [number, number] = [-180, 180];
@@ -158,11 +158,12 @@ function getMinZoomForTier(tier: number): number {
   }
 }
 
-function getCapitalMinZoom(tier: 1 | 2 | 3): number {
+function getCityMinZoom(tier: 1 | 2 | 3 | 4): number {
   switch (tier) {
     case 1: return 3;
     case 2: return 4;
-    case 3: return 5.5;
+    case 3: return 5;
+    case 4: return 6.5;
   }
 }
 
@@ -504,18 +505,18 @@ const GlobalMap = memo(({
             )}
           </Geographies>
 
-          {/* Capital city markers — appear at zoom 3+ */}
-          {currentZoom >= 3 && WORLD_CAPITALS.map((capital) => {
-            const minZoom = getCapitalMinZoom(capital.tier);
+          {/* City markers — capitals + major cities, appear at zoom 3+ */}
+          {currentZoom >= 3 && WORLD_CITIES.map((city) => {
+            const minZoom = getCityMinZoom(city.tier);
             if (currentZoom < minZoom) return null;
 
             const fadeProgress = Math.min(1, (currentZoom - minZoom) / 1);
 
             return (
-              <Marker key={`cap-${capital.name}`} coordinates={capital.coordinates}>
+              <Marker key={`city-${city.name}-${city.country}`} coordinates={city.coordinates}>
                 <circle
-                  r={capitalDotR}
-                  fill="hsl(220, 10%, 55%)"
+                  r={city.isCapital ? capitalDotR * 1.2 : capitalDotR}
+                  fill={city.isCapital ? "hsl(220, 20%, 60%)" : "hsl(220, 10%, 50%)"}
                   opacity={fadeProgress * 0.8}
                 />
                 <text
@@ -524,17 +525,17 @@ const GlobalMap = memo(({
                   dy="0.3em"
                   style={{
                     fontFamily: "'Noto Sans JP', system-ui, sans-serif",
-                    fill: "hsl(220, 10%, 55%)",
-                    fontSize: `${capitalFontSize}px`,
-                    fontWeight: 400,
-                    fontStyle: "italic",
+                    fill: city.isCapital ? "hsl(220, 15%, 60%)" : "hsl(220, 10%, 50%)",
+                    fontSize: `${city.isCapital ? capitalFontSize * 1.1 : capitalFontSize * 0.9}px`,
+                    fontWeight: city.isCapital ? 500 : 400,
+                    fontStyle: city.isCapital ? "normal" : "italic",
                     pointerEvents: "none",
                     userSelect: "none",
                     opacity: fadeProgress * 0.7,
                     transition: "opacity 0.3s",
                   }}
                 >
-                  {capital.name}
+                  {city.name}
                 </text>
               </Marker>
             );
