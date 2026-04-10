@@ -108,6 +108,7 @@ const DashboardLayout = () => {
             selectedSignalId={selectedSignal?.id || null}
             selectedCountry={selectedCountry}
             newsDots={newsDots}
+            liveSignals={liveSignals}
           />
 
           {/* Bottom-left floating domain/category selector */}
