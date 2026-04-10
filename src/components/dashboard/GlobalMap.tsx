@@ -231,16 +231,10 @@ const GlobalMap = memo(({
     animFrameRef.current = requestAnimationFrame(step);
   }, []);
 
-  // Real-time position updates during zoom/pan gestures (labels update live)
+  // Only update liveZoom during gestures — don't touch position (avoids feedback loop)
   const handleMove = useCallback((pos: any) => {
-    // onMove may pass { coordinates, zoom } or { x, y, k } depending on version
     const zoom = pos.zoom ?? pos.k ?? positionRef.current.zoom;
-    const coordinates: [number, number] = pos.coordinates
-      ? [pos.coordinates[0], pos.coordinates[1]]
-      : positionRef.current.coordinates;
-    const next = { coordinates, zoom };
-    positionRef.current = next;
-    setPosition(next);
+    setLiveZoom(zoom);
     targetZoomRef.current = zoom;
   }, []);
 
