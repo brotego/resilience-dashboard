@@ -8,10 +8,12 @@ import CompanySelector from "./CompanySelector";
 import AIInsightPanel from "./AIInsightPanel";
 import CountryOutlookPanel from "./CountryOutlookPanel";
 import GlobalMap from "./GlobalMap";
+import { useGlobalNewsDots } from "@/hooks/useGlobalNewsDots";
 
 export type DashboardMode = "resilience" | "genz";
 
 const DashboardLayout = () => {
+  const { dots: newsDots } = useGlobalNewsDots();
   const [mode, setMode] = useState<DashboardMode>("resilience");
   const [activeDomains, setActiveDomains] = useState<DomainId[]>(["work"]);
   const [activeMindset] = useState<MindsetId>("cracks");
@@ -103,6 +105,7 @@ const DashboardLayout = () => {
             onCountryClick={handleCountryClick}
             selectedSignalId={selectedSignal?.id || null}
             selectedCountry={selectedCountry}
+            newsDots={newsDots}
           />
 
           {/* Bottom-left floating domain/category selector */}
