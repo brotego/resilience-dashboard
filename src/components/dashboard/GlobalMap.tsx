@@ -332,7 +332,7 @@ const GlobalMap = memo(({
     >
       {/* Zoom level indicator */}
       <div className="absolute top-3 left-3 z-10 bg-background/80 backdrop-blur-sm border border-border rounded-md px-2 py-1 text-xs font-mono text-muted-foreground">
-        {position.zoom.toFixed(1)}x
+        {liveZoom.toFixed(1)}x
       </div>
 
       {/* Zoom controls */}
