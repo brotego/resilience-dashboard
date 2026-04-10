@@ -33,19 +33,25 @@ interface Props {
 const GENZ_COLOR = "#1ab5a5";
 const MIN_ZOOM = 1.3;
 const MAX_ZOOM = 20;
-const ZOOM_STEP = 1.4;
+const ZOOM_STEP = 1.3;
 
-// Pan boundaries (lng/lat) — prevents panning beyond Earth
+// Pan boundaries (lng/lat) — soft clamp prevents panning beyond Earth
 const LNG_BOUNDS: [number, number] = [-180, 180];
 const LAT_BOUNDS: [number, number] = [-60, 85];
 
+// Soft clamp with elastic resistance instead of hard stop
+function softClamp(value: number, min: number, max: number, elasticity: number = 0.15): number {
+  if (value < min) return min + (value - min) * elasticity;
+  if (value > max) return max + (value - max) * elasticity;
+  return value;
+}
+
 function clampCoords(coords: [number, number], zoom: number): [number, number] {
-  // At higher zoom the visible area is smaller, so allow more panning range
   const lngRange = 180 / zoom;
   const latRange = 70 / zoom;
   return [
-    Math.max(LNG_BOUNDS[0] + lngRange, Math.min(LNG_BOUNDS[1] - lngRange, coords[0])),
-    Math.max(LAT_BOUNDS[0] + latRange, Math.min(LAT_BOUNDS[1] - latRange, coords[1])),
+    softClamp(coords[0], LNG_BOUNDS[0] + lngRange, LNG_BOUNDS[1] - lngRange),
+    softClamp(coords[1], LAT_BOUNDS[0] + latRange, LAT_BOUNDS[1] - latRange),
   ];
 }
 
@@ -182,39 +188,55 @@ const GlobalMap = memo(({
     coordinates: [30, 20],
     zoom: 1.5,
   });
+  const targetZoomRef = useRef(1.5);
+  const animFrameRef = useRef<number | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+
+  const clampZoom = (z: number) => Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, z));
+
+  // Smooth animated zoom transition
+  const animateZoom = useCallback((targetZoom: number) => {
+    targetZoomRef.current = targetZoom;
+    if (animFrameRef.current) cancelAnimationFrame(animFrameRef.current);
+
+    const step = () => {
+      setPosition((prev) => {
+        const diff = targetZoomRef.current - prev.zoom;
+        if (Math.abs(diff) < 0.01) {
+          animFrameRef.current = null;
+          return { coordinates: clampCoords(prev.coordinates, targetZoomRef.current), zoom: targetZoomRef.current };
+        }
+        // Ease toward target (lerp factor 0.15 for smooth feel)
+        const newZoom = prev.zoom + diff * 0.15;
+        animFrameRef.current = requestAnimationFrame(step);
+        return { coordinates: clampCoords(prev.coordinates, newZoom), zoom: newZoom };
+      });
+    };
+    animFrameRef.current = requestAnimationFrame(step);
+  }, []);
 
   const handleMoveEnd = useCallback((pos: { coordinates: [number, number]; zoom: number }) => {
     const clamped = clampCoords(pos.coordinates, pos.zoom);
     setPosition({ coordinates: clamped, zoom: pos.zoom });
+    targetZoomRef.current = pos.zoom;
   }, []);
-
-  const clampZoom = (z: number) => Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, z));
 
   const handleWheel = useCallback((e: React.WheelEvent) => {
     e.preventDefault();
-    setPosition((prev) => {
-      const newZoom = clampZoom(prev.zoom * (e.deltaY < 0 ? 1.08 : 0.92));
-      return {
-        coordinates: clampCoords(prev.coordinates, newZoom),
-        zoom: newZoom,
-      };
-    });
-  }, []);
+    const direction = e.deltaY < 0 ? 1.06 : 0.94;
+    const newTarget = clampZoom(targetZoomRef.current * direction);
+    animateZoom(newTarget);
+  }, [animateZoom]);
 
   const zoomIn = useCallback(() => {
-    setPosition((prev) => {
-      const newZoom = clampZoom(prev.zoom * ZOOM_STEP);
-      return { coordinates: clampCoords(prev.coordinates, newZoom), zoom: newZoom };
-    });
-  }, []);
+    const newTarget = clampZoom(targetZoomRef.current * ZOOM_STEP);
+    animateZoom(newTarget);
+  }, [animateZoom]);
 
   const zoomOut = useCallback(() => {
-    setPosition((prev) => {
-      const newZoom = clampZoom(prev.zoom / ZOOM_STEP);
-      return { coordinates: clampCoords(prev.coordinates, newZoom), zoom: newZoom };
-    });
-  }, []);
+    const newTarget = clampZoom(targetZoomRef.current / ZOOM_STEP);
+    animateZoom(newTarget);
+  }, [animateZoom]);
 
   const dotScale = 1 / position.zoom;
   const labelFontSize = Math.max(3, 7 * dotScale);
