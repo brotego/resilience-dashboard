@@ -188,6 +188,7 @@ const GlobalMap = memo(({
     coordinates: [30, 20],
     zoom: 1.5,
   });
+  const [liveZoom, setLiveZoom] = useState(1.5); // lightweight zoom for labels during gestures
   const positionRef = useRef<{ coordinates: [number, number]; zoom: number }>({
     coordinates: [30, 20],
     zoom: 1.5,
@@ -230,16 +231,10 @@ const GlobalMap = memo(({
     animFrameRef.current = requestAnimationFrame(step);
   }, []);
 
-  // Real-time position updates during zoom/pan gestures (labels update live)
+  // Only update liveZoom during gestures — don't touch position (avoids feedback loop)
   const handleMove = useCallback((pos: any) => {
-    // onMove may pass { coordinates, zoom } or { x, y, k } depending on version
     const zoom = pos.zoom ?? pos.k ?? positionRef.current.zoom;
-    const coordinates: [number, number] = pos.coordinates
-      ? [pos.coordinates[0], pos.coordinates[1]]
-      : positionRef.current.coordinates;
-    const next = { coordinates, zoom };
-    positionRef.current = next;
-    setPosition(next);
+    setLiveZoom(zoom);
     targetZoomRef.current = zoom;
   }, []);
 
@@ -248,6 +243,7 @@ const GlobalMap = memo(({
     const next = { coordinates: pos.coordinates, zoom: pos.zoom };
     positionRef.current = next;
     setPosition(next);
+    setLiveZoom(pos.zoom);
     targetZoomRef.current = pos.zoom;
 
     const needsSettle =
@@ -312,7 +308,7 @@ const GlobalMap = memo(({
     animateZoom(newTarget);
   }, [animateZoom]);
 
-  const dotScale = 1 / position.zoom;
+  const dotScale = 1 / liveZoom;
   const labelFontSize = Math.max(3, 7 * dotScale);
 
   const resilienceFiltered = mode === "resilience"
@@ -327,7 +323,7 @@ const GlobalMap = memo(({
     if (name) onCountryClick(name);
   }, [onCountryClick]);
 
-  const currentZoom = position.zoom;
+  const currentZoom = liveZoom;
 
   return (
     <div
@@ -336,7 +332,7 @@ const GlobalMap = memo(({
     >
       {/* Zoom level indicator */}
       <div className="absolute top-3 left-3 z-10 bg-background/80 backdrop-blur-sm border border-border rounded-md px-2 py-1 text-xs font-mono text-muted-foreground">
-        {position.zoom.toFixed(1)}x
+        {liveZoom.toFixed(1)}x
       </div>
 
       {/* Zoom controls */}
