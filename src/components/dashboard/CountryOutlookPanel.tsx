@@ -236,6 +236,12 @@ const CountryOutlookPanel = ({ countryName, mode, selectedCompany, onClose, onSi
             </div>
           )}
 
+          {/* Business News Feed */}
+          <NewsFeedSection countryName={countryName} type="business" />
+
+          {/* Gen Z Signal Feed */}
+          <NewsFeedSection countryName={countryName} type="genz" />
+
           {/* Japan Perception */}
           <div>
             <h4 className="text-xs font-bold uppercase tracking-wider text-muted-foreground mb-2 flex items-center gap-1.5">
