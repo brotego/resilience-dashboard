@@ -32,6 +32,7 @@ interface Props {
   selectedSignalId: string | null;
   selectedCountry: string | null;
   newsDots?: NewsDot[];
+  liveSignals?: ResilienceSignal[];
 }
 
 const GENZ_COLOR = "#1ab5a5";
@@ -195,6 +196,7 @@ const GlobalMap = memo(({
   selectedSignalId,
   selectedCountry,
   newsDots = [],
+  liveSignals,
 }: Props) => {
   const [position, setPosition] = useState<{ coordinates: [number, number]; zoom: number }>({
     coordinates: [30, 20],
