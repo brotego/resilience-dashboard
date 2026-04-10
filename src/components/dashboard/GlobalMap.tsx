@@ -342,8 +342,8 @@ const GlobalMap = memo(({
   }, [animateZoom]);
 
   const dotScale = 1 / liveZoom;
-  const labelFontSize = Math.max(1.5, 5 / Math.pow(liveZoom, 0.85));
-  const capitalFontSize = Math.max(1.2, 4 / Math.pow(liveZoom, 0.85));
+  const labelFontSize = Math.max(0.6, 5 / Math.pow(liveZoom, 1.05));
+  const capitalFontSize = Math.max(0.5, 4 / Math.pow(liveZoom, 1.05));
   const capitalDotR = Math.max(0.4, 1.2 * dotScale);
 
   const resilienceFiltered = mode === "resilience"
