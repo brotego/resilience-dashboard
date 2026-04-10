@@ -466,8 +466,6 @@ const GlobalMap = memo(({
                     </Marker>
                   ));
                 })()}
-                  );
-                })}
               </>
             )}
           </Geographies>
