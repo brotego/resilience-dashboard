@@ -16,6 +16,7 @@ import { DomainId, MindsetId, ResilienceSignal } from "@/data/types";
 import { GenZCategoryId, GenZSignal } from "@/data/genzTypes";
 import { DashboardMode } from "./DashboardLayout";
 import { Plus, Minus } from "lucide-react";
+import { NewsDot } from "@/hooks/useGlobalNewsDots";
 
 // Higher resolution TopoJSON for smoother borders when zoomed
 const GEO_URL = "https://cdn.jsdelivr.net/npm/world-atlas@2/countries-50m.json";
@@ -30,6 +31,7 @@ interface Props {
   onCountryClick: (countryName: string, geo: any) => void;
   selectedSignalId: string | null;
   selectedCountry: string | null;
+  newsDots?: NewsDot[];
 }
 
 const GENZ_COLOR = "#1ab5a5";
@@ -192,6 +194,7 @@ const GlobalMap = memo(({
   onCountryClick,
   selectedSignalId,
   selectedCountry,
+  newsDots = [],
 }: Props) => {
   const [position, setPosition] = useState<{ coordinates: [number, number]; zoom: number }>({
     coordinates: [30, 20],
@@ -660,6 +663,35 @@ const GlobalMap = memo(({
                 </Marker>
               );
             })}
+
+          {/* Live news dots from API */}
+          {newsDots.map((dot) => {
+            const isBiz = dot.type === "business";
+            const color = isBiz ? "#3b82f6" : "#ff6701";
+            const r = 2.2 * dotScale;
+
+            return (
+              <Marker key={dot.id} coordinates={dot.coordinates}>
+                <title>{`${dot.title} — ${dot.source}`}</title>
+                {/* Pulsing ring */}
+                <circle r={r * 3} fill={color} opacity={0.08}>
+                  <animate attributeName="r" from={String(r * 2)} to={String(r * 4)} dur="2.5s" repeatCount="indefinite" />
+                  <animate attributeName="opacity" from="0.12" to="0" dur="2.5s" repeatCount="indefinite" />
+                </circle>
+                {/* Dot */}
+                <circle
+                  r={r}
+                  fill={color}
+                  opacity={0.85}
+                  stroke={color}
+                  strokeWidth={0.5 * dotScale}
+                  className="transition-all duration-200"
+                  onMouseEnter={(e) => e.currentTarget.setAttribute("r", String(r * 1.6))}
+                  onMouseLeave={(e) => e.currentTarget.setAttribute("r", String(r))}
+                />
+              </Marker>
+            );
+          })}
         </ZoomableGroup>
       </ComposableMap>
     </div>
