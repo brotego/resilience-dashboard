@@ -391,26 +391,62 @@ const GlobalMap = memo(({
                     />
                   );
                 })}
-                {/* Country labels — progressive reveal based on zoom */}
-                {geographies.map((geo) => {
-                  const geoName = geo.properties?.name || geo.properties?.NAME || "";
-                  if (!geoName) return null;
+                {/* Country labels — progressive reveal with collision detection */}
+                {(() => {
+                  // Collect all visible labels with their positions
+                  const candidates = geographies
+                    .map((geo) => {
+                      const geoName = geo.properties?.name || geo.properties?.NAME || "";
+                      if (!geoName) return null;
 
-                  const tier = getCountryTier(geoName);
-                  const minZoom = getMinZoomForTier(tier);
-                  if (currentZoom < minZoom) return null;
+                      const tier = getCountryTier(geoName);
+                      const minZoom = getMinZoomForTier(tier);
+                      if (currentZoom < minZoom) return null;
 
-                  const override = LABEL_OVERRIDES[geoName];
-                  const centroid = override || geoCentroid(geo) as [number, number];
-                  if (!centroid || (centroid[0] === 0 && centroid[1] === 0)) return null;
-                  const displayName = DISPLAY_NAMES[geoName] || geoName;
+                      const override = LABEL_OVERRIDES[geoName];
+                      const centroid = override || geoCentroid(geo) as [number, number];
+                      if (!centroid || (centroid[0] === 0 && centroid[1] === 0)) return null;
+                      const displayName = DISPLAY_NAMES[geoName] || geoName;
 
-                  // Fade in: labels that just appeared are slightly transparent
-                  const fadeRange = minZoom * 0.3;
-                  const opacity = Math.min(1, (currentZoom - minZoom) / fadeRange + 0.5);
+                      const fadeRange = minZoom * 0.3;
+                      const opacity = Math.min(1, (currentZoom - minZoom) / fadeRange + 0.5);
 
-                  return (
-                    <Marker key={`label-${geo.rsmKey}`} coordinates={centroid}>
+                      return { geo, geoName, tier, centroid, displayName, opacity };
+                    })
+                    .filter(Boolean) as Array<{
+                      geo: any; geoName: string; tier: number;
+                      centroid: [number, number]; displayName: string; opacity: number;
+                    }>;
+
+                  // Sort by tier (lower tier = more important = placed first)
+                  candidates.sort((a, b) => a.tier - b.tier);
+
+                  // Simple collision detection in geo-coordinates
+                  // Approximate label width/height in degrees based on zoom
+                  const charWidthDeg = (labelFontSize * 0.6) / currentZoom;
+                  const labelHeightDeg = (labelFontSize * 1.4) / currentZoom;
+
+                  const placed: Array<{ x: number; y: number; w: number; h: number }> = [];
+                  const visible: typeof candidates = [];
+
+                  for (const c of candidates) {
+                    const w = c.displayName.length * charWidthDeg;
+                    const h = labelHeightDeg;
+                    const x = c.centroid[0] - w / 2;
+                    const y = c.centroid[1] - h / 2;
+
+                    const overlaps = placed.some(
+                      (p) => x < p.x + p.w && x + w > p.x && y < p.y + p.h && y + h > p.y
+                    );
+
+                    if (!overlaps) {
+                      placed.push({ x, y, w, h });
+                      visible.push(c);
+                    }
+                  }
+
+                  return visible.map((c) => (
+                    <Marker key={`label-${c.geo.rsmKey}`} coordinates={c.centroid}>
                       <text
                         textAnchor="middle"
                         dy="0.35em"
@@ -421,15 +457,15 @@ const GlobalMap = memo(({
                           fontWeight: 500,
                           pointerEvents: "none",
                           userSelect: "none",
-                          opacity,
+                          opacity: c.opacity,
                           transition: "opacity 0.3s",
                         }}
                       >
-                        {displayName}
+                        {c.displayName}
                       </text>
                     </Marker>
-                  );
-                })}
+                  ));
+                })()}
               </>
             )}
           </Geographies>
