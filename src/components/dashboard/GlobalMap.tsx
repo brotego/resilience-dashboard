@@ -308,7 +308,7 @@ const GlobalMap = memo(({
     animateZoom(newTarget);
   }, [animateZoom]);
 
-  const dotScale = 1 / position.zoom;
+  const dotScale = 1 / liveZoom;
   const labelFontSize = Math.max(3, 7 * dotScale);
 
   const resilienceFiltered = mode === "resilience"
@@ -323,7 +323,7 @@ const GlobalMap = memo(({
     if (name) onCountryClick(name);
   }, [onCountryClick]);
 
-  const currentZoom = position.zoom;
+  const currentZoom = liveZoom;
 
   return (
     <div
