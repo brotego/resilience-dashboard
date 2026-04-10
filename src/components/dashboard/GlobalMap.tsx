@@ -31,7 +31,7 @@ interface Props {
 }
 
 const GENZ_COLOR = "#1ab5a5";
-const MIN_ZOOM = 1.3;
+const MIN_ZOOM = 1;
 const MAX_ZOOM = 20;
 const ZOOM_STEP = 1.18;
 
