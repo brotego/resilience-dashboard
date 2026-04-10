@@ -352,7 +352,7 @@ const GlobalMap = memo(({
   const capitalDotR = Math.max(0.4, 1.2 * dotScale);
 
   const resilienceFiltered = mode === "resilience"
-    ? SIGNALS.filter((s) => activeDomains.includes(s.domain))
+    ? (liveSignals || SIGNALS.filter((s) => activeDomains.includes(s.domain)))
     : [];
   const genzFiltered = mode === "genz"
     ? GENZ_SIGNALS.filter((s) => activeCategories.includes(s.category))
