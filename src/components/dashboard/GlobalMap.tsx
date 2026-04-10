@@ -243,6 +243,7 @@ const GlobalMap = memo(({
     const next = { coordinates: pos.coordinates, zoom: pos.zoom };
     positionRef.current = next;
     setPosition(next);
+    setLiveZoom(pos.zoom);
     targetZoomRef.current = pos.zoom;
 
     const needsSettle =
