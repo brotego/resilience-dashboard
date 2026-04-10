@@ -505,18 +505,18 @@ const GlobalMap = memo(({
             )}
           </Geographies>
 
-          {/* Capital city markers — appear at zoom 3+ */}
-          {currentZoom >= 3 && WORLD_CAPITALS.map((capital) => {
-            const minZoom = getCapitalMinZoom(capital.tier);
+          {/* City markers — capitals + major cities, appear at zoom 3+ */}
+          {currentZoom >= 3 && WORLD_CITIES.map((city) => {
+            const minZoom = getCityMinZoom(city.tier);
             if (currentZoom < minZoom) return null;
 
             const fadeProgress = Math.min(1, (currentZoom - minZoom) / 1);
 
             return (
-              <Marker key={`cap-${capital.name}`} coordinates={capital.coordinates}>
+              <Marker key={`city-${city.name}-${city.country}`} coordinates={city.coordinates}>
                 <circle
-                  r={capitalDotR}
-                  fill="hsl(220, 10%, 55%)"
+                  r={city.isCapital ? capitalDotR * 1.2 : capitalDotR}
+                  fill={city.isCapital ? "hsl(220, 20%, 60%)" : "hsl(220, 10%, 50%)"}
                   opacity={fadeProgress * 0.8}
                 />
                 <text
@@ -525,17 +525,17 @@ const GlobalMap = memo(({
                   dy="0.3em"
                   style={{
                     fontFamily: "'Noto Sans JP', system-ui, sans-serif",
-                    fill: "hsl(220, 10%, 55%)",
-                    fontSize: `${capitalFontSize}px`,
-                    fontWeight: 400,
-                    fontStyle: "italic",
+                    fill: city.isCapital ? "hsl(220, 15%, 60%)" : "hsl(220, 10%, 50%)",
+                    fontSize: `${city.isCapital ? capitalFontSize * 1.1 : capitalFontSize * 0.9}px`,
+                    fontWeight: city.isCapital ? 500 : 400,
+                    fontStyle: city.isCapital ? "normal" : "italic",
                     pointerEvents: "none",
                     userSelect: "none",
                     opacity: fadeProgress * 0.7,
                     transition: "opacity 0.3s",
                   }}
                 >
-                  {capital.name}
+                  {city.name}
                 </text>
               </Marker>
             );
