@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef, memo } from "react";
+import { useState, useCallback, useRef, memo, useMemo } from "react";
 import {
   ComposableMap,
   ZoomableGroup,
@@ -6,6 +6,7 @@ import {
   Geography,
   Marker,
 } from "react-simple-maps";
+import { geoCentroid } from "d3-geo";
 import { SIGNALS } from "@/data/signals";
 import { GENZ_SIGNALS } from "@/data/genzSignals";
 import { DOMAINS } from "@/data/domains";
@@ -75,79 +76,33 @@ const COUNTRY_ALIASES: Record<string, string[]> = {
   "Peru": ["Lima"],
 };
 
-const COUNTRY_LABELS: Array<{ name: string; coordinates: [number, number] }> = [
-  { name: "United States", coordinates: [-98, 39] },
-  { name: "Canada", coordinates: [-106, 56] },
-  { name: "Mexico", coordinates: [-102, 24] },
-  { name: "Brazil", coordinates: [-53, -10] },
-  { name: "Argentina", coordinates: [-64, -34] },
-  { name: "Chile", coordinates: [-71, -33] },
-  { name: "Colombia", coordinates: [-73, 4] },
-  { name: "Peru", coordinates: [-76, -10] },
-  { name: "Venezuela", coordinates: [-66, 8] },
-  { name: "Ecuador", coordinates: [-78, -1] },
-  { name: "Bolivia", coordinates: [-65, -17] },
-  { name: "Paraguay", coordinates: [-58, -23] },
-  { name: "Uruguay", coordinates: [-56, -33] },
-  { name: "Cuba", coordinates: [-79, 22] },
-  { name: "Japan", coordinates: [138, 37] },
-  { name: "China", coordinates: [104, 35] },
-  { name: "India", coordinates: [79, 22] },
-  { name: "Germany", coordinates: [10, 51] },
-  { name: "France", coordinates: [2, 47] },
-  { name: "UK", coordinates: [-2, 54] },
-  { name: "Spain", coordinates: [-4, 40] },
-  { name: "Italy", coordinates: [12, 43] },
-  { name: "Portugal", coordinates: [-8, 40] },
-  { name: "Netherlands", coordinates: [5, 52] },
-  { name: "Belgium", coordinates: [4, 51] },
-  { name: "Switzerland", coordinates: [8, 47] },
-  { name: "Austria", coordinates: [14, 48] },
-  { name: "Poland", coordinates: [20, 52] },
-  { name: "Czech Rep.", coordinates: [15, 50] },
-  { name: "Romania", coordinates: [25, 46] },
-  { name: "Ukraine", coordinates: [32, 49] },
-  { name: "Sweden", coordinates: [16, 63] },
-  { name: "Norway", coordinates: [9, 62] },
-  { name: "Finland", coordinates: [26, 64] },
-  { name: "Denmark", coordinates: [10, 56] },
-  { name: "Ireland", coordinates: [-8, 53] },
-  { name: "Greece", coordinates: [22, 39] },
-  { name: "Turkey", coordinates: [35, 39] },
-  { name: "Russia", coordinates: [100, 60] },
-  { name: "Australia", coordinates: [134, -25] },
-  { name: "New Zealand", coordinates: [174, -41] },
-  { name: "Indonesia", coordinates: [118, -2] },
-  { name: "South Korea", coordinates: [128, 36] },
-  { name: "Thailand", coordinates: [101, 15] },
-  { name: "Vietnam", coordinates: [107, 16] },
-  { name: "Philippines", coordinates: [122, 12] },
-  { name: "Malaysia", coordinates: [109, 4] },
-  { name: "Singapore", coordinates: [104, 1.3] },
-  { name: "Mongolia", coordinates: [104, 47] },
-  { name: "Pakistan", coordinates: [69, 30] },
-  { name: "Bangladesh", coordinates: [90, 24] },
-  { name: "Myanmar", coordinates: [96, 20] },
-  { name: "Nigeria", coordinates: [8, 10] },
-  { name: "Kenya", coordinates: [38, 0] },
-  { name: "South Africa", coordinates: [25, -29] },
-  { name: "Ghana", coordinates: [-2, 8] },
-  { name: "Egypt", coordinates: [30, 27] },
-  { name: "Ethiopia", coordinates: [40, 9] },
-  { name: "Tanzania", coordinates: [35, -6] },
-  { name: "DR Congo", coordinates: [24, -3] },
-  { name: "Morocco", coordinates: [-6, 32] },
-  { name: "Algeria", coordinates: [3, 28] },
-  { name: "Libya", coordinates: [17, 27] },
-  { name: "Sudan", coordinates: [30, 16] },
-  { name: "Saudi Arabia", coordinates: [45, 24] },
-  { name: "UAE", coordinates: [54, 24] },
-  { name: "Iran", coordinates: [53, 33] },
-  { name: "Iraq", coordinates: [44, 33] },
-  { name: "Afghanistan", coordinates: [67, 34] },
-  { name: "Kazakhstan", coordinates: [67, 48] },
-  { name: "Uzbekistan", coordinates: [64, 41] },
-];
+// Manual centroid overrides for countries whose computed centroid is off
+const LABEL_OVERRIDES: Record<string, [number, number]> = {
+  "United States of America": [-98, 39],
+  "Russia": [100, 60],
+  "Canada": [-106, 56],
+  "France": [2, 47],
+  "Norway": [9, 62],
+  "Indonesia": [118, -2],
+  "Malaysia": [109, 4],
+  "Chile": [-71, -33],
+  "New Zealand": [174, -41],
+};
+
+// Short display names
+const DISPLAY_NAMES: Record<string, string> = {
+  "United States of America": "United States",
+  "United Kingdom": "UK",
+  "United Arab Emirates": "UAE",
+  "Dem. Rep. Congo": "DR Congo",
+  "Dominican Rep.": "Dom. Rep.",
+  "Central African Rep.": "C.A.R.",
+  "Bosnia and Herz.": "Bosnia",
+  "Czech Republic": "Czech Rep.",
+  "Republic of the Congo": "Congo",
+  "Democratic Republic of the Congo": "DR Congo",
+  "S. Sudan": "S. Sudan",
+};
 
 function getShortTitle(title: string): string {
   const words = title.split(" ");
@@ -195,7 +150,7 @@ const GlobalMap = memo(({
   }, []);
 
   const dotScale = 1 / position.zoom;
-  const labelFontSize = Math.max(6, 8 * dotScale);
+  const labelFontSize = Math.max(3, 7 * dotScale);
 
   const resilienceFiltered = mode === "resilience"
     ? SIGNALS.filter((s) => activeDomains.includes(s.domain))
@@ -204,7 +159,7 @@ const GlobalMap = memo(({
     ? GENZ_SIGNALS.filter((s) => activeCategories.includes(s.category))
     : [];
 
-  const handleCountryClick = useCallback((geo: any) => {
+  const handleCountryClickCb = useCallback((geo: any) => {
     const name = geo.properties?.name || geo.properties?.NAME;
     if (name) onCountryClick(name);
   }, [onCountryClick]);
@@ -255,48 +210,59 @@ const GlobalMap = memo(({
           }}
         >
           <Geographies geography={GEO_URL}>
-            {({ geographies }) =>
-              geographies.map((geo) => {
-                const geoName = geo.properties?.name || geo.properties?.NAME || "";
-                const isSelected = selectedCountry === geoName ||
-                  (selectedCountry && COUNTRY_ALIASES[geoName]?.some(a => a === selectedCountry));
-                return (
-                  <Geography
-                    key={geo.rsmKey}
-                    geography={geo}
-                    onClick={() => handleCountryClick(geo)}
-                    fill={isSelected ? "hsl(220, 14%, 24%)" : "hsl(220, 14%, 16%)"}
-                    stroke="hsl(220, 14%, 22%)"
-                    strokeWidth={0.5}
-                    style={{
-                      default: { outline: "none", cursor: "pointer" },
-                      hover: { fill: "hsl(220, 14%, 22%)", outline: "none", cursor: "pointer" },
-                      pressed: { fill: "hsl(220, 14%, 26%)", outline: "none" },
-                    }}
-                  />
-                );
-              })
-            }
+            {({ geographies }) => (
+              <>
+                {geographies.map((geo) => {
+                  const geoName = geo.properties?.name || geo.properties?.NAME || "";
+                  const isSelected = selectedCountry === geoName ||
+                    (selectedCountry && COUNTRY_ALIASES[geoName]?.some(a => a === selectedCountry));
+                  return (
+                    <Geography
+                      key={geo.rsmKey}
+                      geography={geo}
+                      onClick={() => handleCountryClickCb(geo)}
+                      fill={isSelected ? "hsl(220, 14%, 24%)" : "hsl(220, 14%, 16%)"}
+                      stroke="hsl(220, 14%, 22%)"
+                      strokeWidth={0.5}
+                      style={{
+                        default: { outline: "none", cursor: "pointer" },
+                        hover: { fill: "hsl(220, 14%, 22%)", outline: "none", cursor: "pointer" },
+                        pressed: { fill: "hsl(220, 14%, 26%)", outline: "none" },
+                      }}
+                    />
+                  );
+                })}
+                {/* Country labels from geography centroids */}
+                {geographies.map((geo) => {
+                  const geoName = geo.properties?.name || geo.properties?.NAME || "";
+                  if (!geoName) return null;
+                  const override = LABEL_OVERRIDES[geoName];
+                  const centroid = override || geoCentroid(geo) as [number, number];
+                  // Skip labels at extreme latitudes or invalid centroids
+                  if (!centroid || (centroid[0] === 0 && centroid[1] === 0)) return null;
+                  const displayName = DISPLAY_NAMES[geoName] || geoName;
+                  return (
+                    <Marker key={`label-${geo.rsmKey}`} coordinates={centroid}>
+                      <text
+                        textAnchor="middle"
+                        dy="0.35em"
+                        style={{
+                          fontFamily: "'Noto Sans JP', system-ui, sans-serif",
+                          fill: "hsl(220, 10%, 42%)",
+                          fontSize: `${labelFontSize}px`,
+                          fontWeight: 500,
+                          pointerEvents: "none",
+                          userSelect: "none",
+                        }}
+                      >
+                        {displayName}
+                      </text>
+                    </Marker>
+                  );
+                })}
+              </>
+            )}
           </Geographies>
-
-          {/* Country labels — always visible */}
-          {COUNTRY_LABELS.map((c) => (
-            <Marker key={c.name} coordinates={c.coordinates}>
-              <text
-                textAnchor="middle"
-                style={{
-                  fontFamily: "'Noto Sans JP', system-ui, sans-serif",
-                  fill: "hsl(220, 10%, 40%)",
-                  fontSize: `${labelFontSize}px`,
-                  fontWeight: 500,
-                  pointerEvents: "none",
-                  userSelect: "none",
-                }}
-              >
-                {c.name}
-              </text>
-            </Marker>
-          ))}
 
           {/* Resilience signals */}
           {mode === "resilience" &&
