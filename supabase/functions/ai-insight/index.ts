@@ -41,9 +41,13 @@ serve(async (req) => {
       ? `You are briefing the CEO of ${companyInfo.name} (${companyInfo.sector}). ${companyInfo.context}\nFrame every recommendation and risk specifically for ${companyInfo.name}.`
       : `You are briefing a general executive audience. Frame recommendations and risks for any large enterprise that might be affected.`;
 
+    const langInstruction = isJapanese 
+      ? "\n\nIMPORTANT: Write your ENTIRE response in Japanese (日本語). All labels stay in English (URGENCY, HEADLINE, etc.) but all content text must be in Japanese."
+      : "";
+
     const systemPrompt = `You are a senior strategy analyst at Anchorstar Consulting. You produce razor-sharp intelligence briefs from live news. No fluff. Solution-first. These executives have 30 seconds.
 
-${companyInstruction}
+${companyInstruction}${langInstruction}
 
 OUTPUT FORMAT — use EXACTLY these labels, each on its own line:
 
