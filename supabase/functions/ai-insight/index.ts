@@ -32,6 +32,8 @@ serve(async (req) => {
     const signalLocation = body.signalLocation || "";
     const signalDomain = body.signalDomain || "";
     const companyId = body.company || null;
+    const language = body.language || "en";
+    const isJapanese = language === "jp";
 
     const companyInfo = companyId ? COMPANY_INFO[companyId] : null;
 
