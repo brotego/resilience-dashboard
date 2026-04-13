@@ -148,6 +148,16 @@ const COUNTRY_TIERS: Record<string, number> = {
   "Papua New Guinea": 3, "Gabon": 3,
 };
 
+// 30 largest countries that show as watermark labels at default zoom
+const WATERMARK_COUNTRIES = new Set([
+  "Russia", "Canada", "United States of America", "China", "Brazil",
+  "Australia", "India", "Argentina", "Kazakhstan", "Algeria",
+  "Saudi Arabia", "Mexico", "Indonesia", "Sudan", "Libya",
+  "Iran", "Mongolia", "Peru", "Chad", "Niger",
+  "Angola", "Mali", "South Africa", "Colombia", "Ethiopia",
+  "Bolivia", "Egypt", "Nigeria", "Tanzania", "Turkey",
+]);
+
 function getCountryTier(name: string): number {
   return COUNTRY_TIERS[name] || 4;
 }
