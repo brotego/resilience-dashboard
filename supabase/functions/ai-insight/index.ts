@@ -137,23 +137,32 @@ function parseInsight(raw: string) {
   };
 
   const getBlock = (label: string): string[] => {
-    const re = new RegExp(`^${label}:\\s*\\n([\\s\\S]*?)(?=^[A-Z_]+:|$)`, "mi");
+    // Match block: label followed by lines until next LABEL: or end
+    const re = new RegExp(`${label}:\\s*\\n([\\s\\S]*?)(?=\\n[A-Z_]+:|$)`, "m");
     const m = raw.match(re);
-    if (!m) return [];
+    if (!m || !m[1]) {
+      // Fallback: try inline single value
+      const single = get(label);
+      return single ? [single] : [];
+    }
     return m[1]
       .split("\n")
       .map((l: string) => l.replace(/^\d+\s*/, "").trim())
-      .filter(Boolean);
+      .filter((l: string) => l.length > 0);
   };
 
+  const actions = getBlock("ACTIONS");
+  const risks = getBlock("RISKS");
+  const opportunities = getBlock("OPPORTUNITIES");
+
   return {
-    urgency: get("URGENCY") || "medium",
-    headline: get("HEADLINE"),
-    actions: getBlock("ACTIONS").length ? getBlock("ACTIONS") : [get("ACTIONS")].filter(Boolean),
-    risks: getBlock("RISKS").length ? getBlock("RISKS") : [get("RISKS")].filter(Boolean),
-    opportunities: getBlock("OPPORTUNITIES").length ? getBlock("OPPORTUNITIES") : [get("OPPORTUNITIES")].filter(Boolean),
-    whyItMatters: get("WHY_IT_MATTERS"),
-    genzSignal: get("GENZ_SIGNAL"),
-    patternTag: get("PATTERN_TAG") || "Emerging Signal",
+    urgency: (get("URGENCY") || "medium").toLowerCase(),
+    headline: get("HEADLINE") || "",
+    actions: actions.length > 0 ? actions : ["Assess strategic impact and develop response plan."],
+    risks: risks.length > 0 ? risks : ["Delayed response risks competitive disadvantage."],
+    opportunities: opportunities.length > 0 ? opportunities : ["First-mover positioning available."],
+    whyItMatters: get("WHY_IT_MATTERS") || get("WHY IT MATTERS") || "Strategic implications for market positioning.",
+    genzSignal: get("GENZ_SIGNAL") || get("GENZ SIGNAL") || "",
+    patternTag: get("PATTERN_TAG") || get("PATTERN TAG") || "Emerging Signal",
   };
 }
