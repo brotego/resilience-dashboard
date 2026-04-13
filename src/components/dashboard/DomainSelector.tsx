@@ -1,9 +1,19 @@
 import { DOMAINS } from "@/data/domains";
 import { DomainId } from "@/data/types";
 import { Briefcase, User, Users, Heart, Leaf } from "lucide-react";
+import { useLang } from "@/i18n/LanguageContext";
+import { TranslationKey } from "@/i18n/translations";
 
 const ICONS: Record<string, React.ElementType> = {
   Briefcase, User, Users, Heart, Leaf,
+};
+
+const DOMAIN_KEYS: Record<string, TranslationKey> = {
+  work: "domain.work",
+  selfhood: "domain.selfhood",
+  community: "domain.community",
+  aging: "domain.aging",
+  environment: "domain.environment",
 };
 
 interface Props {
@@ -12,6 +22,7 @@ interface Props {
 }
 
 const DomainSelector = ({ activeDomains, onToggle }: Props) => {
+  const { t } = useLang();
   return (
     <div className="flex flex-wrap gap-1.5">
       {DOMAINS.map((d) => {
@@ -28,7 +39,7 @@ const DomainSelector = ({ activeDomains, onToggle }: Props) => {
             }`}
           >
             {Icon && <Icon className="h-3 w-3 shrink-0" style={{ color: d.color }} />}
-            <span>{d.label}</span>
+            <span>{t(DOMAIN_KEYS[d.id])}</span>
           </button>
         );
       })}

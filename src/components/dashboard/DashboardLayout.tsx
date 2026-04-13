@@ -10,25 +10,29 @@ import AIInsightPanel from "./AIInsightPanel";
 import CountryOutlookPanel from "./CountryOutlookPanel";
 import GlobalMap from "./GlobalMap";
 import { useUnifiedSignals } from "@/hooks/useUnifiedSignals";
+import { useLang } from "@/i18n/LanguageContext";
 
 export type DashboardMode = "resilience" | "genz";
 
 const LiveClock = () => {
   const [now, setNow] = useState(new Date());
+  const { lang, t } = useLang();
   useEffect(() => {
-    const t = setInterval(() => setNow(new Date()), 1000);
-    return () => clearInterval(t);
+    const timer = setInterval(() => setNow(new Date()), 1000);
+    return () => clearInterval(timer);
   }, []);
+  const locale = t("clock.locale");
   return (
     <span className="font-mono text-[11px] text-muted-foreground tabular-nums">
-      {now.toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric", year: "numeric" })}
+      {now.toLocaleDateString(locale, { weekday: "short", month: "short", day: "numeric", year: "numeric" })}
       {" · "}
-      {now.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false })}
+      {now.toLocaleTimeString(locale, { hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false })}
     </span>
   );
 };
 
 const DashboardLayout = () => {
+  const { lang, setLang, t } = useLang();
   const [mode, setMode] = useState<DashboardMode>("resilience");
   const [activeDomains, setActiveDomains] = useState<DomainId[]>(["work", "selfhood", "community", "aging", "environment"]);
   const [activeMindset] = useState<MindsetId>("cracks");
@@ -36,11 +40,9 @@ const DashboardLayout = () => {
   const [selectedCompany, setSelectedCompany] = useState<CompanyId | null>("mori_building");
   const [selectedSignal, setSelectedSignal] = useState<UnifiedSignal | null>(null);
   const [selectedCountry, setSelectedCountry] = useState<string | null>(null);
-  const [lang, setLang] = useState<"en" | "jp">("en");
 
   const { signals, isLive } = useUnifiedSignals(mode, activeDomains, activeCategories, selectedCompany);
 
-  // Filter signals by mode for the map
   const visibleSignals = signals.filter(s => {
     if (mode === "resilience") return s.layer === "resilience" || s.layer === "live-news";
     return s.layer === "genz" || s.layer === "live-news";
@@ -81,10 +83,10 @@ const DashboardLayout = () => {
       <header className="flex items-center justify-between px-6 py-2.5 border-b border-border bg-card">
         <div className="flex flex-col">
           <h1 className="text-lg font-bold tracking-tight text-foreground">
-            Flourishing Through Resilience
+            {t("app.title")}
           </h1>
           <span className="text-[11px] text-muted-foreground">
-            Anchorstar × Mori Building
+            {t("app.subtitle")}
           </span>
         </div>
 
@@ -93,14 +95,14 @@ const DashboardLayout = () => {
           <LiveClock />
           <div className="h-4 w-px bg-border" />
           <span className="text-[11px] font-semibold text-primary tabular-nums">
-            {signalCount} active signals
+            {signalCount} {t("header.activeSignals")}
           </span>
           {isLive && (
             <>
               <div className="h-4 w-px bg-border" />
               <span className="text-[9px] font-bold text-green-400 uppercase tracking-wider flex items-center gap-1">
                 <span className="h-1.5 w-1.5 rounded-full bg-green-400 animate-pulse" />
-                LIVE
+                {t("header.live")}
               </span>
             </>
           )}
@@ -143,7 +145,7 @@ const DashboardLayout = () => {
                   : "bg-secondary text-muted-foreground hover:text-foreground"
               }`}
             >
-              Global Resilience
+              {t("mode.resilience")}
             </button>
             <button
               onClick={() => setMode("genz")}
@@ -153,7 +155,7 @@ const DashboardLayout = () => {
                   : "bg-secondary text-muted-foreground hover:text-foreground"
               }`}
             >
-              Gen Z Signal
+              {t("mode.genz")}
             </button>
           </div>
         </div>

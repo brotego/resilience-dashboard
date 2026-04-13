@@ -5,6 +5,7 @@ import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, Command
 import { Check, ChevronsUpDown } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
+import { useLang } from "@/i18n/LanguageContext";
 
 interface Props {
   selectedCompany: CompanyId | null;
@@ -13,6 +14,7 @@ interface Props {
 
 const CompanySelector = ({ selectedCompany, onSelect }: Props) => {
   const [open, setOpen] = useState(false);
+  const { t } = useLang();
   const selected = COMPANIES.find((c) => c.id === selectedCompany);
 
   return (
@@ -24,21 +26,21 @@ const CompanySelector = ({ selectedCompany, onSelect }: Props) => {
           aria-expanded={open}
           className="w-full justify-between bg-secondary/50 border-border text-sm h-9 rounded-lg font-normal"
         >
-          {selected ? selected.name : "All companies"}
+          {selected ? selected.name : t("company.all")}
           <ChevronsUpDown className="ml-2 h-3.5 w-3.5 shrink-0 opacity-50" />
         </Button>
       </PopoverTrigger>
       <PopoverContent className="w-[220px] p-0" align="end">
         <Command>
-          <CommandInput placeholder="Search company..." className="h-9" />
+          <CommandInput placeholder={t("company.search")} className="h-9" />
           <CommandList>
-            <CommandEmpty>No company found.</CommandEmpty>
+            <CommandEmpty>{t("company.empty")}</CommandEmpty>
             <CommandGroup>
               <CommandItem
                 value="all-companies"
                 onSelect={() => { onSelect(null); setOpen(false); }}
               >
-                All companies
+                {t("company.all")}
                 <Check className={cn("ml-auto h-4 w-4", !selectedCompany ? "opacity-100" : "opacity-0")} />
               </CommandItem>
               {COMPANIES.map((c) => (
