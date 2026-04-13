@@ -7,18 +7,15 @@ import {
   Marker,
 } from "react-simple-maps";
 import { geoCentroid, geoBounds } from "d3-geo";
-import { SIGNALS } from "@/data/signals";
-import { GENZ_SIGNALS } from "@/data/genzSignals";
 import { DOMAINS } from "@/data/domains";
 import { COMPANIES, CompanyId } from "@/data/companies";
 import { WORLD_CITIES } from "@/data/capitals";
-import { DomainId, MindsetId, ResilienceSignal } from "@/data/types";
-import { GenZCategoryId, GenZSignal } from "@/data/genzTypes";
+import { DomainId, MindsetId } from "@/data/types";
+import { GenZCategoryId } from "@/data/genzTypes";
+import { UnifiedSignal } from "@/data/unifiedSignalTypes";
 import { DashboardMode } from "./DashboardLayout";
 import { Plus, Minus } from "lucide-react";
-import { NewsDot } from "@/hooks/useGlobalNewsDots";
 
-// Higher resolution TopoJSON for smoother borders when zoomed
 const GEO_URL = "https://cdn.jsdelivr.net/npm/world-atlas@2/countries-50m.json";
 
 interface Props {
@@ -27,12 +24,11 @@ interface Props {
   activeMindset: MindsetId;
   activeCategories: GenZCategoryId[];
   selectedCompany: CompanyId | null;
-  onSignalClick: (signal: ResilienceSignal | GenZSignal, mode: DashboardMode) => void;
+  onSignalClick: (signal: UnifiedSignal) => void;
   onCountryClick: (countryName: string, geo: any) => void;
   selectedSignalId: string | null;
   selectedCountry: string | null;
-  newsDots?: NewsDot[];
-  liveSignals?: ResilienceSignal[];
+  signals: UnifiedSignal[];
 }
 
 const GENZ_COLOR = "#1ab5a5";
@@ -148,7 +144,6 @@ const COUNTRY_TIERS: Record<string, number> = {
   "Papua New Guinea": 3, "Gabon": 3,
 };
 
-// 30 largest countries that show as watermark labels at default zoom
 const WATERMARK_COUNTRIES = new Set([
   "Russia", "Canada", "United States of America", "China", "Brazil",
   "Australia", "India", "Argentina", "Kazakhstan", "Algeria",
@@ -158,32 +153,12 @@ const WATERMARK_COUNTRIES = new Set([
   "Bolivia", "Egypt", "Nigeria", "Tanzania", "Turkey",
 ]);
 
-function getCountryTier(name: string): number {
-  return COUNTRY_TIERS[name] || 4;
-}
-
+function getCountryTier(name: string): number { return COUNTRY_TIERS[name] || 4; }
 function getMinZoomForTier(tier: number): number {
-  switch (tier) {
-    case 1: return 1.3;
-    case 2: return 2;
-    case 3: return 3.5;
-    default: return 6;
-  }
+  switch (tier) { case 1: return 1.3; case 2: return 2; case 3: return 3.5; default: return 6; }
 }
-
 function getCityMinZoom(tier: 1 | 2 | 3 | 4): number {
-  switch (tier) {
-    case 1: return 3;
-    case 2: return 4;
-    case 3: return 5;
-    case 4: return 6.5;
-  }
-}
-
-function getShortTitle(title: string): string {
-  const words = title.split(" ");
-  if (words.length <= 4) return title;
-  return words.slice(0, 4).join(" ") + "…";
+  switch (tier) { case 1: return 3; case 2: return 4; case 3: return 5; case 4: return 6.5; }
 }
 
 function calcCountryZoom(geo: any): number {
@@ -191,8 +166,17 @@ function calcCountryZoom(geo: any): number {
   const lngSpan = Math.abs(bounds[1][0] - bounds[0][0]);
   const latSpan = Math.abs(bounds[1][1] - bounds[0][1]);
   const maxSpan = Math.max(lngSpan, latSpan);
-  const targetZoom = Math.min(MAX_ZOOM, Math.max(2, 120 / maxSpan));
-  return targetZoom;
+  return Math.min(MAX_ZOOM, Math.max(2, 120 / maxSpan));
+}
+
+function getSignalColor(signal: UnifiedSignal): string {
+  if (signal.layer === "genz") return GENZ_COLOR;
+  if (signal.layer === "live-news") return signal.category ? "#ff6701" : "#3b82f6";
+  if (signal.domain) {
+    const domain = DOMAINS.find(d => d.id === signal.domain);
+    return domain?.color || "hsl(38, 90%, 55%)";
+  }
+  return "#3b82f6";
 }
 
 const GlobalMap = memo(({
@@ -205,27 +189,22 @@ const GlobalMap = memo(({
   onCountryClick,
   selectedSignalId,
   selectedCountry,
-  newsDots = [],
-  liveSignals,
+  signals,
 }: Props) => {
   const [position, setPosition] = useState<{ coordinates: [number, number]; zoom: number }>({
-    coordinates: [30, 20],
-    zoom: 1.5,
+    coordinates: [30, 20], zoom: 1.5,
   });
   const [liveZoom, setLiveZoom] = useState(1.5);
-  const [tooltip, setTooltip] = useState<{ x: number; y: number; title: string; location: string; urgency: string } | null>(null);
-  const positionRef = useRef<{ coordinates: [number, number]; zoom: number }>({
-    coordinates: [30, 20],
-    zoom: 1.5,
-  });
+  const [tooltip, setTooltip] = useState<{ x: number; y: number; title: string; location: string; urgency: string; score: number } | null>(null);
+  const positionRef = useRef({ coordinates: [30, 20] as [number, number], zoom: 1.5 });
   const targetZoomRef = useRef(1.5);
   const animFrameRef = useRef<number | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
 
-  const showTooltip = useCallback((e: React.MouseEvent, title: string, location: string, urgency: string) => {
+  const showTooltip = useCallback((e: React.MouseEvent, title: string, location: string, urgency: string, score: number) => {
     const rect = containerRef.current?.getBoundingClientRect();
     if (!rect) return;
-    setTooltip({ x: e.clientX - rect.left + 12, y: e.clientY - rect.top - 10, title, location, urgency });
+    setTooltip({ x: e.clientX - rect.left + 12, y: e.clientY - rect.top - 10, title, location, urgency, score });
   }, []);
   const hideTooltip = useCallback(() => setTooltip(null), []);
 
@@ -233,13 +212,11 @@ const GlobalMap = memo(({
 
   const animateToPosition = useCallback((target: { coordinates: [number, number]; zoom: number }, easing: number = 0.08) => {
     if (animFrameRef.current) cancelAnimationFrame(animFrameRef.current);
-
     const step = () => {
       const prev = positionRef.current;
       const lngDiff = target.coordinates[0] - prev.coordinates[0];
       const latDiff = target.coordinates[1] - prev.coordinates[1];
       const zoomDiff = target.zoom - prev.zoom;
-
       if (Math.abs(lngDiff) < 0.02 && Math.abs(latDiff) < 0.02 && Math.abs(zoomDiff) < 0.005) {
         animFrameRef.current = null;
         positionRef.current = target;
@@ -247,21 +224,15 @@ const GlobalMap = memo(({
         setLiveZoom(target.zoom);
         return;
       }
-
       const next = {
-        coordinates: [
-          prev.coordinates[0] + lngDiff * easing,
-          prev.coordinates[1] + latDiff * easing,
-        ] as [number, number],
+        coordinates: [prev.coordinates[0] + lngDiff * easing, prev.coordinates[1] + latDiff * easing] as [number, number],
         zoom: prev.zoom + zoomDiff * easing,
       };
-
       positionRef.current = next;
       setPosition(next);
       setLiveZoom(next.zoom);
       animFrameRef.current = requestAnimationFrame(step);
     };
-
     animFrameRef.current = requestAnimationFrame(step);
   }, []);
 
@@ -278,15 +249,12 @@ const GlobalMap = memo(({
     animateToPosition(target, 0.06);
   }, [animateToPosition]);
 
-  // Pan so the dot is visible and not behind the right panel (320px wide)
   const panToSignal = useCallback((coords: [number, number]) => {
     const current = positionRef.current;
-    // Offset longitude slightly left so dot isn't hidden behind right panel
-    // At zoom 1.5, ~320px ≈ ~15° longitude. Scale inversely with zoom.
     const lngOffset = -12 / Math.max(1, current.zoom);
     const target = {
       coordinates: [coords[0] + lngOffset, coords[1]] as [number, number],
-      zoom: Math.max(current.zoom, 2), // ensure minimum useful zoom
+      zoom: Math.max(current.zoom, 2),
     };
     targetZoomRef.current = target.zoom;
     animateToPosition(target, 0.06);
@@ -299,9 +267,7 @@ const GlobalMap = memo(({
 
   const prevSelectedCountry = useRef(selectedCountry);
   useEffect(() => {
-    if (prevSelectedCountry.current && !selectedCountry) {
-      zoomToGlobalRef.current();
-    }
+    if (prevSelectedCountry.current && !selectedCountry) zoomToGlobalRef.current();
     prevSelectedCountry.current = selectedCountry;
   }, [selectedCountry]);
 
@@ -313,82 +279,45 @@ const GlobalMap = memo(({
 
   const handleMoveEnd = useCallback((pos: { coordinates: [number, number]; zoom: number }) => {
     const clampedCoords = clampCoords(pos.coordinates, pos.zoom);
-    const next = { coordinates: pos.coordinates, zoom: pos.zoom };
-    positionRef.current = next;
-    setPosition(next);
+    positionRef.current = { coordinates: pos.coordinates, zoom: pos.zoom };
+    setPosition({ coordinates: pos.coordinates, zoom: pos.zoom });
     setLiveZoom(pos.zoom);
     targetZoomRef.current = pos.zoom;
-
-    const needsSettle =
-      Math.abs(clampedCoords[0] - pos.coordinates[0]) > 0.02 ||
-      Math.abs(clampedCoords[1] - pos.coordinates[1]) > 0.02;
-
-    if (needsSettle) {
-      animateToPosition({ coordinates: clampedCoords, zoom: pos.zoom }, 0.07);
-    }
+    const needsSettle = Math.abs(clampedCoords[0] - pos.coordinates[0]) > 0.02 || Math.abs(clampedCoords[1] - pos.coordinates[1]) > 0.02;
+    if (needsSettle) animateToPosition({ coordinates: clampedCoords, zoom: pos.zoom }, 0.07);
   }, [animateToPosition]);
 
   const animateZoom = useCallback((targetZoom: number) => {
     targetZoomRef.current = targetZoom;
     const current = positionRef.current;
-    animateToPosition(
-      {
-        coordinates: clampCoords(current.coordinates, targetZoom),
-        zoom: targetZoom,
-      },
-      0.07,
-    );
+    animateToPosition({ coordinates: clampCoords(current.coordinates, targetZoom), zoom: targetZoom }, 0.07);
   }, [animateToPosition]);
 
   useEffect(() => {
     const el = containerRef.current;
     if (!el) return;
-
-    const preventBrowserZoom = (e: Event) => {
-      e.preventDefault();
-      e.stopPropagation();
-    };
-
-    const handleWheel = (e: WheelEvent) => {
-      if (e.ctrlKey) {
-        e.preventDefault();
-      }
-    };
-
+    const prevent = (e: Event) => { e.preventDefault(); e.stopPropagation(); };
+    const handleWheel = (e: WheelEvent) => { if (e.ctrlKey) e.preventDefault(); };
     el.addEventListener('wheel', handleWheel, { passive: false });
-    el.addEventListener('gesturestart', preventBrowserZoom);
-    el.addEventListener('gesturechange', preventBrowserZoom);
-    el.addEventListener('gestureend', preventBrowserZoom);
-
+    el.addEventListener('gesturestart', prevent);
+    el.addEventListener('gesturechange', prevent);
+    el.addEventListener('gestureend', prevent);
     return () => {
       el.removeEventListener('wheel', handleWheel);
-      el.removeEventListener('gesturestart', preventBrowserZoom);
-      el.removeEventListener('gesturechange', preventBrowserZoom);
-      el.removeEventListener('gestureend', preventBrowserZoom);
+      el.removeEventListener('gesturestart', prevent);
+      el.removeEventListener('gesturechange', prevent);
+      el.removeEventListener('gestureend', prevent);
     };
   }, []);
 
-  const zoomIn = useCallback(() => {
-    const newTarget = clampZoom(targetZoomRef.current * ZOOM_STEP);
-    animateZoom(newTarget);
-  }, [animateZoom]);
-
-  const zoomOut = useCallback(() => {
-    const newTarget = clampZoom(targetZoomRef.current / ZOOM_STEP);
-    animateZoom(newTarget);
-  }, [animateZoom]);
+  const zoomIn = useCallback(() => animateZoom(clampZoom(targetZoomRef.current * ZOOM_STEP)), [animateZoom]);
+  const zoomOut = useCallback(() => animateZoom(clampZoom(targetZoomRef.current / ZOOM_STEP)), [animateZoom]);
 
   const dotScale = 1 / liveZoom;
   const labelFontSize = Math.max(0.6, 5 / Math.pow(liveZoom, 1.05));
   const capitalFontSize = Math.max(0.5, 4 / Math.pow(liveZoom, 1.05));
   const capitalDotR = Math.max(0.4, 1.2 * dotScale);
-
-  const resilienceFiltered = mode === "resilience"
-    ? (liveSignals || SIGNALS.filter((s) => activeDomains.includes(s.domain)))
-    : [];
-  const genzFiltered = mode === "genz"
-    ? GENZ_SIGNALS.filter((s) => activeCategories.includes(s.category))
-    : [];
+  const currentZoom = liveZoom;
 
   const handleCountryClickCb = useCallback((geo: any) => {
     const name = geo.properties?.name || geo.properties?.NAME;
@@ -398,41 +327,20 @@ const GlobalMap = memo(({
     }
   }, [onCountryClick]);
 
-  const currentZoom = liveZoom;
-
   return (
-    <div
-      ref={containerRef}
-      className="w-full h-full bg-background relative"
-    >
-      {/* Zoom level indicator */}
+    <div ref={containerRef} className="w-full h-full bg-background relative">
+      {/* Zoom indicator */}
       <div className="absolute top-3 left-3 z-10 bg-background/80 backdrop-blur-sm border border-border rounded-md px-2 py-1 text-xs font-mono text-muted-foreground">
         {liveZoom.toFixed(1)}x
       </div>
 
       {/* Zoom controls */}
       <div className="absolute bottom-4 right-4 z-10 flex flex-col gap-1">
-        <button
-          onClick={zoomIn}
-          className="w-8 h-8 flex items-center justify-center bg-background/80 backdrop-blur-sm border border-border rounded-md text-foreground hover:bg-accent transition-colors"
-          aria-label="Zoom in"
-        >
-          <Plus size={16} />
-        </button>
-        <button
-          onClick={zoomOut}
-          className="w-8 h-8 flex items-center justify-center bg-background/80 backdrop-blur-sm border border-border rounded-md text-foreground hover:bg-accent transition-colors"
-          aria-label="Zoom out"
-        >
-          <Minus size={16} />
-        </button>
+        <button onClick={zoomIn} className="w-8 h-8 flex items-center justify-center bg-background/80 backdrop-blur-sm border border-border rounded-md text-foreground hover:bg-accent transition-colors" aria-label="Zoom in"><Plus size={16} /></button>
+        <button onClick={zoomOut} className="w-8 h-8 flex items-center justify-center bg-background/80 backdrop-blur-sm border border-border rounded-md text-foreground hover:bg-accent transition-colors" aria-label="Zoom out"><Minus size={16} /></button>
       </div>
 
-      <ComposableMap
-        projection="geoMercator"
-        projectionConfig={{ scale: 140, center: [0, 20] }}
-        style={{ width: "100%", height: "100%" }}
-      >
+      <ComposableMap projection="geoMercator" projectionConfig={{ scale: 140, center: [0, 20] }} style={{ width: "100%", height: "100%" }}>
         <ZoomableGroup
           center={position.coordinates}
           zoom={position.zoom}
@@ -448,8 +356,7 @@ const GlobalMap = memo(({
               <>
                 {geographies.map((geo) => {
                   const geoName = geo.properties?.name || geo.properties?.NAME || "";
-                  const isSelected = selectedCountry === geoName ||
-                    (selectedCountry && COUNTRY_ALIASES[geoName]?.some(a => a === selectedCountry));
+                  const isSelected = selectedCountry === geoName || (selectedCountry && COUNTRY_ALIASES[geoName]?.some(a => a === selectedCountry));
                   const isJapanGeo = geoName === "Japan";
                   const baseFill = isSelected ? "#1a2a35" : isJapanGeo ? "hsl(220, 14%, 18%)" : "hsl(220, 14%, 16%)";
                   const baseStroke = isSelected ? "rgba(18, 65, 234, 0.6)" : "hsl(220, 14%, 22%)";
@@ -470,116 +377,70 @@ const GlobalMap = memo(({
                   );
                 })}
 
-                {/* Watermark country labels — always visible at zoom 1+ */}
+                {/* Watermark country labels */}
                 {(() => {
                   const watermarkFontSize = Math.max(1.5, 8 / Math.pow(liveZoom, 0.9));
                   return geographies
-                    .filter((geo) => {
-                      const name = geo.properties?.name || geo.properties?.NAME || "";
-                      return WATERMARK_COUNTRIES.has(name);
-                    })
-                    .map((geo) => {
+                    .filter(geo => WATERMARK_COUNTRIES.has(geo.properties?.name || geo.properties?.NAME || ""))
+                    .map(geo => {
                       const name = geo.properties?.name || geo.properties?.NAME || "";
                       const override = LABEL_OVERRIDES[name];
                       const centroid = override || geoCentroid(geo) as [number, number];
                       if (!centroid || (centroid[0] === 0 && centroid[1] === 0)) return null;
                       const displayName = DISPLAY_NAMES[name] || name;
-                      // Fade out as regular labels appear
                       const opacity = currentZoom < 1.3 ? 0.3 : Math.max(0, 0.3 - (currentZoom - 1.3) * 0.15);
                       if (opacity <= 0.02) return null;
                       return (
                         <Marker key={`wm-${geo.rsmKey}`} coordinates={centroid}>
-                          <text
-                            textAnchor="middle"
-                            dy="0.35em"
-                            style={{
-                              fontFamily: "'Georgia', 'Times New Roman', serif",
-                              fill: "hsl(220, 10%, 35%)",
-                              fontSize: `${watermarkFontSize}px`,
-                              fontWeight: 400,
-                              letterSpacing: "0.15em",
-                              textTransform: "uppercase" as const,
-                              pointerEvents: "none",
-                              userSelect: "none",
-                              opacity,
-                              transition: "opacity 0.5s",
-                            }}
-                          >
-                            {displayName}
-                          </text>
+                          <text textAnchor="middle" dy="0.35em" style={{
+                            fontFamily: "'Georgia', 'Times New Roman', serif",
+                            fill: "hsl(220, 10%, 35%)", fontSize: `${watermarkFontSize}px`,
+                            fontWeight: 400, letterSpacing: "0.15em", textTransform: "uppercase",
+                            pointerEvents: "none", userSelect: "none", opacity, transition: "opacity 0.5s",
+                          }}>{displayName}</text>
                         </Marker>
                       );
                     });
                 })()}
 
-                {/* Country labels — progressive reveal with collision detection */}
+                {/* Country labels — progressive reveal */}
                 {(() => {
-                  const candidates = geographies
-                    .map((geo) => {
-                      const geoName = geo.properties?.name || geo.properties?.NAME || "";
-                      if (!geoName) return null;
-
-                      const tier = getCountryTier(geoName);
-                      const minZoom = getMinZoomForTier(tier);
-                      if (currentZoom < minZoom) return null;
-
-                      const override = LABEL_OVERRIDES[geoName];
-                      const centroid = override || geoCentroid(geo) as [number, number];
-                      if (!centroid || (centroid[0] === 0 && centroid[1] === 0)) return null;
-                      const displayName = DISPLAY_NAMES[geoName] || geoName;
-
-                      const fadeRange = minZoom * 0.3;
-                      const opacity = Math.min(1, (currentZoom - minZoom) / fadeRange + 0.5);
-
-                      return { geo, geoName, tier, centroid, displayName, opacity };
-                    })
-                    .filter(Boolean) as Array<{
-                      geo: any; geoName: string; tier: number;
-                      centroid: [number, number]; displayName: string; opacity: number;
-                    }>;
+                  const candidates = geographies.map(geo => {
+                    const geoName = geo.properties?.name || geo.properties?.NAME || "";
+                    if (!geoName) return null;
+                    const tier = getCountryTier(geoName);
+                    const minZoom = getMinZoomForTier(tier);
+                    if (currentZoom < minZoom) return null;
+                    const override = LABEL_OVERRIDES[geoName];
+                    const centroid = override || geoCentroid(geo) as [number, number];
+                    if (!centroid || (centroid[0] === 0 && centroid[1] === 0)) return null;
+                    const displayName = DISPLAY_NAMES[geoName] || geoName;
+                    const fadeRange = minZoom * 0.3;
+                    const opacity = Math.min(1, (currentZoom - minZoom) / fadeRange + 0.5);
+                    return { geo, geoName, tier, centroid, displayName, opacity };
+                  }).filter(Boolean) as Array<{ geo: any; geoName: string; tier: number; centroid: [number, number]; displayName: string; opacity: number }>;
 
                   candidates.sort((a, b) => a.tier - b.tier);
-
                   const charWidthDeg = (labelFontSize * 0.6) / currentZoom;
                   const labelHeightDeg = (labelFontSize * 1.4) / currentZoom;
-
                   const placed: Array<{ x: number; y: number; w: number; h: number }> = [];
                   const visible: typeof candidates = [];
-
                   for (const c of candidates) {
                     const w = c.displayName.length * charWidthDeg;
                     const h = labelHeightDeg;
                     const x = c.centroid[0] - w / 2;
                     const y = c.centroid[1] - h / 2;
-
-                    const overlaps = placed.some(
-                      (p) => x < p.x + p.w && x + w > p.x && y < p.y + p.h && y + h > p.y
-                    );
-
-                    if (!overlaps) {
-                      placed.push({ x, y, w, h });
-                      visible.push(c);
-                    }
+                    const overlaps = placed.some(p => x < p.x + p.w && x + w > p.x && y < p.y + p.h && y + h > p.y);
+                    if (!overlaps) { placed.push({ x, y, w, h }); visible.push(c); }
                   }
-
-                  return visible.map((c) => (
+                  return visible.map(c => (
                     <Marker key={`label-${c.geo.rsmKey}`} coordinates={c.centroid}>
-                      <text
-                        textAnchor="middle"
-                        dy="0.35em"
-                        style={{
-                          fontFamily: "'Noto Sans JP', system-ui, sans-serif",
-                          fill: "hsl(220, 10%, 42%)",
-                          fontSize: `${labelFontSize}px`,
-                          fontWeight: 500,
-                          pointerEvents: "none",
-                          userSelect: "none",
-                          opacity: c.opacity,
-                          transition: "opacity 0.3s",
-                        }}
-                      >
-                        {c.displayName}
-                      </text>
+                      <text textAnchor="middle" dy="0.35em" style={{
+                        fontFamily: "'Noto Sans JP', system-ui, sans-serif",
+                        fill: "hsl(220, 10%, 42%)", fontSize: `${labelFontSize}px`,
+                        fontWeight: 500, pointerEvents: "none", userSelect: "none",
+                        opacity: c.opacity, transition: "opacity 0.3s",
+                      }}>{c.displayName}</text>
                     </Marker>
                   ));
                 })()}
@@ -587,266 +448,106 @@ const GlobalMap = memo(({
             )}
           </Geographies>
 
-          {/* City markers — capitals + major cities, appear at zoom 3+ */}
-          {currentZoom >= 3 && WORLD_CITIES.map((city) => {
+          {/* City markers */}
+          {currentZoom >= 3 && WORLD_CITIES.map(city => {
             const minZoom = getCityMinZoom(city.tier);
             if (currentZoom < minZoom) return null;
-
             const fadeProgress = Math.min(1, (currentZoom - minZoom) / 1);
-
             return (
               <Marker key={`city-${city.name}-${city.country}`} coordinates={city.coordinates}>
-                <circle
-                  r={city.isCapital ? capitalDotR * 1.2 : capitalDotR}
-                  fill={city.isCapital ? "hsl(220, 20%, 60%)" : "hsl(220, 10%, 50%)"}
-                  opacity={fadeProgress * 0.8}
-                />
-                <text
-                  textAnchor="start"
-                  x={capitalDotR + 1.5 * dotScale}
-                  dy="0.3em"
-                  style={{
-                    fontFamily: "'Noto Sans JP', system-ui, sans-serif",
-                    fill: city.isCapital ? "hsl(220, 15%, 60%)" : "hsl(220, 10%, 50%)",
-                    fontSize: `${city.isCapital ? capitalFontSize * 1.1 : capitalFontSize * 0.9}px`,
-                    fontWeight: city.isCapital ? 500 : 400,
-                    fontStyle: city.isCapital ? "normal" : "italic",
-                    pointerEvents: "none",
-                    userSelect: "none",
-                    opacity: fadeProgress * 0.7,
-                    transition: "opacity 0.3s",
-                  }}
-                >
-                  {city.name}
-                </text>
+                <circle r={city.isCapital ? capitalDotR * 1.2 : capitalDotR} fill={city.isCapital ? "hsl(220, 20%, 60%)" : "hsl(220, 10%, 50%)"} opacity={fadeProgress * 0.8} />
+                <text textAnchor="start" x={capitalDotR + 1.5 * dotScale} dy="0.3em" style={{
+                  fontFamily: "'Noto Sans JP', system-ui, sans-serif",
+                  fill: city.isCapital ? "hsl(220, 15%, 60%)" : "hsl(220, 10%, 50%)",
+                  fontSize: `${city.isCapital ? capitalFontSize * 1.1 : capitalFontSize * 0.9}px`,
+                  fontWeight: city.isCapital ? 500 : 400, fontStyle: city.isCapital ? "normal" : "italic",
+                  pointerEvents: "none", userSelect: "none", opacity: fadeProgress * 0.7, transition: "opacity 0.3s",
+                }}>{city.name}</text>
               </Marker>
             );
           })}
 
-          {/* Resilience signals — urgency-based sizing */}
-          {mode === "resilience" &&
-            resilienceFiltered.map((signal) => {
-              const domain = DOMAINS.find((d) => d.id === signal.domain);
-              const color = domain?.color || "hsl(38, 90%, 55%)";
-              const relevant = selectedCompany
-                ? isRelevantToCompany(`${signal.title} ${signal.description}`, selectedCompany)
-                : false;
-              const dimmed = !!(selectedCompany && !relevant);
+          {/* UNIFIED SIGNAL DOTS */}
+          {signals.map(signal => {
+            const color = getSignalColor(signal);
+            const score = signal.resilienceScore;
+            const relevant = selectedCompany ? isRelevantToCompany(`${signal.title} ${signal.description}`, selectedCompany) : false;
+            const dimmed = !!(selectedCompany && !relevant && signal.layer !== "live-news");
 
-              const urgencyMultiplier = signal.intensity >= 9 ? 2.0
-                : signal.intensity >= 7 ? 1.5
-                : signal.intensity >= 5 ? 1.0
-                : 0.7;
-              const isCritical = signal.intensity >= 9;
-              const isHigh = signal.intensity >= 7;
-              const urgencyLabel = isCritical ? "Critical" : isHigh ? "High" : signal.intensity >= 5 ? "Medium" : "Low";
+            const urgencyMultiplier = score >= 9 ? 2.0 : score >= 7 ? 1.5 : score >= 4 ? 1.0 : 0.7;
+            const isCritical = score >= 9;
+            const isHigh = score >= 7;
+            const urgencyLabel = signal.urgency.charAt(0).toUpperCase() + signal.urgency.slice(1);
 
-              const baseR = (relevant ? 5 : 3.5) * urgencyMultiplier;
-              const r = baseR * dotScale;
-              const isSelected = selectedSignalId === signal.id;
-              const fillColor = color;
-
-              return (
-                <Marker
-                  key={signal.id}
-                  coordinates={signal.coordinates}
-                  onClick={() => {
-                    onSignalClick(signal, "resilience");
-                    panToSignal(signal.coordinates);
-                  }}
-                  style={{ cursor: "pointer" }}
-                >
-                  {/* Animated pulse glow for critical signals */}
-                  {isCritical && !dimmed && (
-                    <circle r={r * 3} fill={fillColor} opacity={0}>
-                      <animate attributeName="r" from={String(r * 1.5)} to={String(r * 4)} dur="2s" repeatCount="indefinite" />
-                      <animate attributeName="opacity" from="0.25" to="0" dur="2s" repeatCount="indefinite" />
-                    </circle>
-                  )}
-                  {isHigh && !isCritical && !dimmed && (
-                    <circle r={r * 2.2} fill={fillColor} opacity={0.12} />
-                  )}
-                  <circle r={r * 2} fill={fillColor} opacity={dimmed ? 0.04 : 0.15} />
-                  <circle
-                    r={r}
-                    fill={fillColor}
-                    stroke={fillColor}
-                    strokeWidth={1 * dotScale}
-                    opacity={dimmed ? 0.45 : signal.intensity < 5 ? 0.55 : 1}
-                    style={{ transition: "r 150ms ease, opacity 150ms ease" }}
-                    onMouseEnter={(e) => {
-                      e.currentTarget.setAttribute("r", String(r * 1.3));
-                      // Intensify glow
-                      const glow = e.currentTarget.previousElementSibling as SVGCircleElement | null;
-                      if (glow) glow.setAttribute("opacity", "0.3");
-                      showTooltip(e as any, signal.title, signal.location, urgencyLabel);
-                    }}
-                    onMouseMove={(e) => showTooltip(e as any, signal.title, signal.location, urgencyLabel)}
-                    onMouseLeave={(e) => {
-                      e.currentTarget.setAttribute("r", String(r));
-                      const glow = e.currentTarget.previousElementSibling as SVGCircleElement | null;
-                      if (glow) glow.setAttribute("opacity", "0.15");
-                      hideTooltip();
-                    }}
-                  />
-                  {/* Selection ring — animated pulse */}
-                  {isSelected && (
-                    <>
-                      <circle
-                        r={r * 2.5}
-                        fill="none"
-                        stroke="#1241ea"
-                        strokeWidth={1.5 * dotScale}
-                        opacity={0.7}
-                      >
-                        <animate attributeName="r" from={String(r * 2.2)} to={String(r * 3)} dur="1.5s" repeatCount="indefinite" />
-                        <animate attributeName="opacity" from="0.7" to="0.2" dur="1.5s" repeatCount="indefinite" />
-                      </circle>
-                      <circle
-                        r={r * 2}
-                        fill="none"
-                        stroke="#1241ea"
-                        strokeWidth={1 * dotScale}
-                        opacity={0.9}
-                      />
-                    </>
-                  )}
-                </Marker>
-              );
-            })}
-          {mode === "genz" &&
-            genzFiltered.map((signal) => {
-              const relevant = selectedCompany
-                ? isRelevantToCompany(`${signal.title} ${signal.description}`, selectedCompany)
-                : false;
-              const dimmed = !!(selectedCompany && !relevant);
-
-              const urgencyMultiplier = signal.intensity >= 9 ? 2.0
-                : signal.intensity >= 7 ? 1.5
-                : signal.intensity >= 5 ? 1.0
-                : 0.7;
-              const isCritical = signal.intensity >= 9;
-              const isHigh = signal.intensity >= 7;
-              const urgencyLabel = isCritical ? "Critical" : isHigh ? "High" : signal.intensity >= 5 ? "Medium" : "Low";
-
-              const baseR = (relevant ? 5 : 3.5) * urgencyMultiplier;
-              const r = baseR * dotScale;
-              const isSelected = selectedSignalId === signal.id;
-
-              return (
-                <Marker
-                  key={signal.id}
-                  coordinates={signal.coordinates}
-                  onClick={() => {
-                    onSignalClick(signal, "genz");
-                    panToSignal(signal.coordinates);
-                  }}
-                  style={{ cursor: "pointer" }}
-                >
-                  {isCritical && !dimmed && (
-                    <circle r={r * 3} fill={GENZ_COLOR} opacity={0}>
-                      <animate attributeName="r" from={String(r * 1.5)} to={String(r * 4)} dur="2s" repeatCount="indefinite" />
-                      <animate attributeName="opacity" from="0.25" to="0" dur="2s" repeatCount="indefinite" />
-                    </circle>
-                  )}
-                  {isHigh && !isCritical && !dimmed && (
-                    <circle r={r * 2.2} fill={GENZ_COLOR} opacity={0.12} />
-                  )}
-                  <circle r={r * 2} fill={GENZ_COLOR} opacity={dimmed ? 0.04 : 0.15} />
-                  <circle
-                    r={r}
-                    fill={GENZ_COLOR}
-                    stroke={GENZ_COLOR}
-                    strokeWidth={1 * dotScale}
-                    opacity={dimmed ? 0.45 : signal.intensity < 5 ? 0.55 : 1}
-                    style={{ transition: "r 150ms ease, opacity 150ms ease" }}
-                    onMouseEnter={(e) => {
-                      e.currentTarget.setAttribute("r", String(r * 1.3));
-                      const glow = e.currentTarget.previousElementSibling as SVGCircleElement | null;
-                      if (glow) glow.setAttribute("opacity", "0.3");
-                      showTooltip(e as any, signal.title, signal.location, urgencyLabel);
-                    }}
-                    onMouseMove={(e) => showTooltip(e as any, signal.title, signal.location, urgencyLabel)}
-                    onMouseLeave={(e) => {
-                      e.currentTarget.setAttribute("r", String(r));
-                      const glow = e.currentTarget.previousElementSibling as SVGCircleElement | null;
-                      if (glow) glow.setAttribute("opacity", "0.15");
-                      hideTooltip();
-                    }}
-                  />
-                  {isSelected && (
-                    <>
-                      <circle
-                        r={r * 2.5}
-                        fill="none"
-                        stroke="#1241ea"
-                        strokeWidth={1.5 * dotScale}
-                        opacity={0.7}
-                      >
-                        <animate attributeName="r" from={String(r * 2.2)} to={String(r * 3)} dur="1.5s" repeatCount="indefinite" />
-                        <animate attributeName="opacity" from="0.7" to="0.2" dur="1.5s" repeatCount="indefinite" />
-                      </circle>
-                      <circle
-                        r={r * 2}
-                        fill="none"
-                        stroke="#1241ea"
-                        strokeWidth={1 * dotScale}
-                        opacity={0.9}
-                      />
-                    </>
-                  )}
-                </Marker>
-              );
-            })}
-
-          {/* Live news dots from API */}
-          {newsDots.map((dot) => {
-            const isBiz = dot.type === "business";
-            const color = isBiz ? "#3b82f6" : "#ff6701";
-            const r = 2.2 * dotScale;
+            const baseR = (relevant ? 5 : 3.5) * urgencyMultiplier;
+            const r = baseR * dotScale;
+            const isSelected = selectedSignalId === signal.id;
 
             return (
-              <Marker key={dot.id} coordinates={dot.coordinates} style={{ cursor: "pointer" }}>
-                {/* Pulsing ring */}
-                <circle r={r * 3} fill={color} opacity={0.08}>
-                  <animate attributeName="r" from={String(r * 2)} to={String(r * 4)} dur="2.5s" repeatCount="indefinite" />
-                  <animate attributeName="opacity" from="0.12" to="0" dur="2.5s" repeatCount="indefinite" />
-                </circle>
-                {/* Dot */}
+              <Marker
+                key={signal.id}
+                coordinates={signal.coordinates}
+                onClick={() => { onSignalClick(signal); panToSignal(signal.coordinates); }}
+                style={{ cursor: "pointer" }}
+              >
+                {isCritical && !dimmed && (
+                  <circle r={r * 3} fill={color} opacity={0}>
+                    <animate attributeName="r" from={String(r * 1.5)} to={String(r * 4)} dur="2s" repeatCount="indefinite" />
+                    <animate attributeName="opacity" from="0.25" to="0" dur="2s" repeatCount="indefinite" />
+                  </circle>
+                )}
+                {isHigh && !isCritical && !dimmed && (
+                  <circle r={r * 2.2} fill={color} opacity={0.12} />
+                )}
+                <circle r={r * 2} fill={color} opacity={dimmed ? 0.04 : 0.15} />
                 <circle
                   r={r}
                   fill={color}
-                  opacity={0.85}
                   stroke={color}
-                  strokeWidth={0.5 * dotScale}
-                  style={{ transition: "r 150ms ease" }}
+                  strokeWidth={1 * dotScale}
+                  opacity={dimmed ? 0.45 : score < 4 ? 0.55 : 1}
+                  style={{ transition: "r 150ms ease, opacity 150ms ease" }}
                   onMouseEnter={(e) => {
                     e.currentTarget.setAttribute("r", String(r * 1.3));
-                    showTooltip(e as any, dot.title, dot.source || "News", isBiz ? "Business" : "Gen Z");
+                    const glow = e.currentTarget.previousElementSibling as SVGCircleElement | null;
+                    if (glow) glow.setAttribute("opacity", "0.3");
+                    showTooltip(e as any, signal.title, signal.location, urgencyLabel, score);
                   }}
-                  onMouseMove={(e) => showTooltip(e as any, dot.title, dot.source || "News", isBiz ? "Business" : "Gen Z")}
+                  onMouseMove={(e) => showTooltip(e as any, signal.title, signal.location, urgencyLabel, score)}
                   onMouseLeave={(e) => {
                     e.currentTarget.setAttribute("r", String(r));
+                    const glow = e.currentTarget.previousElementSibling as SVGCircleElement | null;
+                    if (glow) glow.setAttribute("opacity", "0.15");
                     hideTooltip();
                   }}
                 />
+                {isSelected && (
+                  <>
+                    <circle r={r * 2.5} fill="none" stroke="#1241ea" strokeWidth={1.5 * dotScale} opacity={0.7}>
+                      <animate attributeName="r" from={String(r * 2.2)} to={String(r * 3)} dur="1.5s" repeatCount="indefinite" />
+                      <animate attributeName="opacity" from="0.7" to="0.2" dur="1.5s" repeatCount="indefinite" />
+                    </circle>
+                    <circle r={r * 2} fill="none" stroke="#1241ea" strokeWidth={1 * dotScale} opacity={0.9} />
+                  </>
+                )}
               </Marker>
             );
           })}
         </ZoomableGroup>
       </ComposableMap>
 
-      {/* Custom HTML tooltip overlay */}
+      {/* Tooltip overlay */}
       {tooltip && (
-        <div
-          className="absolute z-50 pointer-events-none"
-          style={{ left: tooltip.x, top: tooltip.y, transform: "translateY(-100%)" }}
-        >
-          <div className="bg-card/95 backdrop-blur-sm border border-border rounded-lg px-3 py-2 shadow-lg max-w-[220px]">
+        <div className="absolute z-50 pointer-events-none" style={{ left: tooltip.x, top: tooltip.y, transform: "translateY(-100%)" }}>
+          <div className="bg-card/95 backdrop-blur-sm border border-border rounded-lg px-3 py-2 shadow-lg max-w-[240px]">
             <p className="text-[11px] font-bold text-foreground leading-tight truncate">{tooltip.title}</p>
             <div className="flex items-center gap-2 mt-1">
               <span className="text-[10px] text-muted-foreground">{tooltip.location}</span>
               <span className="text-[9px] font-bold uppercase tracking-wider text-primary">{tooltip.urgency}</span>
+            </div>
+            <div className="flex items-center gap-1 mt-1">
+              <span className="text-[9px] text-muted-foreground">Resilience Exposure:</span>
+              <span className="text-[10px] font-bold text-primary">{tooltip.score}/10</span>
             </div>
           </div>
         </div>
