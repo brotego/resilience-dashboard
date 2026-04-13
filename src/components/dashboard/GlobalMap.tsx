@@ -445,6 +445,48 @@ const GlobalMap = memo(({
                   );
                 })}
 
+                {/* Watermark country labels — always visible at zoom 1+ */}
+                {(() => {
+                  const watermarkFontSize = Math.max(1.5, 8 / Math.pow(liveZoom, 0.9));
+                  return geographies
+                    .filter((geo) => {
+                      const name = geo.properties?.name || geo.properties?.NAME || "";
+                      return WATERMARK_COUNTRIES.has(name);
+                    })
+                    .map((geo) => {
+                      const name = geo.properties?.name || geo.properties?.NAME || "";
+                      const override = LABEL_OVERRIDES[name];
+                      const centroid = override || geoCentroid(geo) as [number, number];
+                      if (!centroid || (centroid[0] === 0 && centroid[1] === 0)) return null;
+                      const displayName = DISPLAY_NAMES[name] || name;
+                      // Fade out as regular labels appear
+                      const opacity = currentZoom < 1.3 ? 0.3 : Math.max(0, 0.3 - (currentZoom - 1.3) * 0.15);
+                      if (opacity <= 0.02) return null;
+                      return (
+                        <Marker key={`wm-${geo.rsmKey}`} coordinates={centroid}>
+                          <text
+                            textAnchor="middle"
+                            dy="0.35em"
+                            style={{
+                              fontFamily: "'Georgia', 'Times New Roman', serif",
+                              fill: "hsl(220, 10%, 35%)",
+                              fontSize: `${watermarkFontSize}px`,
+                              fontWeight: 400,
+                              letterSpacing: "0.15em",
+                              textTransform: "uppercase" as const,
+                              pointerEvents: "none",
+                              userSelect: "none",
+                              opacity,
+                              transition: "opacity 0.5s",
+                            }}
+                          >
+                            {displayName}
+                          </text>
+                        </Marker>
+                      );
+                    });
+                })()}
+
                 {/* Country labels — progressive reveal with collision detection */}
                 {(() => {
                   const candidates = geographies
