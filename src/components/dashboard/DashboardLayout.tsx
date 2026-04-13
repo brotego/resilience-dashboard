@@ -1,4 +1,4 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 import { DomainId, MindsetId, ResilienceSignal } from "@/data/types";
 import { GenZCategoryId, GenZSignal } from "@/data/genzTypes";
 import { CompanyId } from "@/data/companies";
@@ -10,8 +10,25 @@ import CountryOutlookPanel from "./CountryOutlookPanel";
 import GlobalMap from "./GlobalMap";
 import { useGlobalNewsDots } from "@/hooks/useGlobalNewsDots";
 import { useLiveSignals } from "@/hooks/useLiveSignals";
+import { SIGNALS } from "@/data/signals";
+import { GENZ_SIGNALS } from "@/data/genzSignals";
 
 export type DashboardMode = "resilience" | "genz";
+
+const LiveClock = () => {
+  const [now, setNow] = useState(new Date());
+  useEffect(() => {
+    const t = setInterval(() => setNow(new Date()), 1000);
+    return () => clearInterval(t);
+  }, []);
+  return (
+    <span className="font-mono text-[11px] text-muted-foreground tabular-nums">
+      {now.toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric", year: "numeric" })}
+      {" · "}
+      {now.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false })}
+    </span>
+  );
+};
 
 const DashboardLayout = () => {
   const { dots: newsDots } = useGlobalNewsDots();
@@ -22,7 +39,12 @@ const DashboardLayout = () => {
   const [selectedCompany, setSelectedCompany] = useState<CompanyId | null>("mori_building");
   const [selectedSignal, setSelectedSignal] = useState<ResilienceSignal | GenZSignal | null>(null);
   const [selectedCountry, setSelectedCountry] = useState<string | null>(null);
+  const [lang, setLang] = useState<"en" | "jp">("en");
   const { signals: liveSignals } = useLiveSignals(activeDomains);
+
+  const signalCount = mode === "resilience"
+    ? (liveSignals?.length || SIGNALS.filter(s => activeDomains.includes(s.domain)).length) + newsDots.length
+    : GENZ_SIGNALS.filter(s => activeCategories.includes(s.category)).length + newsDots.length;
 
   const toggleDomain = (id: DomainId) => {
     setActiveDomains((prev) =>
@@ -53,8 +75,8 @@ const DashboardLayout = () => {
 
   return (
     <div className="h-screen flex flex-col bg-background overflow-hidden">
-      {/* Top bar: mode toggle + company selector */}
-      <header className="flex items-center justify-between px-6 py-3 border-b border-border bg-card">
+      {/* Top bar */}
+      <header className="flex items-center justify-between px-6 py-2.5 border-b border-border bg-card">
         <div className="flex flex-col">
           <h1 className="text-lg font-bold tracking-tight text-foreground">
             Flourishing Through Resilience
@@ -62,6 +84,38 @@ const DashboardLayout = () => {
           <span className="text-[11px] text-muted-foreground">
             Anchorstar × Mori Building
           </span>
+        </div>
+
+        {/* Center info strip */}
+        <div className="flex items-center gap-4">
+          <LiveClock />
+          <div className="h-4 w-px bg-border" />
+          <span className="text-[11px] font-semibold text-primary tabular-nums">
+            {signalCount} active signals
+          </span>
+          <div className="h-4 w-px bg-border" />
+          <div className="flex items-center gap-0.5">
+            <button
+              onClick={() => setLang("en")}
+              className={`px-2 py-0.5 text-[10px] font-bold rounded-l-md transition-colors ${
+                lang === "en"
+                  ? "bg-primary text-primary-foreground"
+                  : "bg-secondary text-muted-foreground hover:text-foreground"
+              }`}
+            >
+              EN
+            </button>
+            <button
+              onClick={() => setLang("jp")}
+              className={`px-2 py-0.5 text-[10px] font-bold rounded-r-md transition-colors ${
+                lang === "jp"
+                  ? "bg-primary text-primary-foreground"
+                  : "bg-secondary text-muted-foreground hover:text-foreground"
+              }`}
+            >
+              JP
+            </button>
+          </div>
         </div>
 
         <div className="flex items-center gap-4">

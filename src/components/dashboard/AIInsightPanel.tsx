@@ -29,6 +29,17 @@ interface Props {
   onClose: () => void;
 }
 
+function timeAgo(date: Date): string {
+  const seconds = Math.floor((Date.now() - date.getTime()) / 1000);
+  if (seconds < 60) return "just now";
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes}m ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.floor(hours / 24);
+  return `${days}d ago`;
+}
+
 const UrgencyBadge = ({ level }: { level: string }) => {
   const colors: Record<string, string> = {
     high: "bg-red-500/20 text-red-400 border-red-500/30",
@@ -73,7 +84,8 @@ const AIInsightPanel = ({
   const company = selectedCompany ? COMPANIES.find((c) => c.id === selectedCompany) : null;
   const isResilience = mode === "resilience";
 
-  // Fetch AI insight whenever signal or company changes
+  const modeLabel = isResilience ? "RESILIENCE INTELLIGENCE BRIEF" : "GEN Z SIGNAL BRIEF";
+
   useEffect(() => {
     if (!selectedSignal) {
       setInsight(null);
@@ -121,7 +133,10 @@ const AIInsightPanel = ({
     return (
       <div className="h-full flex flex-col bg-card border-l border-border">
         <div className="px-4 py-3 border-b border-border">
-          <h3 className="text-sm font-bold uppercase tracking-wider text-primary">
+          <p className="text-[10px] font-mono font-bold uppercase tracking-[0.15em] text-primary mb-1">
+            {modeLabel}
+          </p>
+          <h3 className="text-sm font-bold uppercase tracking-wider text-foreground">
             Intelligence Panel
           </h3>
         </div>
@@ -143,24 +158,35 @@ const AIInsightPanel = ({
     ? DOMAINS.find((d) => d.id === (selectedSignal as ResilienceSignal).domain)
     : GENZ_CATEGORIES.find((c) => c.id === (selectedSignal as GenZSignal).category);
 
-  const companyLabel = company?.name || "General";
+  const companyLabel = company?.name;
   const numberedIcon = (i: number) => ["①", "②", "③"][i] || `${i + 1}`;
+
+  // Build a "published" date from signal year or fallback
+  const signalDate = (selectedSignal as any).year
+    ? new Date((selectedSignal as any).year, 0, 1)
+    : new Date();
+  const relativeTime = timeAgo(signalDate);
 
   return (
     <div className="h-full flex flex-col bg-card border-l border-border">
-      {/* Header */}
-      <div className="px-4 py-3 border-b border-border flex items-start justify-between gap-2">
-        <div className="flex items-center gap-2 flex-wrap">
-          {insight && <UrgencyBadge level={insight.urgency} />}
-          {domainOrCategory && <Tag label={domainOrCategory.label} color="#1241ea" />}
-          {insight?.patternTag && <Tag label={insight.patternTag} color="hsl(220, 14%, 30%)" />}
+      {/* Mode header + urgency */}
+      <div className="px-4 py-3 border-b border-border">
+        <p className="text-[10px] font-mono font-bold uppercase tracking-[0.15em] text-primary mb-2">
+          {modeLabel}
+        </p>
+        <div className="flex items-start justify-between gap-2">
+          <div className="flex items-center gap-2 flex-wrap">
+            {insight && <UrgencyBadge level={insight.urgency} />}
+            {domainOrCategory && <Tag label={domainOrCategory.label} color="#1241ea" />}
+            {insight?.patternTag && <Tag label={insight.patternTag} color="hsl(220, 14%, 30%)" />}
+          </div>
+          <button
+            onClick={onClose}
+            className="text-muted-foreground hover:text-foreground transition-colors p-0.5 shrink-0"
+          >
+            <X className="h-4 w-4" />
+          </button>
         </div>
-        <button
-          onClick={onClose}
-          className="text-muted-foreground hover:text-foreground transition-colors p-0.5 shrink-0"
-        >
-          <X className="h-4 w-4" />
-        </button>
       </div>
 
       {/* Scrollable content */}
@@ -170,11 +196,11 @@ const AIInsightPanel = ({
         <div>
           <h2 className="text-base font-bold text-foreground leading-snug">{selectedSignal.title}</h2>
           <p className="text-[11px] text-muted-foreground mt-1">
-            {selectedSignal.location} · {(selectedSignal as any).source || "Live Signal"} · {new Date().toLocaleDateString("en-US", { month: "short", year: "numeric" })}
+            {selectedSignal.location} · {(selectedSignal as any).source || "Live Signal"} · <span className="text-primary/70">{relativeTime}</span>
           </p>
         </div>
 
-        {/* AI HEADLINE — super short summary */}
+        {/* Loading */}
         {loading && (
           <div className="flex items-center gap-2 text-muted-foreground text-xs py-8 justify-center">
             <Loader2 className="h-4 w-4 animate-spin" />
@@ -198,7 +224,7 @@ const AIInsightPanel = ({
             {/* 2. WHAT TO DO */}
             <div className="rounded-xl bg-accent/10 border border-accent/20 p-3">
               <h4 className="text-xs font-bold uppercase tracking-wider text-accent mb-2">
-                What To Do{company ? ` — ${company.name}` : ""}
+                What To Do{companyLabel ? ` — ${companyLabel}` : ""}
               </h4>
               <div className="space-y-2">
                 {insight.actions.map((a, i) => (
@@ -235,12 +261,12 @@ const AIInsightPanel = ({
             {/* 4. WHY IT MATTERS */}
             <div className="rounded-xl bg-primary/10 border border-primary/20 p-3">
               <h4 className="text-xs font-bold uppercase tracking-wider text-primary mb-1.5">
-                Why This Matters{company ? ` — ${company.name}` : ""}
+                Why This Matters{companyLabel ? ` — ${companyLabel}` : ""}
               </h4>
               <p className="text-[12px] text-foreground leading-relaxed">{insight.whyItMatters}</p>
             </div>
 
-            {/* 5. DEEPER CONTEXT — collapsible */}
+            {/* 5. DEEPER CONTEXT */}
             <div className="border-t border-border pt-2">
               <button
                 onClick={() => setContextOpen(!contextOpen)}
