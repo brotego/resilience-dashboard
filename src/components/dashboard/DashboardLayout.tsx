@@ -166,7 +166,7 @@ const DashboardLayout = () => {
           />
 
           {/* Bottom-left floating domain/category selector */}
-          <div className="absolute bottom-4 left-4 z-10 bg-card/80 backdrop-blur-md border border-border/50 rounded-lg p-2 shadow-md">
+          <div className="absolute bottom-4 left-4 z-10 bg-card/90 backdrop-blur-md border border-border rounded-lg p-2 shadow-lg">
             {mode === "resilience" ? (
               <DomainSelector activeDomains={activeDomains} onToggle={toggleDomain} />
             ) : (

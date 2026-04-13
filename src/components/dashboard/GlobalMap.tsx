@@ -666,7 +666,7 @@ const GlobalMap = memo(({
                   {isHigh && !isCritical && !dimmed && (
                     <circle r={r * 2.2} fill={fillColor} opacity={0.12} />
                   )}
-                  <circle r={r * 2} fill={fillColor} opacity={dimmed ? 0 : 0.15} />
+                  <circle r={r * 2} fill={fillColor} opacity={dimmed ? 0.04 : 0.15} />
                   <circle
                     r={r}
                     fill={fillColor}
@@ -752,7 +752,7 @@ const GlobalMap = memo(({
                   {isHigh && !isCritical && !dimmed && (
                     <circle r={r * 2.2} fill={GENZ_COLOR} opacity={0.12} />
                   )}
-                  <circle r={r * 2} fill={GENZ_COLOR} opacity={dimmed ? 0 : 0.15} />
+                  <circle r={r * 2} fill={GENZ_COLOR} opacity={dimmed ? 0.04 : 0.15} />
                   <circle
                     r={r}
                     fill={GENZ_COLOR}
