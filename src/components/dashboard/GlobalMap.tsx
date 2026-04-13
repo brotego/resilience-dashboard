@@ -680,14 +680,22 @@ const GlobalMap = memo(({
               );
             })}
 
-          {/* Gen Z signals */}
+          {/* Gen Z signals — urgency-based sizing */}
           {mode === "genz" &&
             genzFiltered.map((signal) => {
               const relevant = selectedCompany
                 ? isRelevantToCompany(`${signal.title} ${signal.description}`, selectedCompany)
                 : false;
               const dimmed = !!(selectedCompany && !relevant && !signal.isJapan);
-              const baseR = signal.isJapan ? 6 : relevant ? 6 : 3 + signal.intensity * 0.4;
+
+              const urgencyMultiplier = signal.intensity >= 9 ? 2.0
+                : signal.intensity >= 7 ? 1.5
+                : signal.intensity >= 5 ? 1.0
+                : 0.7;
+              const isCritical = signal.intensity >= 9;
+              const isHigh = signal.intensity >= 7;
+
+              const baseR = (signal.isJapan ? 5 : relevant ? 5 : 3.5) * urgencyMultiplier;
               const r = baseR * dotScale;
               const isSelected = selectedSignalId === signal.id;
 
@@ -699,13 +707,22 @@ const GlobalMap = memo(({
                   style={{ cursor: "pointer" }}
                 >
                   <title>{getShortTitle(signal.title)}</title>
+                  {isCritical && !dimmed && (
+                    <circle r={r * 3} fill={GENZ_COLOR} opacity={0}>
+                      <animate attributeName="r" from={String(r * 1.5)} to={String(r * 4)} dur="2s" repeatCount="indefinite" />
+                      <animate attributeName="opacity" from="0.25" to="0" dur="2s" repeatCount="indefinite" />
+                    </circle>
+                  )}
+                  {isHigh && !isCritical && !dimmed && (
+                    <circle r={r * 2.2} fill={GENZ_COLOR} opacity={0.12} />
+                  )}
                   <circle r={r * 2} fill={GENZ_COLOR} opacity={dimmed ? 0 : 0.15} />
                   <circle
                     r={r}
                     fill={GENZ_COLOR}
                     stroke={isSelected ? "#ffffff" : GENZ_COLOR}
                     strokeWidth={isSelected ? 2 * dotScale : 1 * dotScale}
-                    opacity={dimmed ? 0.25 : 1}
+                    opacity={dimmed ? 0.2 : signal.intensity < 5 ? 0.55 : 1}
                     className="transition-all duration-200 hover:opacity-100"
                     onMouseEnter={(e) => {
                       const el = e.currentTarget;
