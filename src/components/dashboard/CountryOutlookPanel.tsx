@@ -10,6 +10,7 @@ import { GenZSignal } from "@/data/genzTypes";
 import { DashboardMode } from "./DashboardLayout";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import NewsFeedSection from "./NewsFeedSection";
+import { useLang } from "@/i18n/LanguageContext";
 
 interface Props {
   countryName: string;
@@ -35,7 +36,6 @@ function findAllMatchingCountryNames(countryName: string): string[] {
   return [countryName];
 }
 
-// Hardcoded resilience exposure scores
 const RESILIENCE_SCORES: Record<string, number> = {
   "United States of America": 78, "Japan": 92, "United Kingdom": 71, "Germany": 68,
   "France": 65, "China": 74, "India": 69, "Brazil": 55, "Australia": 72,
@@ -61,7 +61,49 @@ const COUNTRY_REGIONS: Record<string, string> = {
   "Turkey": "Middle East", "Iran": "Middle East", "Saudi Arabia": "Middle East",
 };
 
-// Japan perception by country
+const COUNTRY_REGIONS_JP: Record<string, string> = {
+  "United States of America": "北米", "Japan": "東アジア", "United Kingdom": "西ヨーロッパ",
+  "Germany": "西ヨーロッパ", "France": "西ヨーロッパ", "China": "東アジア",
+  "India": "南アジア", "Brazil": "南米", "Australia": "オセアニア",
+  "South Korea": "東アジア", "Indonesia": "東南アジア", "Nigeria": "西アフリカ",
+  "Kenya": "東アフリカ", "Thailand": "東南アジア", "Sweden": "北ヨーロッパ",
+  "Denmark": "北ヨーロッパ", "Singapore": "東南アジア", "Egypt": "北アフリカ",
+  "South Africa": "南アフリカ", "Colombia": "南米", "Argentina": "南米",
+  "Vietnam": "東南アジア", "Philippines": "東南アジア", "Belgium": "西ヨーロッパ",
+  "Netherlands": "西ヨーロッパ", "Ghana": "西アフリカ", "Kazakhstan": "中央アジア",
+  "United Arab Emirates": "中東", "Peru": "南米", "Chile": "南米",
+  "Russia": "ユーラシア", "Canada": "北米", "Mexico": "北米",
+  "Turkey": "中東", "Iran": "中東", "Saudi Arabia": "中東",
+};
+
+const COUNTRY_NAMES_JP: Record<string, string> = {
+  "United States of America": "アメリカ合衆国", "Japan": "日本", "United Kingdom": "イギリス",
+  "Germany": "ドイツ", "France": "フランス", "China": "中国",
+  "India": "インド", "Brazil": "ブラジル", "Australia": "オーストラリア",
+  "South Korea": "韓国", "Indonesia": "インドネシア", "Nigeria": "ナイジェリア",
+  "Kenya": "ケニア", "Thailand": "タイ", "Sweden": "スウェーデン",
+  "Denmark": "デンマーク", "Singapore": "シンガポール", "Egypt": "エジプト",
+  "South Africa": "南アフリカ", "Colombia": "コロンビア", "Argentina": "アルゼンチン",
+  "Vietnam": "ベトナム", "Philippines": "フィリピン", "Belgium": "ベルギー",
+  "Netherlands": "オランダ", "Ghana": "ガーナ", "Kazakhstan": "カザフスタン",
+  "United Arab Emirates": "アラブ首長国連邦", "Peru": "ペルー", "Chile": "チリ",
+  "Russia": "ロシア", "Canada": "カナダ", "Mexico": "メキシコ",
+  "Turkey": "トルコ", "Iran": "イラン", "Saudi Arabia": "サウジアラビア",
+  "Taiwan": "台湾", "New Zealand": "ニュージーランド", "Israel": "イスラエル",
+  "Malaysia": "マレーシア", "Pakistan": "パキスタン", "Bangladesh": "バングラデシュ",
+  "Sri Lanka": "スリランカ", "Nepal": "ネパール", "Myanmar": "ミャンマー",
+  "Cambodia": "カンボジア", "Morocco": "モロッコ", "Tunisia": "チュニジア",
+  "Ethiopia": "エチオピア", "Tanzania": "タンザニア", "Rwanda": "ルワンダ",
+  "Senegal": "セネガル", "Cuba": "キューバ", "Jamaica": "ジャマイカ",
+  "Iceland": "アイスランド", "Norway": "ノルウェー", "Finland": "フィンランド",
+  "Ireland": "アイルランド", "Poland": "ポーランド", "Ukraine": "ウクライナ",
+  "Romania": "ルーマニア", "Czech Republic": "チェコ", "Austria": "オーストリア",
+  "Switzerland": "スイス", "Portugal": "ポルトガル", "Greece": "ギリシャ",
+  "Hungary": "ハンガリー", "Georgia": "ジョージア", "Uzbekistan": "ウズベキスタン",
+  "Jordan": "ヨルダン", "Lebanon": "レバノン", "Qatar": "カタール",
+  "Namibia": "ナミビア", "Spain": "スペイン", "Italy": "イタリア",
+};
+
 const JAPAN_PERCEPTION: Record<string, string> = {
   "United States of America": "Strong cultural affinity through anime, gaming, and automotive. Japanese brands are seen as premium and reliable. Growing interest in Japanese work culture reforms.",
   "United Kingdom": "Japan is viewed as a sophisticated innovation partner. Post-Brexit trade deal strengthens bilateral ties. Strong interest in Japanese design and craftsmanship.",
@@ -78,38 +120,58 @@ const JAPAN_PERCEPTION: Record<string, string> = {
   "Singapore": "Japan as a premium lifestyle and innovation benchmark. Strong business ties in finance and technology. Japanese F&B and retail highly popular.",
 };
 
-// Company-specific country insights
-function getCompanyCountryInsight(companyId: CompanyId | null, countryName: string): string {
-  if (!companyId) return "Select a company to see tailored strategic insights for this market.";
+const JAPAN_PERCEPTION_JP: Record<string, string> = {
+  "United States of America": "アニメ、ゲーム、自動車を通じた強い文化的親和性。日本ブランドはプレミアムで信頼性が高いと見なされている。日本の働き方改革への関心が高まっている。",
+  "United Kingdom": "日本は洗練されたイノベーションパートナーと見なされている。ブレグジット後の貿易協定が二国間関係を強化。日本のデザインと職人技への強い関心。",
+  "Germany": "製造大国としての相互尊重。日本は高齢社会管理のモデルと見なされている。自動車電動化での協力が拡大中。",
+  "France": "深い文化的敬意 — 日本は伝統を守りながら革新する精神的な同志と見なされている。高級品と食文化での強いつながり。",
+  "China": "複雑な関係 — 日本の品質と文化への称賛と地政学的緊張が共存。外交摩擦にもかかわらず日本ブランドはプレミアムポジションを維持。",
+  "India": "成長する戦略的パートナーシップ。日本は主要なインフラ投資家および技術パートナーと見なされている。新幹線プロジェクトによる好意的な認知。",
+  "Brazil": "日本国外最大の日系人コミュニティ。日系コミュニティを通じた強い文化的つながり。自動車と電機分野で日本ブランドへの深い信頼。",
+  "South Korea": "歴史的緊張にもかかわらず文化交流が活発化。K-POPとJ-POPのクロスオーバーが新たな消費者の架け橋を形成。若者は日本を旅行・ライフスタイルの目的地と見なしている。",
+  "Australia": "日本は重要な貿易パートナーおよび文化的同盟国。強い観光つながり。日本食文化がオーストラリアの都市に深く根付いている。",
+  "Indonesia": "日本は最大の投資国であり最も信頼される開発パートナー。自動車で日本ブランドが支配的。若者の間でアニメ・マンガの影響力が拡大中。",
+  "Nigeria": "日本は憧れの対象 — 急速な近代化のモデル。日本の技術とアニメへの関心が高まっている。限定的だが拡大中のビジネスプレゼンス。",
+  "Thailand": "深い経済的つながり — 日本は最大の外国投資国。コンビニ文化やラーメンなど日本の利便文化が深く統合。非常に好意的な世論。",
+  "Singapore": "日本はプレミアムなライフスタイルとイノベーションのベンチマーク。金融とテクノロジーでの強いビジネス関係。日本の飲食・小売が非常に人気。",
+};
+
+function getCompanyCountryInsight(companyId: CompanyId | null, countryName: string, lang: string): string {
+  if (!companyId) return lang === "jp" ? "この市場向けのカスタマイズされた戦略的インサイトを表示するには、企業を選択してください。" : "Select a company to see tailored strategic insights for this market.";
   const company = COMPANIES.find(c => c.id === companyId);
   if (!company) return "";
   
   const insights: Record<string, Record<string, string>> = {
     mori_building: {
-      "United States of America": "US urban development is shifting toward mixed-use vertical communities — Mori Building's core competency. NYC and SF present partnership opportunities for vertical garden city concepts.",
-      "China": "China's Tier 1 cities are building vertical communities at scale. Mori Building's premium positioning and design philosophy can differentiate in Shanghai and Shenzhen's luxury urban segments.",
-      "India": "India's rapid urbanization creates demand for integrated urban planning. Mori Building's smart city expertise is directly applicable to Mumbai and Bangalore's development corridors.",
+      "United States of America": lang === "jp" ? "米国の都市開発は複合用途の垂直コミュニティに移行中 — 森ビルのコアコンピタンスです。NYCとSFは垂直庭園都市コンセプトのパートナーシップ機会を提供。" : "US urban development is shifting toward mixed-use vertical communities — Mori Building's core competency. NYC and SF present partnership opportunities for vertical garden city concepts.",
+      "China": lang === "jp" ? "中国のTier 1都市は垂直コミュニティを大規模に構築中。森ビルのプレミアムポジショニングとデザイン哲学は上海・深圳の高級都市セグメントで差別化可能。" : "China's Tier 1 cities are building vertical communities at scale. Mori Building's premium positioning and design philosophy can differentiate in Shanghai and Shenzhen's luxury urban segments.",
+      "India": lang === "jp" ? "インドの急速な都市化は統合的な都市計画への需要を創出。森ビルのスマートシティ専門知識はムンバイとバンガロールの開発回廊に直接適用可能。" : "India's rapid urbanization creates demand for integrated urban planning. Mori Building's smart city expertise is directly applicable to Mumbai and Bangalore's development corridors.",
     },
     kirin: {
-      "United States of America": "US functional beverage market growing 12% annually. Kirin's health sciences portfolio — particularly immunology and gut health products — has strong product-market fit.",
-      "Thailand": "Thailand's wellness tourism sector creates distribution channels for Kirin's functional health products. Partner with hospitality chains for health-focused beverage placement.",
-      "Australia": "Australia's health-conscious consumer base and premium beverage market align with Kirin's craft and functional offerings. Lion (subsidiary) provides existing distribution infrastructure.",
-    },
-    nintendo: {
-      "United States of America": "US remains Nintendo's largest market. Opportunities in health gaming and cognitive wellness applications for aging Baby Boomers align with Nintendo's inclusive design philosophy.",
-      "India": "India's 500M+ mobile gamers represent a massive untapped audience. Nintendo's family-friendly brand could dominate the premium mobile gaming segment.",
-      "Brazil": "Brazil's passionate gaming community and growing middle class present expansion opportunities. Localized content and pricing strategies are key.",
+      "United States of America": lang === "jp" ? "米国の機能性飲料市場は年12%成長。キリンの健康科学ポートフォリオ — 特に免疫学と腸内健康製品 — は強い製品市場適合性を持つ。" : "US functional beverage market growing 12% annually. Kirin's health sciences portfolio — particularly immunology and gut health products — has strong product-market fit.",
+      "Thailand": lang === "jp" ? "タイのウェルネスツーリズム部門はキリンの機能性健康製品の流通チャネルを創出。ホスピタリティチェーンとの提携による健康志向飲料の配置を推奨。" : "Thailand's wellness tourism sector creates distribution channels for Kirin's functional health products. Partner with hospitality chains for health-focused beverage placement.",
     },
   };
 
-  return insights[companyId]?.[countryName] || 
-    `${company.name}'s expertise in ${company.sector.toLowerCase()} positions it to capitalize on emerging trends in ${countryName}. Focus on ${company.relevantDomains.join(" and ")} domains for maximum strategic impact.`;
+  const fallback = lang === "jp" 
+    ? `${company.name}の${company.sector.toLowerCase()}における専門性は、${COUNTRY_NAMES_JP[countryName] || countryName}の新興トレンドを活用するのに有利な位置にあります。${company.relevantDomains.join("と")}ドメインに注力することで最大の戦略的インパクトが期待できます。`
+    : `${company.name}'s expertise in ${company.sector.toLowerCase()} positions it to capitalize on emerging trends in ${countryName}. Focus on ${company.relevantDomains.join(" and ")} domains for maximum strategic impact.`;
+
+  return insights[companyId]?.[countryName] || fallback;
 }
 
-function getRecommendedActions(companyId: CompanyId | null, countryName: string): string[] {
+function getRecommendedActions(companyId: CompanyId | null, countryName: string, lang: string): string[] {
   const company = companyId ? COMPANIES.find(c => c.id === companyId) : null;
-  const companyName = company?.name || "your organization";
+  const companyName = company?.name || (lang === "jp" ? "御社" : "your organization");
+  const cn = lang === "jp" ? (COUNTRY_NAMES_JP[countryName] || countryName) : countryName;
   
+  if (lang === "jp") {
+    return [
+      `${cn}における${companyName}の市場参入フィージビリティスタディを実施し、規制環境とローカルパートナーシップに焦点を当てる。`,
+      `${cn}で${companyName}の戦略的優先事項を補完する能力を持つ3〜5社のローカルイノベーションパートナーを特定する。`,
+      `${cn}のレジリエンスシグナルを四半期ごとにモニタリングし、消費者行動と政策方向の早期変化を検知する。`,
+    ];
+  }
   return [
     `Commission a market-entry feasibility study for ${companyName} in ${countryName}, focusing on regulatory landscape and local partnerships.`,
     `Identify 3-5 local innovation partners in ${countryName} whose capabilities complement ${companyName}'s strategic priorities.`,
@@ -123,13 +185,14 @@ const URGENCY_COLORS: Record<string, string> = {
   low: "bg-emerald-500/20 text-emerald-400 border-emerald-500/30",
 };
 
-function getUrgency(intensity: number): { label: string; style: string } {
-  if (intensity >= 8) return { label: "High", style: URGENCY_COLORS.high };
-  if (intensity >= 5) return { label: "Medium", style: URGENCY_COLORS.medium };
-  return { label: "Low", style: URGENCY_COLORS.low };
+function getUrgency(intensity: number, lang: string): { label: string; style: string } {
+  if (intensity >= 8) return { label: lang === "jp" ? "高" : "High", style: URGENCY_COLORS.high };
+  if (intensity >= 5) return { label: lang === "jp" ? "中" : "Medium", style: URGENCY_COLORS.medium };
+  return { label: lang === "jp" ? "低" : "Low", style: URGENCY_COLORS.low };
 }
 
 const CountryOutlookPanel = ({ countryName, mode, selectedCompany, onClose, onSignalClick }: Props) => {
+  const { lang, t } = useLang();
   const matchNames = findAllMatchingCountryNames(countryName);
   const matchSignal = (location: string) => matchNames.some((name) => matchesCountry(location, name));
 
@@ -138,27 +201,27 @@ const CountryOutlookPanel = ({ countryName, mode, selectedCompany, onClose, onSi
   const allSignals = [...resilienceSignals, ...genzSignals];
 
   const score = RESILIENCE_SCORES[countryName] ?? Math.floor(Math.random() * 40 + 30);
-  const region = COUNTRY_REGIONS[countryName] || "Global";
-  const japanPerception = JAPAN_PERCEPTION[countryName] || `${countryName} has growing awareness of Japanese brands and culture, with opportunities for deeper engagement through strategic cultural exchange and business partnerships.`;
-  const companyInsight = getCompanyCountryInsight(selectedCompany, countryName);
-  const actions = getRecommendedActions(selectedCompany, countryName);
+  const region = lang === "jp" ? (COUNTRY_REGIONS_JP[countryName] || COUNTRY_REGIONS[countryName] || "グローバル") : (COUNTRY_REGIONS[countryName] || "Global");
+  const japanPerception = lang === "jp" ? (JAPAN_PERCEPTION_JP[countryName] || JAPAN_PERCEPTION[countryName] || `${COUNTRY_NAMES_JP[countryName] || countryName}は日本のブランドと文化への認知が高まっており、戦略的な文化交流とビジネスパートナーシップを通じたより深いエンゲージメントの機会があります。`) : (JAPAN_PERCEPTION[countryName] || `${countryName} has growing awareness of Japanese brands and culture, with opportunities for deeper engagement through strategic cultural exchange and business partnerships.`);
+  const companyInsight = getCompanyCountryInsight(selectedCompany, countryName, lang);
+  const actions = getRecommendedActions(selectedCompany, countryName, lang);
   const company = selectedCompany ? COMPANIES.find(c => c.id === selectedCompany) : null;
+  const displayName = lang === "jp" ? (COUNTRY_NAMES_JP[countryName] || countryName) : countryName;
 
   const scoreColor = score >= 70 ? "text-emerald-400" : score >= 50 ? "text-amber-400" : "text-red-400";
   const scoreBg = score >= 70 ? "bg-emerald-500/10 border-emerald-500/20" : score >= 50 ? "bg-amber-500/10 border-amber-500/20" : "bg-red-500/10 border-red-500/20";
 
   return (
     <div className="h-full flex flex-col bg-card border-l border-border">
-      {/* Back button + header */}
       <div className="px-4 py-3 border-b border-border">
         <button
           onClick={onClose}
           className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors mb-2"
         >
           <ArrowLeft className="h-3.5 w-3.5" />
-          Back to Global
+          {t("country.backToGlobal")}
         </button>
-        <h2 className="text-xl font-bold text-foreground leading-tight">{countryName}</h2>
+        <h2 className="text-xl font-bold text-foreground leading-tight">{displayName}</h2>
         <span className="text-[11px] text-muted-foreground">{region}</span>
       </div>
 
@@ -168,7 +231,7 @@ const CountryOutlookPanel = ({ countryName, mode, selectedCompany, onClose, onSi
           <div className={`rounded-lg border p-4 ${scoreBg}`}>
             <div className="flex items-center justify-between">
               <div>
-                <h4 className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">Resilience Exposure</h4>
+                <h4 className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">{t("country.resilienceExposure")}</h4>
                 <div className={`text-3xl font-black mt-1 ${scoreColor}`}>{score}</div>
               </div>
               <div className="w-12 h-12 rounded-full border-2 flex items-center justify-center" style={{ borderColor: score >= 70 ? "#34d399" : score >= 50 ? "#fbbf24" : "#f87171" }}>
@@ -189,7 +252,7 @@ const CountryOutlookPanel = ({ countryName, mode, selectedCompany, onClose, onSi
           {/* Company insight */}
           <div>
             <h4 className="text-xs font-bold uppercase tracking-wider text-primary mb-2">
-              {company ? `What This Means for ${company.name}` : "Strategic Context"}
+              {company ? `${t("country.whatThisMeans")} ${company.name}` : t("country.strategicContext")}
             </h4>
             <p className="text-[12px] text-foreground/80 leading-relaxed">{companyInsight}</p>
           </div>
@@ -198,16 +261,12 @@ const CountryOutlookPanel = ({ countryName, mode, selectedCompany, onClose, onSi
           {allSignals.length > 0 && (
             <div>
               <h4 className="text-xs font-bold uppercase tracking-wider text-primary mb-2">
-                Recent Signals ({allSignals.length})
+                {t("country.recentSignals")} ({allSignals.length})
               </h4>
               <div className="space-y-1.5">
                 {allSignals.map((signal) => {
                   const isResilience = 'domain' in signal;
-                  const urgency = getUrgency(signal.intensity);
-                  const tag = isResilience
-                    ? DOMAINS.find((d) => d.id === (signal as ResilienceSignal).domain)
-                    : GENZ_CATEGORIES.find((c) => c.id === (signal as GenZSignal).category);
-
+                  const urgency = getUrgency(signal.intensity, lang);
                   return (
                     <button
                       key={signal.id}
@@ -231,8 +290,7 @@ const CountryOutlookPanel = ({ countryName, mode, selectedCompany, onClose, onSi
 
           {allSignals.length === 0 && (
             <div className="text-center py-6">
-              <div className="text-2xl mb-1">🌍</div>
-              <p className="text-xs text-muted-foreground">No signals tracked in {countryName} yet.</p>
+              <p className="text-xs text-muted-foreground">{t("country.noSignals")} {displayName} {t("country.yet")}</p>
             </div>
           )}
 
@@ -245,7 +303,7 @@ const CountryOutlookPanel = ({ countryName, mode, selectedCompany, onClose, onSi
           {/* Japan Perception */}
           <div>
             <h4 className="text-xs font-bold uppercase tracking-wider text-muted-foreground mb-2 flex items-center gap-1.5">
-              🇯🇵 Japan Perception
+              🇯🇵 {t("country.japanPerception")}
             </h4>
             <p className="text-[11px] text-foreground/70 leading-relaxed">{japanPerception}</p>
           </div>
@@ -255,7 +313,7 @@ const CountryOutlookPanel = ({ countryName, mode, selectedCompany, onClose, onSi
             <h4 className="text-xs font-bold uppercase tracking-wider mb-2" style={{ color: "#ff6701" }}>
               <span className="flex items-center gap-1.5">
                 <TrendingUp className="h-3.5 w-3.5" />
-                Recommended Actions
+                {t("country.recommendedActions")}
               </span>
             </h4>
             <div className="space-y-2">
