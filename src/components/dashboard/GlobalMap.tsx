@@ -628,7 +628,7 @@ const GlobalMap = memo(({
               const relevant = selectedCompany
                 ? isRelevantToCompany(`${signal.title} ${signal.description}`, selectedCompany)
                 : false;
-              const dimmed = !!(selectedCompany && !relevant && !signal.isJapan);
+              const dimmed = !!(selectedCompany && !relevant);
 
               const urgencyMultiplier = signal.intensity >= 9 ? 2.0
                 : signal.intensity >= 7 ? 1.5
@@ -638,10 +638,10 @@ const GlobalMap = memo(({
               const isHigh = signal.intensity >= 7;
               const urgencyLabel = isCritical ? "Critical" : isHigh ? "High" : signal.intensity >= 5 ? "Medium" : "Low";
 
-              const baseR = (signal.isJapan ? 5 : relevant ? 5 : 3.5) * urgencyMultiplier;
+              const baseR = (relevant ? 5 : 3.5) * urgencyMultiplier;
               const r = baseR * dotScale;
               const isSelected = selectedSignalId === signal.id;
-              const fillColor = signal.isJapan ? "#1241ea" : color;
+              const fillColor = color;
 
               return (
                 <Marker
@@ -708,15 +708,6 @@ const GlobalMap = memo(({
                       />
                     </>
                   )}
-                  {signal.isJapan && (
-                    <text
-                      textAnchor="middle"
-                      y={-r - 4 * dotScale}
-                      style={{ fontSize: `${10 * dotScale}px`, pointerEvents: "none" }}
-                    >
-                      🇯🇵
-                    </text>
-                  )}
                 </Marker>
               );
             })}
@@ -725,7 +716,7 @@ const GlobalMap = memo(({
               const relevant = selectedCompany
                 ? isRelevantToCompany(`${signal.title} ${signal.description}`, selectedCompany)
                 : false;
-              const dimmed = !!(selectedCompany && !relevant && !signal.isJapan);
+              const dimmed = !!(selectedCompany && !relevant);
 
               const urgencyMultiplier = signal.intensity >= 9 ? 2.0
                 : signal.intensity >= 7 ? 1.5
@@ -735,7 +726,7 @@ const GlobalMap = memo(({
               const isHigh = signal.intensity >= 7;
               const urgencyLabel = isCritical ? "Critical" : isHigh ? "High" : signal.intensity >= 5 ? "Medium" : "Low";
 
-              const baseR = (signal.isJapan ? 5 : relevant ? 5 : 3.5) * urgencyMultiplier;
+              const baseR = (relevant ? 5 : 3.5) * urgencyMultiplier;
               const r = baseR * dotScale;
               const isSelected = selectedSignalId === signal.id;
 
@@ -800,15 +791,6 @@ const GlobalMap = memo(({
                         opacity={0.9}
                       />
                     </>
-                  )}
-                  {signal.isJapan && (
-                    <text
-                      textAnchor="middle"
-                      y={-r - 4 * dotScale}
-                      style={{ fontSize: `${10 * dotScale}px`, pointerEvents: "none" }}
-                    >
-                      🇯🇵
-                    </text>
                   )}
                 </Marker>
               );
