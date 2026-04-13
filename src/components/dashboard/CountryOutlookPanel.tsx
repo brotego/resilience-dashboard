@@ -16,7 +16,7 @@ interface Props {
   mode: DashboardMode;
   selectedCompany: CompanyId | null;
   onClose: () => void;
-  onSignalClick: (signal: ResilienceSignal | GenZSignal, mode: DashboardMode) => void;
+  onSignalClick: (signal: any) => void;
 }
 
 function matchesCountry(location: string, countryName: string): boolean {
