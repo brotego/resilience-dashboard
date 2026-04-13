@@ -278,6 +278,20 @@ const GlobalMap = memo(({
     animateToPosition(target, 0.06);
   }, [animateToPosition]);
 
+  // Pan so the dot is visible and not behind the right panel (320px wide)
+  const panToSignal = useCallback((coords: [number, number]) => {
+    const current = positionRef.current;
+    // Offset longitude slightly left so dot isn't hidden behind right panel
+    // At zoom 1.5, ~320px ≈ ~15° longitude. Scale inversely with zoom.
+    const lngOffset = -12 / Math.max(1, current.zoom);
+    const target = {
+      coordinates: [coords[0] + lngOffset, coords[1]] as [number, number],
+      zoom: Math.max(current.zoom, 2), // ensure minimum useful zoom
+    };
+    targetZoomRef.current = target.zoom;
+    animateToPosition(target, 0.06);
+  }, [animateToPosition]);
+
   const zoomToCountryRef = useRef(zoomToCountry);
   const zoomToGlobalRef = useRef(zoomToGlobal);
   zoomToCountryRef.current = zoomToCountry;
