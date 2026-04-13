@@ -450,13 +450,16 @@ const GlobalMap = memo(({
                   const geoName = geo.properties?.name || geo.properties?.NAME || "";
                   const isSelected = selectedCountry === geoName ||
                     (selectedCountry && COUNTRY_ALIASES[geoName]?.some(a => a === selectedCountry));
+                  const isJapanGeo = geoName === "Japan";
+                  const baseFill = isSelected ? "#1a2a35" : isJapanGeo ? "hsl(220, 14%, 18%)" : "hsl(220, 14%, 16%)";
+                  const baseStroke = isSelected ? "rgba(18, 65, 234, 0.6)" : "hsl(220, 14%, 22%)";
                   return (
                     <Geography
                       key={geo.rsmKey}
                       geography={geo}
                       onClick={() => handleCountryClickCb(geo)}
-                      fill={isSelected ? "#1a2a35" : "hsl(220, 14%, 16%)"}
-                      stroke={isSelected ? "rgba(18, 65, 234, 0.6)" : "hsl(220, 14%, 22%)"}
+                      fill={baseFill}
+                      stroke={baseStroke}
                       strokeWidth={isSelected ? 1.5 / currentZoom : 0.5 / Math.max(1, currentZoom * 0.5)}
                       style={{
                         default: { outline: "none", cursor: "pointer" },
