@@ -213,6 +213,7 @@ const GlobalMap = memo(({
     zoom: 1.5,
   });
   const [liveZoom, setLiveZoom] = useState(1.5);
+  const [tooltip, setTooltip] = useState<{ x: number; y: number; title: string; location: string; urgency: string } | null>(null);
   const positionRef = useRef<{ coordinates: [number, number]; zoom: number }>({
     coordinates: [30, 20],
     zoom: 1.5,
@@ -220,6 +221,13 @@ const GlobalMap = memo(({
   const targetZoomRef = useRef(1.5);
   const animFrameRef = useRef<number | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+
+  const showTooltip = useCallback((e: React.MouseEvent, title: string, location: string, urgency: string) => {
+    const rect = containerRef.current?.getBoundingClientRect();
+    if (!rect) return;
+    setTooltip({ x: e.clientX - rect.left + 12, y: e.clientY - rect.top - 10, title, location, urgency });
+  }, []);
+  const hideTooltip = useCallback(() => setTooltip(null), []);
 
   const clampZoom = (z: number) => Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, z));
 
@@ -267,6 +275,20 @@ const GlobalMap = memo(({
   const zoomToGlobal = useCallback(() => {
     const target = { coordinates: [30, 20] as [number, number], zoom: 1.5 };
     targetZoomRef.current = 1.5;
+    animateToPosition(target, 0.06);
+  }, [animateToPosition]);
+
+  // Pan so the dot is visible and not behind the right panel (320px wide)
+  const panToSignal = useCallback((coords: [number, number]) => {
+    const current = positionRef.current;
+    // Offset longitude slightly left so dot isn't hidden behind right panel
+    // At zoom 1.5, ~320px ≈ ~15° longitude. Scale inversely with zoom.
+    const lngOffset = -12 / Math.max(1, current.zoom);
+    const target = {
+      coordinates: [coords[0] + lngOffset, coords[1]] as [number, number],
+      zoom: Math.max(current.zoom, 2), // ensure minimum useful zoom
+    };
+    targetZoomRef.current = target.zoom;
     animateToPosition(target, 0.06);
   }, [animateToPosition]);
 
@@ -608,13 +630,13 @@ const GlobalMap = memo(({
                 : false;
               const dimmed = !!(selectedCompany && !relevant && !signal.isJapan);
 
-              // Urgency sizing: intensity 9-10=critical, 7-8=high, 5-6=medium, <5=low
               const urgencyMultiplier = signal.intensity >= 9 ? 2.0
                 : signal.intensity >= 7 ? 1.5
                 : signal.intensity >= 5 ? 1.0
                 : 0.7;
               const isCritical = signal.intensity >= 9;
               const isHigh = signal.intensity >= 7;
+              const urgencyLabel = isCritical ? "Critical" : isHigh ? "High" : signal.intensity >= 5 ? "Medium" : "Low";
 
               const baseR = (signal.isJapan ? 5 : relevant ? 5 : 3.5) * urgencyMultiplier;
               const r = baseR * dotScale;
@@ -625,10 +647,12 @@ const GlobalMap = memo(({
                 <Marker
                   key={signal.id}
                   coordinates={signal.coordinates}
-                  onClick={() => onSignalClick(signal, "resilience")}
+                  onClick={() => {
+                    onSignalClick(signal, "resilience");
+                    panToSignal(signal.coordinates);
+                  }}
                   style={{ cursor: "pointer" }}
                 >
-                  <title>{getShortTitle(signal.title)}</title>
                   {/* Animated pulse glow for critical signals */}
                   {isCritical && !dimmed && (
                     <circle r={r * 3} fill={fillColor} opacity={0}>
@@ -636,7 +660,6 @@ const GlobalMap = memo(({
                       <animate attributeName="opacity" from="0.25" to="0" dur="2s" repeatCount="indefinite" />
                     </circle>
                   )}
-                  {/* Static glow for high urgency */}
                   {isHigh && !isCritical && !dimmed && (
                     <circle r={r * 2.2} fill={fillColor} opacity={0.12} />
                   )}
@@ -644,28 +667,46 @@ const GlobalMap = memo(({
                   <circle
                     r={r}
                     fill={fillColor}
-                    stroke={isSelected ? "#ffffff" : fillColor}
-                    strokeWidth={isSelected ? 2 * dotScale : 1 * dotScale}
+                    stroke={fillColor}
+                    strokeWidth={1 * dotScale}
                     opacity={dimmed ? 0.2 : signal.intensity < 5 ? 0.55 : 1}
-                    className="transition-all duration-200 hover:opacity-100"
-                    style={{ transition: "opacity 0.3s, r 0.2s" }}
+                    style={{ transition: "r 150ms ease, opacity 150ms ease" }}
                     onMouseEnter={(e) => {
-                      const el = e.currentTarget;
-                      el.setAttribute("r", String(r * 1.5));
+                      e.currentTarget.setAttribute("r", String(r * 1.3));
+                      // Intensify glow
+                      const glow = e.currentTarget.previousElementSibling as SVGCircleElement | null;
+                      if (glow) glow.setAttribute("opacity", "0.3");
+                      showTooltip(e as any, signal.title, signal.location, urgencyLabel);
                     }}
+                    onMouseMove={(e) => showTooltip(e as any, signal.title, signal.location, urgencyLabel)}
                     onMouseLeave={(e) => {
-                      const el = e.currentTarget;
-                      el.setAttribute("r", String(r));
+                      e.currentTarget.setAttribute("r", String(r));
+                      const glow = e.currentTarget.previousElementSibling as SVGCircleElement | null;
+                      if (glow) glow.setAttribute("opacity", "0.15");
+                      hideTooltip();
                     }}
                   />
+                  {/* Selection ring — animated pulse */}
                   {isSelected && (
-                    <circle
-                      r={r * 2.5}
-                      fill="none"
-                      stroke="#ffffff"
-                      strokeWidth={0.5 * dotScale}
-                      opacity={0.4}
-                    />
+                    <>
+                      <circle
+                        r={r * 2.5}
+                        fill="none"
+                        stroke="#1241ea"
+                        strokeWidth={1.5 * dotScale}
+                        opacity={0.7}
+                      >
+                        <animate attributeName="r" from={String(r * 2.2)} to={String(r * 3)} dur="1.5s" repeatCount="indefinite" />
+                        <animate attributeName="opacity" from="0.7" to="0.2" dur="1.5s" repeatCount="indefinite" />
+                      </circle>
+                      <circle
+                        r={r * 2}
+                        fill="none"
+                        stroke="#1241ea"
+                        strokeWidth={1 * dotScale}
+                        opacity={0.9}
+                      />
+                    </>
                   )}
                   {signal.isJapan && (
                     <text
@@ -679,8 +720,6 @@ const GlobalMap = memo(({
                 </Marker>
               );
             })}
-
-          {/* Gen Z signals — urgency-based sizing */}
           {mode === "genz" &&
             genzFiltered.map((signal) => {
               const relevant = selectedCompany
@@ -694,6 +733,7 @@ const GlobalMap = memo(({
                 : 0.7;
               const isCritical = signal.intensity >= 9;
               const isHigh = signal.intensity >= 7;
+              const urgencyLabel = isCritical ? "Critical" : isHigh ? "High" : signal.intensity >= 5 ? "Medium" : "Low";
 
               const baseR = (signal.isJapan ? 5 : relevant ? 5 : 3.5) * urgencyMultiplier;
               const r = baseR * dotScale;
@@ -703,10 +743,12 @@ const GlobalMap = memo(({
                 <Marker
                   key={signal.id}
                   coordinates={signal.coordinates}
-                  onClick={() => onSignalClick(signal, "genz")}
+                  onClick={() => {
+                    onSignalClick(signal, "genz");
+                    panToSignal(signal.coordinates);
+                  }}
                   style={{ cursor: "pointer" }}
                 >
-                  <title>{getShortTitle(signal.title)}</title>
                   {isCritical && !dimmed && (
                     <circle r={r * 3} fill={GENZ_COLOR} opacity={0}>
                       <animate attributeName="r" from={String(r * 1.5)} to={String(r * 4)} dur="2s" repeatCount="indefinite" />
@@ -720,27 +762,44 @@ const GlobalMap = memo(({
                   <circle
                     r={r}
                     fill={GENZ_COLOR}
-                    stroke={isSelected ? "#ffffff" : GENZ_COLOR}
-                    strokeWidth={isSelected ? 2 * dotScale : 1 * dotScale}
+                    stroke={GENZ_COLOR}
+                    strokeWidth={1 * dotScale}
                     opacity={dimmed ? 0.2 : signal.intensity < 5 ? 0.55 : 1}
-                    className="transition-all duration-200 hover:opacity-100"
+                    style={{ transition: "r 150ms ease, opacity 150ms ease" }}
                     onMouseEnter={(e) => {
-                      const el = e.currentTarget;
-                      el.setAttribute("r", String(r * 1.5));
+                      e.currentTarget.setAttribute("r", String(r * 1.3));
+                      const glow = e.currentTarget.previousElementSibling as SVGCircleElement | null;
+                      if (glow) glow.setAttribute("opacity", "0.3");
+                      showTooltip(e as any, signal.title, signal.location, urgencyLabel);
                     }}
+                    onMouseMove={(e) => showTooltip(e as any, signal.title, signal.location, urgencyLabel)}
                     onMouseLeave={(e) => {
-                      const el = e.currentTarget;
-                      el.setAttribute("r", String(r));
+                      e.currentTarget.setAttribute("r", String(r));
+                      const glow = e.currentTarget.previousElementSibling as SVGCircleElement | null;
+                      if (glow) glow.setAttribute("opacity", "0.15");
+                      hideTooltip();
                     }}
                   />
                   {isSelected && (
-                    <circle
-                      r={r * 2.5}
-                      fill="none"
-                      stroke="#ffffff"
-                      strokeWidth={0.5 * dotScale}
-                      opacity={0.4}
-                    />
+                    <>
+                      <circle
+                        r={r * 2.5}
+                        fill="none"
+                        stroke="#1241ea"
+                        strokeWidth={1.5 * dotScale}
+                        opacity={0.7}
+                      >
+                        <animate attributeName="r" from={String(r * 2.2)} to={String(r * 3)} dur="1.5s" repeatCount="indefinite" />
+                        <animate attributeName="opacity" from="0.7" to="0.2" dur="1.5s" repeatCount="indefinite" />
+                      </circle>
+                      <circle
+                        r={r * 2}
+                        fill="none"
+                        stroke="#1241ea"
+                        strokeWidth={1 * dotScale}
+                        opacity={0.9}
+                      />
+                    </>
                   )}
                   {signal.isJapan && (
                     <text
@@ -762,8 +821,7 @@ const GlobalMap = memo(({
             const r = 2.2 * dotScale;
 
             return (
-              <Marker key={dot.id} coordinates={dot.coordinates}>
-                <title>{`${dot.title} — ${dot.source}`}</title>
+              <Marker key={dot.id} coordinates={dot.coordinates} style={{ cursor: "pointer" }}>
                 {/* Pulsing ring */}
                 <circle r={r * 3} fill={color} opacity={0.08}>
                   <animate attributeName="r" from={String(r * 2)} to={String(r * 4)} dur="2.5s" repeatCount="indefinite" />
@@ -776,15 +834,38 @@ const GlobalMap = memo(({
                   opacity={0.85}
                   stroke={color}
                   strokeWidth={0.5 * dotScale}
-                  className="transition-all duration-200"
-                  onMouseEnter={(e) => e.currentTarget.setAttribute("r", String(r * 1.6))}
-                  onMouseLeave={(e) => e.currentTarget.setAttribute("r", String(r))}
+                  style={{ transition: "r 150ms ease" }}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.setAttribute("r", String(r * 1.3));
+                    showTooltip(e as any, dot.title, dot.source || "News", isBiz ? "Business" : "Gen Z");
+                  }}
+                  onMouseMove={(e) => showTooltip(e as any, dot.title, dot.source || "News", isBiz ? "Business" : "Gen Z")}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.setAttribute("r", String(r));
+                    hideTooltip();
+                  }}
                 />
               </Marker>
             );
           })}
         </ZoomableGroup>
       </ComposableMap>
+
+      {/* Custom HTML tooltip overlay */}
+      {tooltip && (
+        <div
+          className="absolute z-50 pointer-events-none"
+          style={{ left: tooltip.x, top: tooltip.y, transform: "translateY(-100%)" }}
+        >
+          <div className="bg-card/95 backdrop-blur-sm border border-border rounded-lg px-3 py-2 shadow-lg max-w-[220px]">
+            <p className="text-[11px] font-bold text-foreground leading-tight truncate">{tooltip.title}</p>
+            <div className="flex items-center gap-2 mt-1">
+              <span className="text-[10px] text-muted-foreground">{tooltip.location}</span>
+              <span className="text-[9px] font-bold uppercase tracking-wider text-primary">{tooltip.urgency}</span>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 });
