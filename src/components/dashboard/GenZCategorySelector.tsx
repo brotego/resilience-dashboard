@@ -1,9 +1,19 @@
 import { GENZ_CATEGORIES } from "@/data/genzCategories";
 import { GenZCategoryId } from "@/data/genzTypes";
 import { Shield, Coffee, Sprout, Smartphone, Heart } from "lucide-react";
+import { useLang } from "@/i18n/LanguageContext";
+import { TranslationKey } from "@/i18n/translations";
 
 const ICONS: Record<string, React.ElementType> = {
   Shield, Coffee, Sprout, Smartphone, Heart,
+};
+
+const CATEGORY_KEYS: Record<string, TranslationKey> = {
+  authenticity: "genz.authenticity",
+  worklife: "genz.worklife",
+  climate: "genz.climate",
+  digital: "genz.digital",
+  belonging: "genz.belonging",
 };
 
 interface Props {
@@ -12,6 +22,7 @@ interface Props {
 }
 
 const GenZCategorySelector = ({ activeCategories, onToggle }: Props) => {
+  const { t } = useLang();
   return (
     <div className="flex flex-wrap gap-1.5">
       {GENZ_CATEGORIES.map((c) => {
@@ -28,7 +39,7 @@ const GenZCategorySelector = ({ activeCategories, onToggle }: Props) => {
             }`}
           >
             {Icon && <Icon className="h-3 w-3 shrink-0 text-genz" />}
-            <span>{c.label}</span>
+            <span>{t(CATEGORY_KEYS[c.id])}</span>
           </button>
         );
       })}
