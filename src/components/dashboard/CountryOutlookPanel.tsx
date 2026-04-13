@@ -211,7 +211,7 @@ const CountryOutlookPanel = ({ countryName, mode, selectedCompany, onClose, onSi
                   return (
                     <button
                       key={signal.id}
-                      onClick={() => onSignalClick(signal, isResilience ? "resilience" : "genz")}
+                      onClick={() => onSignalClick(signal)}
                       className="w-full text-left rounded-lg border border-border bg-background/50 hover:bg-accent/10 p-2.5 transition-colors group"
                     >
                       <div className="flex items-center justify-between gap-2">
