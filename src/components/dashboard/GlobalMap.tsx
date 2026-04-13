@@ -733,6 +733,7 @@ const GlobalMap = memo(({
                 : 0.7;
               const isCritical = signal.intensity >= 9;
               const isHigh = signal.intensity >= 7;
+              const urgencyLabel = isCritical ? "Critical" : isHigh ? "High" : signal.intensity >= 5 ? "Medium" : "Low";
 
               const baseR = (signal.isJapan ? 5 : relevant ? 5 : 3.5) * urgencyMultiplier;
               const r = baseR * dotScale;
@@ -742,10 +743,12 @@ const GlobalMap = memo(({
                 <Marker
                   key={signal.id}
                   coordinates={signal.coordinates}
-                  onClick={() => onSignalClick(signal, "genz")}
+                  onClick={() => {
+                    onSignalClick(signal, "genz");
+                    panToSignal(signal.coordinates);
+                  }}
                   style={{ cursor: "pointer" }}
                 >
-                  <title>{getShortTitle(signal.title)}</title>
                   {isCritical && !dimmed && (
                     <circle r={r * 3} fill={GENZ_COLOR} opacity={0}>
                       <animate attributeName="r" from={String(r * 1.5)} to={String(r * 4)} dur="2s" repeatCount="indefinite" />
@@ -759,27 +762,44 @@ const GlobalMap = memo(({
                   <circle
                     r={r}
                     fill={GENZ_COLOR}
-                    stroke={isSelected ? "#ffffff" : GENZ_COLOR}
-                    strokeWidth={isSelected ? 2 * dotScale : 1 * dotScale}
+                    stroke={GENZ_COLOR}
+                    strokeWidth={1 * dotScale}
                     opacity={dimmed ? 0.2 : signal.intensity < 5 ? 0.55 : 1}
-                    className="transition-all duration-200 hover:opacity-100"
+                    style={{ transition: "r 150ms ease, opacity 150ms ease" }}
                     onMouseEnter={(e) => {
-                      const el = e.currentTarget;
-                      el.setAttribute("r", String(r * 1.5));
+                      e.currentTarget.setAttribute("r", String(r * 1.3));
+                      const glow = e.currentTarget.previousElementSibling as SVGCircleElement | null;
+                      if (glow) glow.setAttribute("opacity", "0.3");
+                      showTooltip(e as any, signal.title, signal.location, urgencyLabel);
                     }}
+                    onMouseMove={(e) => showTooltip(e as any, signal.title, signal.location, urgencyLabel)}
                     onMouseLeave={(e) => {
-                      const el = e.currentTarget;
-                      el.setAttribute("r", String(r));
+                      e.currentTarget.setAttribute("r", String(r));
+                      const glow = e.currentTarget.previousElementSibling as SVGCircleElement | null;
+                      if (glow) glow.setAttribute("opacity", "0.15");
+                      hideTooltip();
                     }}
                   />
                   {isSelected && (
-                    <circle
-                      r={r * 2.5}
-                      fill="none"
-                      stroke="#ffffff"
-                      strokeWidth={0.5 * dotScale}
-                      opacity={0.4}
-                    />
+                    <>
+                      <circle
+                        r={r * 2.5}
+                        fill="none"
+                        stroke="#1241ea"
+                        strokeWidth={1.5 * dotScale}
+                        opacity={0.7}
+                      >
+                        <animate attributeName="r" from={String(r * 2.2)} to={String(r * 3)} dur="1.5s" repeatCount="indefinite" />
+                        <animate attributeName="opacity" from="0.7" to="0.2" dur="1.5s" repeatCount="indefinite" />
+                      </circle>
+                      <circle
+                        r={r * 2}
+                        fill="none"
+                        stroke="#1241ea"
+                        strokeWidth={1 * dotScale}
+                        opacity={0.9}
+                      />
+                    </>
                   )}
                   {signal.isJapan && (
                     <text
@@ -801,8 +821,7 @@ const GlobalMap = memo(({
             const r = 2.2 * dotScale;
 
             return (
-              <Marker key={dot.id} coordinates={dot.coordinates}>
-                <title>{`${dot.title} — ${dot.source}`}</title>
+              <Marker key={dot.id} coordinates={dot.coordinates} style={{ cursor: "pointer" }}>
                 {/* Pulsing ring */}
                 <circle r={r * 3} fill={color} opacity={0.08}>
                   <animate attributeName="r" from={String(r * 2)} to={String(r * 4)} dur="2.5s" repeatCount="indefinite" />
@@ -815,15 +834,38 @@ const GlobalMap = memo(({
                   opacity={0.85}
                   stroke={color}
                   strokeWidth={0.5 * dotScale}
-                  className="transition-all duration-200"
-                  onMouseEnter={(e) => e.currentTarget.setAttribute("r", String(r * 1.6))}
-                  onMouseLeave={(e) => e.currentTarget.setAttribute("r", String(r))}
+                  style={{ transition: "r 150ms ease" }}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.setAttribute("r", String(r * 1.3));
+                    showTooltip(e as any, dot.title, dot.source || "News", isBiz ? "Business" : "Gen Z");
+                  }}
+                  onMouseMove={(e) => showTooltip(e as any, dot.title, dot.source || "News", isBiz ? "Business" : "Gen Z")}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.setAttribute("r", String(r));
+                    hideTooltip();
+                  }}
                 />
               </Marker>
             );
           })}
         </ZoomableGroup>
       </ComposableMap>
+
+      {/* Custom HTML tooltip overlay */}
+      {tooltip && (
+        <div
+          className="absolute z-50 pointer-events-none"
+          style={{ left: tooltip.x, top: tooltip.y, transform: "translateY(-100%)" }}
+        >
+          <div className="bg-card/95 backdrop-blur-sm border border-border rounded-lg px-3 py-2 shadow-lg max-w-[220px]">
+            <p className="text-[11px] font-bold text-foreground leading-tight truncate">{tooltip.title}</p>
+            <div className="flex items-center gap-2 mt-1">
+              <span className="text-[10px] text-muted-foreground">{tooltip.location}</span>
+              <span className="text-[9px] font-bold uppercase tracking-wider text-primary">{tooltip.urgency}</span>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 });
