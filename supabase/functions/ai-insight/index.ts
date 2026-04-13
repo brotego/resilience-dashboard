@@ -140,17 +140,25 @@ function parseInsight(raw: string) {
 
   const getBlock = (label: string): string[] => {
     // Match block: label followed by lines until next LABEL: or end
+    // Try multiline block first
     const re = new RegExp(`${label}:\\s*\\n([\\s\\S]*?)(?=\\n[A-Z_]+:|$)`, "m");
     const m = raw.match(re);
-    if (!m || !m[1]) {
-      // Fallback: try inline single value
-      const single = get(label);
-      return single ? [single] : [];
+    if (m && m[1] && m[1].trim().length > 0) {
+      return m[1]
+        .split("\n")
+        .map((l: string) => l.replace(/^\d+[\.\):\s]*/, "").trim())
+        .filter((l: string) => l.length > 0);
     }
-    return m[1]
-      .split("\n")
-      .map((l: string) => l.replace(/^\d+\s*/, "").trim())
-      .filter((l: string) => l.length > 0);
+    // Fallback: try inline after label (sometimes AI puts everything on one line or uses semicolons)
+    const inlineRe = new RegExp(`${label}:\\s*(.+)`, "mi");
+    const im = raw.match(inlineRe);
+    if (im && im[1]) {
+      // Split by numbered patterns like "1." "2." "3." or semicolons
+      const parts = im[1].split(/(?:\d+[\.\)]\s*)|(?:;\s*)/).filter((s: string) => s.trim().length > 0);
+      if (parts.length > 1) return parts.map((s: string) => s.trim());
+      return [im[1].trim()];
+    }
+    return [];
   };
 
   const actions = getBlock("ACTIONS");

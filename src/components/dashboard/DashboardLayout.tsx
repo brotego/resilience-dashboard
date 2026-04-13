@@ -33,7 +33,7 @@ const LiveClock = () => {
 const DashboardLayout = () => {
   const { dots: newsDots } = useGlobalNewsDots();
   const [mode, setMode] = useState<DashboardMode>("resilience");
-  const [activeDomains, setActiveDomains] = useState<DomainId[]>(["work"]);
+  const [activeDomains, setActiveDomains] = useState<DomainId[]>(["work", "selfhood", "community", "aging", "environment"]);
   const [activeMindset] = useState<MindsetId>("cracks");
   const [activeCategories, setActiveCategories] = useState<GenZCategoryId[]>(["authenticity"]);
   const [selectedCompany, setSelectedCompany] = useState<CompanyId | null>("mori_building");
@@ -176,7 +176,7 @@ const DashboardLayout = () => {
         </div>
 
         {/* Right Panel */}
-        <div className="w-80 shrink-0">
+        <div className="w-[420px] shrink-0">
           {selectedCountry && !selectedSignal ? (
             <CountryOutlookPanel
               countryName={selectedCountry}
