@@ -450,13 +450,16 @@ const GlobalMap = memo(({
                   const geoName = geo.properties?.name || geo.properties?.NAME || "";
                   const isSelected = selectedCountry === geoName ||
                     (selectedCountry && COUNTRY_ALIASES[geoName]?.some(a => a === selectedCountry));
+                  const isJapanGeo = geoName === "Japan";
+                  const baseFill = isSelected ? "#1a2a35" : isJapanGeo ? "hsl(220, 14%, 18%)" : "hsl(220, 14%, 16%)";
+                  const baseStroke = isSelected ? "rgba(18, 65, 234, 0.6)" : "hsl(220, 14%, 22%)";
                   return (
                     <Geography
                       key={geo.rsmKey}
                       geography={geo}
                       onClick={() => handleCountryClickCb(geo)}
-                      fill={isSelected ? "#1a2a35" : "hsl(220, 14%, 16%)"}
-                      stroke={isSelected ? "rgba(18, 65, 234, 0.6)" : "hsl(220, 14%, 22%)"}
+                      fill={baseFill}
+                      stroke={baseStroke}
                       strokeWidth={isSelected ? 1.5 / currentZoom : 0.5 / Math.max(1, currentZoom * 0.5)}
                       style={{
                         default: { outline: "none", cursor: "pointer" },
@@ -628,7 +631,7 @@ const GlobalMap = memo(({
               const relevant = selectedCompany
                 ? isRelevantToCompany(`${signal.title} ${signal.description}`, selectedCompany)
                 : false;
-              const dimmed = !!(selectedCompany && !relevant && !signal.isJapan);
+              const dimmed = !!(selectedCompany && !relevant);
 
               const urgencyMultiplier = signal.intensity >= 9 ? 2.0
                 : signal.intensity >= 7 ? 1.5
@@ -638,10 +641,10 @@ const GlobalMap = memo(({
               const isHigh = signal.intensity >= 7;
               const urgencyLabel = isCritical ? "Critical" : isHigh ? "High" : signal.intensity >= 5 ? "Medium" : "Low";
 
-              const baseR = (signal.isJapan ? 5 : relevant ? 5 : 3.5) * urgencyMultiplier;
+              const baseR = (relevant ? 5 : 3.5) * urgencyMultiplier;
               const r = baseR * dotScale;
               const isSelected = selectedSignalId === signal.id;
-              const fillColor = signal.isJapan ? "#1241ea" : color;
+              const fillColor = color;
 
               return (
                 <Marker
@@ -663,13 +666,13 @@ const GlobalMap = memo(({
                   {isHigh && !isCritical && !dimmed && (
                     <circle r={r * 2.2} fill={fillColor} opacity={0.12} />
                   )}
-                  <circle r={r * 2} fill={fillColor} opacity={dimmed ? 0 : 0.15} />
+                  <circle r={r * 2} fill={fillColor} opacity={dimmed ? 0.04 : 0.15} />
                   <circle
                     r={r}
                     fill={fillColor}
                     stroke={fillColor}
                     strokeWidth={1 * dotScale}
-                    opacity={dimmed ? 0.2 : signal.intensity < 5 ? 0.55 : 1}
+                    opacity={dimmed ? 0.45 : signal.intensity < 5 ? 0.55 : 1}
                     style={{ transition: "r 150ms ease, opacity 150ms ease" }}
                     onMouseEnter={(e) => {
                       e.currentTarget.setAttribute("r", String(r * 1.3));
@@ -708,15 +711,6 @@ const GlobalMap = memo(({
                       />
                     </>
                   )}
-                  {signal.isJapan && (
-                    <text
-                      textAnchor="middle"
-                      y={-r - 4 * dotScale}
-                      style={{ fontSize: `${10 * dotScale}px`, pointerEvents: "none" }}
-                    >
-                      🇯🇵
-                    </text>
-                  )}
                 </Marker>
               );
             })}
@@ -725,7 +719,7 @@ const GlobalMap = memo(({
               const relevant = selectedCompany
                 ? isRelevantToCompany(`${signal.title} ${signal.description}`, selectedCompany)
                 : false;
-              const dimmed = !!(selectedCompany && !relevant && !signal.isJapan);
+              const dimmed = !!(selectedCompany && !relevant);
 
               const urgencyMultiplier = signal.intensity >= 9 ? 2.0
                 : signal.intensity >= 7 ? 1.5
@@ -735,7 +729,7 @@ const GlobalMap = memo(({
               const isHigh = signal.intensity >= 7;
               const urgencyLabel = isCritical ? "Critical" : isHigh ? "High" : signal.intensity >= 5 ? "Medium" : "Low";
 
-              const baseR = (signal.isJapan ? 5 : relevant ? 5 : 3.5) * urgencyMultiplier;
+              const baseR = (relevant ? 5 : 3.5) * urgencyMultiplier;
               const r = baseR * dotScale;
               const isSelected = selectedSignalId === signal.id;
 
@@ -758,13 +752,13 @@ const GlobalMap = memo(({
                   {isHigh && !isCritical && !dimmed && (
                     <circle r={r * 2.2} fill={GENZ_COLOR} opacity={0.12} />
                   )}
-                  <circle r={r * 2} fill={GENZ_COLOR} opacity={dimmed ? 0 : 0.15} />
+                  <circle r={r * 2} fill={GENZ_COLOR} opacity={dimmed ? 0.04 : 0.15} />
                   <circle
                     r={r}
                     fill={GENZ_COLOR}
                     stroke={GENZ_COLOR}
                     strokeWidth={1 * dotScale}
-                    opacity={dimmed ? 0.2 : signal.intensity < 5 ? 0.55 : 1}
+                    opacity={dimmed ? 0.45 : signal.intensity < 5 ? 0.55 : 1}
                     style={{ transition: "r 150ms ease, opacity 150ms ease" }}
                     onMouseEnter={(e) => {
                       e.currentTarget.setAttribute("r", String(r * 1.3));
@@ -800,15 +794,6 @@ const GlobalMap = memo(({
                         opacity={0.9}
                       />
                     </>
-                  )}
-                  {signal.isJapan && (
-                    <text
-                      textAnchor="middle"
-                      y={-r - 4 * dotScale}
-                      style={{ fontSize: `${10 * dotScale}px`, pointerEvents: "none" }}
-                    >
-                      🇯🇵
-                    </text>
                   )}
                 </Marker>
               );

@@ -49,7 +49,7 @@ URGENCY: high, medium, or low
 HEADLINE: One sentence (max 15 words) summarizing what happened
 ACTIONS:
 1 First recommended action (one concrete sentence)
-2 Second recommended action (one concrete sentence)  
+2 Second recommended action (one concrete sentence)
 3 Third recommended action (one concrete sentence)
 RISKS:
 First risk (one sentence)
@@ -64,6 +64,8 @@ PATTERN_TAG: One label (e.g. Structural Shift, Early Warning, Accelerating Trend
 Rules:
 - No asterisks, no markdown, no bold. Plain text only.
 - Be specific: name companies, cite numbers, reference real markets.
+- ALWAYS provide exactly 3 numbered action items under ACTIONS. Never fewer.
+- ALWAYS provide exactly 2 items under RISKS and 2 under OPPORTUNITIES. Never fewer.
 - Under 200 words total.
 - Sound like McKinsey, not an AI.`;
 
