@@ -217,31 +217,31 @@ const GlobalMap = memo(({
     if (animFrameRef.current) cancelAnimationFrame(animFrameRef.current);
 
     const step = () => {
-      setPosition((prev) => {
-        const lngDiff = target.coordinates[0] - prev.coordinates[0];
-        const latDiff = target.coordinates[1] - prev.coordinates[1];
-        const zoomDiff = target.zoom - prev.zoom;
+      const prev = positionRef.current;
+      const lngDiff = target.coordinates[0] - prev.coordinates[0];
+      const latDiff = target.coordinates[1] - prev.coordinates[1];
+      const zoomDiff = target.zoom - prev.zoom;
 
-        if (Math.abs(lngDiff) < 0.02 && Math.abs(latDiff) < 0.02 && Math.abs(zoomDiff) < 0.005) {
-          animFrameRef.current = null;
-          positionRef.current = target;
-          setLiveZoom(target.zoom);
-          return target;
-        }
+      if (Math.abs(lngDiff) < 0.02 && Math.abs(latDiff) < 0.02 && Math.abs(zoomDiff) < 0.005) {
+        animFrameRef.current = null;
+        positionRef.current = target;
+        setPosition(target);
+        setLiveZoom(target.zoom);
+        return;
+      }
 
-        const next = {
-          coordinates: [
-            prev.coordinates[0] + lngDiff * easing,
-            prev.coordinates[1] + latDiff * easing,
-          ] as [number, number],
-          zoom: prev.zoom + zoomDiff * easing,
-        };
+      const next = {
+        coordinates: [
+          prev.coordinates[0] + lngDiff * easing,
+          prev.coordinates[1] + latDiff * easing,
+        ] as [number, number],
+        zoom: prev.zoom + zoomDiff * easing,
+      };
 
-        positionRef.current = next;
-        setLiveZoom(next.zoom);
-        animFrameRef.current = requestAnimationFrame(step);
-        return next;
-      });
+      positionRef.current = next;
+      setPosition(next);
+      setLiveZoom(next.zoom);
+      animFrameRef.current = requestAnimationFrame(step);
     };
 
     animFrameRef.current = requestAnimationFrame(step);
@@ -555,7 +555,7 @@ const GlobalMap = memo(({
                 ? isRelevantToCompany(`${signal.title} ${signal.description}`, selectedCompany)
                 : false;
               const dimmed = !!(selectedCompany && !relevant && !signal.isJapan);
-              const baseR = signal.isJapan ? 6 : relevant ? 6 : 3 + signal.intensity * 0.4;
+              const baseR = signal.isJapan ? 5 : relevant ? 5 : 4;
               const r = baseR * dotScale;
               const isSelected = selectedSignalId === signal.id;
               const fillColor = signal.isJapan ? "#1241ea" : color;
