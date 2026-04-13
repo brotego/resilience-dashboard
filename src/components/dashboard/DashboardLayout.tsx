@@ -1,17 +1,15 @@
 import { useState, useCallback, useEffect } from "react";
-import { DomainId, MindsetId, ResilienceSignal } from "@/data/types";
-import { GenZCategoryId, GenZSignal } from "@/data/genzTypes";
+import { DomainId, MindsetId } from "@/data/types";
+import { GenZCategoryId } from "@/data/genzTypes";
 import { CompanyId } from "@/data/companies";
+import { UnifiedSignal } from "@/data/unifiedSignalTypes";
 import DomainSelector from "./DomainSelector";
 import GenZCategorySelector from "./GenZCategorySelector";
 import CompanySelector from "./CompanySelector";
 import AIInsightPanel from "./AIInsightPanel";
 import CountryOutlookPanel from "./CountryOutlookPanel";
 import GlobalMap from "./GlobalMap";
-import { useGlobalNewsDots } from "@/hooks/useGlobalNewsDots";
-import { useLiveSignals } from "@/hooks/useLiveSignals";
-import { SIGNALS } from "@/data/signals";
-import { GENZ_SIGNALS } from "@/data/genzSignals";
+import { useUnifiedSignals } from "@/hooks/useUnifiedSignals";
 
 export type DashboardMode = "resilience" | "genz";
 
@@ -31,20 +29,24 @@ const LiveClock = () => {
 };
 
 const DashboardLayout = () => {
-  const { dots: newsDots } = useGlobalNewsDots();
   const [mode, setMode] = useState<DashboardMode>("resilience");
   const [activeDomains, setActiveDomains] = useState<DomainId[]>(["work", "selfhood", "community", "aging", "environment"]);
   const [activeMindset] = useState<MindsetId>("cracks");
   const [activeCategories, setActiveCategories] = useState<GenZCategoryId[]>(["authenticity"]);
   const [selectedCompany, setSelectedCompany] = useState<CompanyId | null>("mori_building");
-  const [selectedSignal, setSelectedSignal] = useState<ResilienceSignal | GenZSignal | null>(null);
+  const [selectedSignal, setSelectedSignal] = useState<UnifiedSignal | null>(null);
   const [selectedCountry, setSelectedCountry] = useState<string | null>(null);
   const [lang, setLang] = useState<"en" | "jp">("en");
-  const { signals: liveSignals } = useLiveSignals(activeDomains);
 
-  const signalCount = mode === "resilience"
-    ? (liveSignals?.length || SIGNALS.filter(s => activeDomains.includes(s.domain)).length) + newsDots.length
-    : GENZ_SIGNALS.filter(s => activeCategories.includes(s.category)).length + newsDots.length;
+  const { signals, isLive } = useUnifiedSignals(mode, activeDomains, activeCategories, selectedCompany);
+
+  // Filter signals by mode for the map
+  const visibleSignals = signals.filter(s => {
+    if (mode === "resilience") return s.layer === "resilience" || s.layer === "live-news";
+    return s.layer === "genz" || s.layer === "live-news";
+  });
+
+  const signalCount = visibleSignals.length;
 
   const toggleDomain = (id: DomainId) => {
     setActiveDomains((prev) =>
@@ -58,7 +60,7 @@ const DashboardLayout = () => {
     );
   };
 
-  const handleSignalClick = useCallback((signal: ResilienceSignal | GenZSignal, _mode: DashboardMode) => {
+  const handleSignalClick = useCallback((signal: UnifiedSignal) => {
     setSelectedSignal(signal);
     setSelectedCountry(null);
   }, []);
@@ -93,6 +95,15 @@ const DashboardLayout = () => {
           <span className="text-[11px] font-semibold text-primary tabular-nums">
             {signalCount} active signals
           </span>
+          {isLive && (
+            <>
+              <div className="h-4 w-px bg-border" />
+              <span className="text-[9px] font-bold text-green-400 uppercase tracking-wider flex items-center gap-1">
+                <span className="h-1.5 w-1.5 rounded-full bg-green-400 animate-pulse" />
+                LIVE
+              </span>
+            </>
+          )}
           <div className="h-4 w-px bg-border" />
           <div className="flex items-center gap-0.5">
             <button
@@ -161,8 +172,7 @@ const DashboardLayout = () => {
             onCountryClick={handleCountryClick}
             selectedSignalId={selectedSignal?.id || null}
             selectedCountry={selectedCountry}
-            newsDots={newsDots}
-            liveSignals={liveSignals}
+            signals={visibleSignals}
           />
 
           {/* Bottom-left floating domain/category selector */}
@@ -183,7 +193,7 @@ const DashboardLayout = () => {
               mode={mode}
               selectedCompany={selectedCompany}
               onClose={handleClosePanel}
-              onSignalClick={handleSignalClick}
+              onSignalClick={(signal: any) => handleSignalClick(signal)}
             />
           ) : (
             <AIInsightPanel
