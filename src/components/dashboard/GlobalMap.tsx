@@ -148,6 +148,16 @@ const COUNTRY_TIERS: Record<string, number> = {
   "Papua New Guinea": 3, "Gabon": 3,
 };
 
+// 30 largest countries that show as watermark labels at default zoom
+const WATERMARK_COUNTRIES = new Set([
+  "Russia", "Canada", "United States of America", "China", "Brazil",
+  "Australia", "India", "Argentina", "Kazakhstan", "Algeria",
+  "Saudi Arabia", "Mexico", "Indonesia", "Sudan", "Libya",
+  "Iran", "Mongolia", "Peru", "Chad", "Niger",
+  "Angola", "Mali", "South Africa", "Colombia", "Ethiopia",
+  "Bolivia", "Egypt", "Nigeria", "Tanzania", "Turkey",
+]);
+
 function getCountryTier(name: string): number {
   return COUNTRY_TIERS[name] || 4;
 }
@@ -435,6 +445,48 @@ const GlobalMap = memo(({
                   );
                 })}
 
+                {/* Watermark country labels — always visible at zoom 1+ */}
+                {(() => {
+                  const watermarkFontSize = Math.max(1.5, 8 / Math.pow(liveZoom, 0.9));
+                  return geographies
+                    .filter((geo) => {
+                      const name = geo.properties?.name || geo.properties?.NAME || "";
+                      return WATERMARK_COUNTRIES.has(name);
+                    })
+                    .map((geo) => {
+                      const name = geo.properties?.name || geo.properties?.NAME || "";
+                      const override = LABEL_OVERRIDES[name];
+                      const centroid = override || geoCentroid(geo) as [number, number];
+                      if (!centroid || (centroid[0] === 0 && centroid[1] === 0)) return null;
+                      const displayName = DISPLAY_NAMES[name] || name;
+                      // Fade out as regular labels appear
+                      const opacity = currentZoom < 1.3 ? 0.3 : Math.max(0, 0.3 - (currentZoom - 1.3) * 0.15);
+                      if (opacity <= 0.02) return null;
+                      return (
+                        <Marker key={`wm-${geo.rsmKey}`} coordinates={centroid}>
+                          <text
+                            textAnchor="middle"
+                            dy="0.35em"
+                            style={{
+                              fontFamily: "'Georgia', 'Times New Roman', serif",
+                              fill: "hsl(220, 10%, 35%)",
+                              fontSize: `${watermarkFontSize}px`,
+                              fontWeight: 400,
+                              letterSpacing: "0.15em",
+                              textTransform: "uppercase" as const,
+                              pointerEvents: "none",
+                              userSelect: "none",
+                              opacity,
+                              transition: "opacity 0.5s",
+                            }}
+                          >
+                            {displayName}
+                          </text>
+                        </Marker>
+                      );
+                    });
+                })()}
+
                 {/* Country labels — progressive reveal with collision detection */}
                 {(() => {
                   const candidates = geographies
@@ -546,7 +598,7 @@ const GlobalMap = memo(({
             );
           })}
 
-          {/* Resilience signals */}
+          {/* Resilience signals — urgency-based sizing */}
           {mode === "resilience" &&
             resilienceFiltered.map((signal) => {
               const domain = DOMAINS.find((d) => d.id === signal.domain);
@@ -555,7 +607,16 @@ const GlobalMap = memo(({
                 ? isRelevantToCompany(`${signal.title} ${signal.description}`, selectedCompany)
                 : false;
               const dimmed = !!(selectedCompany && !relevant && !signal.isJapan);
-              const baseR = signal.isJapan ? 5 : relevant ? 5 : 4;
+
+              // Urgency sizing: intensity 9-10=critical, 7-8=high, 5-6=medium, <5=low
+              const urgencyMultiplier = signal.intensity >= 9 ? 2.0
+                : signal.intensity >= 7 ? 1.5
+                : signal.intensity >= 5 ? 1.0
+                : 0.7;
+              const isCritical = signal.intensity >= 9;
+              const isHigh = signal.intensity >= 7;
+
+              const baseR = (signal.isJapan ? 5 : relevant ? 5 : 3.5) * urgencyMultiplier;
               const r = baseR * dotScale;
               const isSelected = selectedSignalId === signal.id;
               const fillColor = signal.isJapan ? "#1241ea" : color;
@@ -568,13 +629,24 @@ const GlobalMap = memo(({
                   style={{ cursor: "pointer" }}
                 >
                   <title>{getShortTitle(signal.title)}</title>
+                  {/* Animated pulse glow for critical signals */}
+                  {isCritical && !dimmed && (
+                    <circle r={r * 3} fill={fillColor} opacity={0}>
+                      <animate attributeName="r" from={String(r * 1.5)} to={String(r * 4)} dur="2s" repeatCount="indefinite" />
+                      <animate attributeName="opacity" from="0.25" to="0" dur="2s" repeatCount="indefinite" />
+                    </circle>
+                  )}
+                  {/* Static glow for high urgency */}
+                  {isHigh && !isCritical && !dimmed && (
+                    <circle r={r * 2.2} fill={fillColor} opacity={0.12} />
+                  )}
                   <circle r={r * 2} fill={fillColor} opacity={dimmed ? 0 : 0.15} />
                   <circle
                     r={r}
                     fill={fillColor}
                     stroke={isSelected ? "#ffffff" : fillColor}
                     strokeWidth={isSelected ? 2 * dotScale : 1 * dotScale}
-                    opacity={dimmed ? 0.25 : 1}
+                    opacity={dimmed ? 0.2 : signal.intensity < 5 ? 0.55 : 1}
                     className="transition-all duration-200 hover:opacity-100"
                     style={{ transition: "opacity 0.3s, r 0.2s" }}
                     onMouseEnter={(e) => {
@@ -608,14 +680,22 @@ const GlobalMap = memo(({
               );
             })}
 
-          {/* Gen Z signals */}
+          {/* Gen Z signals — urgency-based sizing */}
           {mode === "genz" &&
             genzFiltered.map((signal) => {
               const relevant = selectedCompany
                 ? isRelevantToCompany(`${signal.title} ${signal.description}`, selectedCompany)
                 : false;
               const dimmed = !!(selectedCompany && !relevant && !signal.isJapan);
-              const baseR = signal.isJapan ? 6 : relevant ? 6 : 3 + signal.intensity * 0.4;
+
+              const urgencyMultiplier = signal.intensity >= 9 ? 2.0
+                : signal.intensity >= 7 ? 1.5
+                : signal.intensity >= 5 ? 1.0
+                : 0.7;
+              const isCritical = signal.intensity >= 9;
+              const isHigh = signal.intensity >= 7;
+
+              const baseR = (signal.isJapan ? 5 : relevant ? 5 : 3.5) * urgencyMultiplier;
               const r = baseR * dotScale;
               const isSelected = selectedSignalId === signal.id;
 
@@ -627,13 +707,22 @@ const GlobalMap = memo(({
                   style={{ cursor: "pointer" }}
                 >
                   <title>{getShortTitle(signal.title)}</title>
+                  {isCritical && !dimmed && (
+                    <circle r={r * 3} fill={GENZ_COLOR} opacity={0}>
+                      <animate attributeName="r" from={String(r * 1.5)} to={String(r * 4)} dur="2s" repeatCount="indefinite" />
+                      <animate attributeName="opacity" from="0.25" to="0" dur="2s" repeatCount="indefinite" />
+                    </circle>
+                  )}
+                  {isHigh && !isCritical && !dimmed && (
+                    <circle r={r * 2.2} fill={GENZ_COLOR} opacity={0.12} />
+                  )}
                   <circle r={r * 2} fill={GENZ_COLOR} opacity={dimmed ? 0 : 0.15} />
                   <circle
                     r={r}
                     fill={GENZ_COLOR}
                     stroke={isSelected ? "#ffffff" : GENZ_COLOR}
                     strokeWidth={isSelected ? 2 * dotScale : 1 * dotScale}
-                    opacity={dimmed ? 0.25 : 1}
+                    opacity={dimmed ? 0.2 : signal.intensity < 5 ? 0.55 : 1}
                     className="transition-all duration-200 hover:opacity-100"
                     onMouseEnter={(e) => {
                       const el = e.currentTarget;
