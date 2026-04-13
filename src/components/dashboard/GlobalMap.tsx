@@ -672,7 +672,7 @@ const GlobalMap = memo(({
                     fill={fillColor}
                     stroke={fillColor}
                     strokeWidth={1 * dotScale}
-                    opacity={dimmed ? 0.2 : signal.intensity < 5 ? 0.55 : 1}
+                    opacity={dimmed ? 0.45 : signal.intensity < 5 ? 0.55 : 1}
                     style={{ transition: "r 150ms ease, opacity 150ms ease" }}
                     onMouseEnter={(e) => {
                       e.currentTarget.setAttribute("r", String(r * 1.3));
@@ -758,7 +758,7 @@ const GlobalMap = memo(({
                     fill={GENZ_COLOR}
                     stroke={GENZ_COLOR}
                     strokeWidth={1 * dotScale}
-                    opacity={dimmed ? 0.2 : signal.intensity < 5 ? 0.55 : 1}
+                    opacity={dimmed ? 0.45 : signal.intensity < 5 ? 0.55 : 1}
                     style={{ transition: "r 150ms ease, opacity 150ms ease" }}
                     onMouseEnter={(e) => {
                       e.currentTarget.setAttribute("r", String(r * 1.3));
