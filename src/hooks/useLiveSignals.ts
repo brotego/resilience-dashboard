@@ -42,9 +42,10 @@ const COUNTRY_FULL_NAMES: Record<string, string> = {
   "UAE": "United Arab Emirates",
 };
 
-function jitter(coords: [number, number], index: number): [number, number] {
-  const angle = (index * 137.5) * (Math.PI / 180);
-  const r = 2 + (index % 3) * 1.2;
+function jitter(coords: [number, number], index: number, domainIndex: number): [number, number] {
+  const seed = index + domainIndex * 7;
+  const angle = (seed * 137.5) * (Math.PI / 180);
+  const r = 3 + (seed % 5) * 1.5;
   return [coords[0] + r * Math.cos(angle), coords[1] + r * Math.sin(angle)];
 }
 
@@ -93,7 +94,7 @@ export function useLiveSignals(activeDomains: DomainId[]) {
       // For each domain, fetch from 3-4 countries to spread dots globally
       const promises = activeDomains.flatMap((domain) => {
         // Pick a subset of countries per domain to avoid too many API calls
-        const countries = NEWS_COUNTRIES.slice(0, 6);
+        const countries = NEWS_COUNTRIES;
         return countries.map(async (country) => {
           try {
             const { data } = await supabase.functions.invoke("news-feed", {
@@ -109,8 +110,8 @@ export function useLiveSignals(activeDomains: DomainId[]) {
                   title: article.title || "Untitled",
                   description: article.description || "",
                   location: `${country.name}`,
-                  coordinates: jitter(country.coords, i + activeDomains.indexOf(domain) * 3),
-                  intensity: 6 + Math.floor(Math.random() * 4),
+                  coordinates: jitter(country.coords, i, activeDomains.indexOf(domain)),
+                  intensity: 7,
                   isJapan: country.code === "jp",
                   mindsetRelevance: {
                     cracks: `This development reveals emerging opportunities in ${domain} within ${country.name}.`,
