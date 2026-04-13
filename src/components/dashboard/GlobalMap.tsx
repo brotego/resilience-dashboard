@@ -213,6 +213,7 @@ const GlobalMap = memo(({
     zoom: 1.5,
   });
   const [liveZoom, setLiveZoom] = useState(1.5);
+  const [tooltip, setTooltip] = useState<{ x: number; y: number; title: string; location: string; urgency: string } | null>(null);
   const positionRef = useRef<{ coordinates: [number, number]; zoom: number }>({
     coordinates: [30, 20],
     zoom: 1.5,
@@ -220,6 +221,13 @@ const GlobalMap = memo(({
   const targetZoomRef = useRef(1.5);
   const animFrameRef = useRef<number | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+
+  const showTooltip = useCallback((e: React.MouseEvent, title: string, location: string, urgency: string) => {
+    const rect = containerRef.current?.getBoundingClientRect();
+    if (!rect) return;
+    setTooltip({ x: e.clientX - rect.left + 12, y: e.clientY - rect.top - 10, title, location, urgency });
+  }, []);
+  const hideTooltip = useCallback(() => setTooltip(null), []);
 
   const clampZoom = (z: number) => Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, z));
 
