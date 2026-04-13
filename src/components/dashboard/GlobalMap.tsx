@@ -598,7 +598,7 @@ const GlobalMap = memo(({
             );
           })}
 
-          {/* Resilience signals */}
+          {/* Resilience signals — urgency-based sizing */}
           {mode === "resilience" &&
             resilienceFiltered.map((signal) => {
               const domain = DOMAINS.find((d) => d.id === signal.domain);
@@ -607,7 +607,16 @@ const GlobalMap = memo(({
                 ? isRelevantToCompany(`${signal.title} ${signal.description}`, selectedCompany)
                 : false;
               const dimmed = !!(selectedCompany && !relevant && !signal.isJapan);
-              const baseR = signal.isJapan ? 5 : relevant ? 5 : 4;
+
+              // Urgency sizing: intensity 9-10=critical, 7-8=high, 5-6=medium, <5=low
+              const urgencyMultiplier = signal.intensity >= 9 ? 2.0
+                : signal.intensity >= 7 ? 1.5
+                : signal.intensity >= 5 ? 1.0
+                : 0.7;
+              const isCritical = signal.intensity >= 9;
+              const isHigh = signal.intensity >= 7;
+
+              const baseR = (signal.isJapan ? 5 : relevant ? 5 : 3.5) * urgencyMultiplier;
               const r = baseR * dotScale;
               const isSelected = selectedSignalId === signal.id;
               const fillColor = signal.isJapan ? "#1241ea" : color;
@@ -620,13 +629,24 @@ const GlobalMap = memo(({
                   style={{ cursor: "pointer" }}
                 >
                   <title>{getShortTitle(signal.title)}</title>
+                  {/* Animated pulse glow for critical signals */}
+                  {isCritical && !dimmed && (
+                    <circle r={r * 3} fill={fillColor} opacity={0}>
+                      <animate attributeName="r" from={String(r * 1.5)} to={String(r * 4)} dur="2s" repeatCount="indefinite" />
+                      <animate attributeName="opacity" from="0.25" to="0" dur="2s" repeatCount="indefinite" />
+                    </circle>
+                  )}
+                  {/* Static glow for high urgency */}
+                  {isHigh && !isCritical && !dimmed && (
+                    <circle r={r * 2.2} fill={fillColor} opacity={0.12} />
+                  )}
                   <circle r={r * 2} fill={fillColor} opacity={dimmed ? 0 : 0.15} />
                   <circle
                     r={r}
                     fill={fillColor}
                     stroke={isSelected ? "#ffffff" : fillColor}
                     strokeWidth={isSelected ? 2 * dotScale : 1 * dotScale}
-                    opacity={dimmed ? 0.25 : 1}
+                    opacity={dimmed ? 0.2 : signal.intensity < 5 ? 0.55 : 1}
                     className="transition-all duration-200 hover:opacity-100"
                     style={{ transition: "opacity 0.3s, r 0.2s" }}
                     onMouseEnter={(e) => {
