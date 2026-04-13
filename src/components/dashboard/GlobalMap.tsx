@@ -630,13 +630,13 @@ const GlobalMap = memo(({
                 : false;
               const dimmed = !!(selectedCompany && !relevant && !signal.isJapan);
 
-              // Urgency sizing: intensity 9-10=critical, 7-8=high, 5-6=medium, <5=low
               const urgencyMultiplier = signal.intensity >= 9 ? 2.0
                 : signal.intensity >= 7 ? 1.5
                 : signal.intensity >= 5 ? 1.0
                 : 0.7;
               const isCritical = signal.intensity >= 9;
               const isHigh = signal.intensity >= 7;
+              const urgencyLabel = isCritical ? "Critical" : isHigh ? "High" : signal.intensity >= 5 ? "Medium" : "Low";
 
               const baseR = (signal.isJapan ? 5 : relevant ? 5 : 3.5) * urgencyMultiplier;
               const r = baseR * dotScale;
@@ -647,10 +647,12 @@ const GlobalMap = memo(({
                 <Marker
                   key={signal.id}
                   coordinates={signal.coordinates}
-                  onClick={() => onSignalClick(signal, "resilience")}
+                  onClick={() => {
+                    onSignalClick(signal, "resilience");
+                    panToSignal(signal.coordinates);
+                  }}
                   style={{ cursor: "pointer" }}
                 >
-                  <title>{getShortTitle(signal.title)}</title>
                   {/* Animated pulse glow for critical signals */}
                   {isCritical && !dimmed && (
                     <circle r={r * 3} fill={fillColor} opacity={0}>
@@ -658,7 +660,6 @@ const GlobalMap = memo(({
                       <animate attributeName="opacity" from="0.25" to="0" dur="2s" repeatCount="indefinite" />
                     </circle>
                   )}
-                  {/* Static glow for high urgency */}
                   {isHigh && !isCritical && !dimmed && (
                     <circle r={r * 2.2} fill={fillColor} opacity={0.12} />
                   )}
@@ -666,28 +667,46 @@ const GlobalMap = memo(({
                   <circle
                     r={r}
                     fill={fillColor}
-                    stroke={isSelected ? "#ffffff" : fillColor}
-                    strokeWidth={isSelected ? 2 * dotScale : 1 * dotScale}
+                    stroke={fillColor}
+                    strokeWidth={1 * dotScale}
                     opacity={dimmed ? 0.2 : signal.intensity < 5 ? 0.55 : 1}
-                    className="transition-all duration-200 hover:opacity-100"
-                    style={{ transition: "opacity 0.3s, r 0.2s" }}
+                    style={{ transition: "r 150ms ease, opacity 150ms ease" }}
                     onMouseEnter={(e) => {
-                      const el = e.currentTarget;
-                      el.setAttribute("r", String(r * 1.5));
+                      e.currentTarget.setAttribute("r", String(r * 1.3));
+                      // Intensify glow
+                      const glow = e.currentTarget.previousElementSibling as SVGCircleElement | null;
+                      if (glow) glow.setAttribute("opacity", "0.3");
+                      showTooltip(e as any, signal.title, signal.location, urgencyLabel);
                     }}
+                    onMouseMove={(e) => showTooltip(e as any, signal.title, signal.location, urgencyLabel)}
                     onMouseLeave={(e) => {
-                      const el = e.currentTarget;
-                      el.setAttribute("r", String(r));
+                      e.currentTarget.setAttribute("r", String(r));
+                      const glow = e.currentTarget.previousElementSibling as SVGCircleElement | null;
+                      if (glow) glow.setAttribute("opacity", "0.15");
+                      hideTooltip();
                     }}
                   />
+                  {/* Selection ring — animated pulse */}
                   {isSelected && (
-                    <circle
-                      r={r * 2.5}
-                      fill="none"
-                      stroke="#ffffff"
-                      strokeWidth={0.5 * dotScale}
-                      opacity={0.4}
-                    />
+                    <>
+                      <circle
+                        r={r * 2.5}
+                        fill="none"
+                        stroke="#1241ea"
+                        strokeWidth={1.5 * dotScale}
+                        opacity={0.7}
+                      >
+                        <animate attributeName="r" from={String(r * 2.2)} to={String(r * 3)} dur="1.5s" repeatCount="indefinite" />
+                        <animate attributeName="opacity" from="0.7" to="0.2" dur="1.5s" repeatCount="indefinite" />
+                      </circle>
+                      <circle
+                        r={r * 2}
+                        fill="none"
+                        stroke="#1241ea"
+                        strokeWidth={1 * dotScale}
+                        opacity={0.9}
+                      />
+                    </>
                   )}
                   {signal.isJapan && (
                     <text
@@ -701,8 +720,6 @@ const GlobalMap = memo(({
                 </Marker>
               );
             })}
-
-          {/* Gen Z signals — urgency-based sizing */}
           {mode === "genz" &&
             genzFiltered.map((signal) => {
               const relevant = selectedCompany
