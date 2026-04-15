@@ -24,7 +24,7 @@ interface Props {
 const GenZCategorySelector = ({ activeCategories, onToggle }: Props) => {
   const { t } = useLang();
   return (
-    <div className="flex flex-wrap gap-1.5">
+    <div className="flex flex-wrap gap-1">
       {GENZ_CATEGORIES.map((c) => {
         const Icon = ICONS[c.icon];
         const active = activeCategories.includes(c.id);
@@ -32,13 +32,13 @@ const GenZCategorySelector = ({ activeCategories, onToggle }: Props) => {
           <button
             key={c.id}
             onClick={() => onToggle(c.id)}
-            className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-medium transition-all border ${
+            className={`flex items-center gap-1.5 px-2 py-0.5 rounded-sm text-[10px] font-mono font-medium transition-all border ${
               active
                 ? "bg-genz/15 border-genz/40 text-foreground"
                 : "bg-secondary/30 border-transparent text-muted-foreground hover:bg-secondary/60"
             }`}
           >
-            {Icon && <Icon className="h-3 w-3 shrink-0 text-genz" />}
+            {Icon && <Icon className="h-2.5 w-2.5 shrink-0 text-genz" />}
             <span>{t(CATEGORY_KEYS[c.id])}</span>
           </button>
         );

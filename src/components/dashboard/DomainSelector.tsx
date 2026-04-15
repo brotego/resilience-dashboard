@@ -24,7 +24,7 @@ interface Props {
 const DomainSelector = ({ activeDomains, onToggle }: Props) => {
   const { t } = useLang();
   return (
-    <div className="flex flex-wrap gap-1.5">
+    <div className="flex flex-wrap gap-1">
       {DOMAINS.map((d) => {
         const Icon = ICONS[d.icon];
         const active = activeDomains.includes(d.id);
@@ -32,13 +32,13 @@ const DomainSelector = ({ activeDomains, onToggle }: Props) => {
           <button
             key={d.id}
             onClick={() => onToggle(d.id)}
-            className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-medium transition-all border ${
+            className={`flex items-center gap-1.5 px-2 py-0.5 rounded-sm text-[10px] font-mono font-medium transition-all border ${
               active
                 ? "bg-primary/15 border-primary/40 text-foreground"
                 : "bg-secondary/30 border-transparent text-muted-foreground hover:bg-secondary/60"
             }`}
           >
-            {Icon && <Icon className="h-3 w-3 shrink-0" style={{ color: d.color }} />}
+            {Icon && <Icon className="h-2.5 w-2.5 shrink-0" style={{ color: d.color }} />}
             <span>{t(DOMAIN_KEYS[d.id])}</span>
           </button>
         );

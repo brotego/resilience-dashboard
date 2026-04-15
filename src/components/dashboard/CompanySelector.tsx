@@ -24,36 +24,38 @@ const CompanySelector = ({ selectedCompany, onSelect }: Props) => {
           variant="outline"
           role="combobox"
           aria-expanded={open}
-          className="w-full justify-between bg-secondary/50 border-border text-sm h-9 rounded-lg font-normal"
+          className="w-full justify-between bg-secondary/50 border-border text-[11px] font-mono h-7 rounded-sm font-normal"
         >
           {selected ? selected.name : t("company.all")}
-          <ChevronsUpDown className="ml-2 h-3.5 w-3.5 shrink-0 opacity-50" />
+          <ChevronsUpDown className="ml-2 h-3 w-3 shrink-0 opacity-50" />
         </Button>
       </PopoverTrigger>
-      <PopoverContent className="w-[220px] p-0" align="end">
+      <PopoverContent className="w-[220px] p-0 rounded-sm" align="end">
         <Command>
-          <CommandInput placeholder={t("company.search")} className="h-9" />
+          <CommandInput placeholder={t("company.search")} className="h-8 text-[11px]" />
           <CommandList>
-            <CommandEmpty>{t("company.empty")}</CommandEmpty>
+            <CommandEmpty className="text-[10px] font-mono">{t("company.empty")}</CommandEmpty>
             <CommandGroup>
               <CommandItem
                 value="all-companies"
                 onSelect={() => { onSelect(null); setOpen(false); }}
+                className="text-[11px]"
               >
                 {t("company.all")}
-                <Check className={cn("ml-auto h-4 w-4", !selectedCompany ? "opacity-100" : "opacity-0")} />
+                <Check className={cn("ml-auto h-3 w-3", !selectedCompany ? "opacity-100" : "opacity-0")} />
               </CommandItem>
               {COMPANIES.map((c) => (
                 <CommandItem
                   key={c.id}
                   value={c.name}
                   onSelect={() => { onSelect(c.id); setOpen(false); }}
+                  className="text-[11px]"
                 >
                   <div className="flex flex-col">
                     <span className="font-semibold">{c.name}</span>
-                    <span className="text-[10px] text-muted-foreground">{c.sector}</span>
+                    <span className="text-[9px] font-mono text-muted-foreground">{c.sector}</span>
                   </div>
-                  <Check className={cn("ml-auto h-4 w-4", selectedCompany === c.id ? "opacity-100" : "opacity-0")} />
+                  <Check className={cn("ml-auto h-3 w-3", selectedCompany === c.id ? "opacity-100" : "opacity-0")} />
                 </CommandItem>
               ))}
             </CommandGroup>
