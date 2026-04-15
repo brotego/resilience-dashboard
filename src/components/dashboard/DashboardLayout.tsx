@@ -9,23 +9,26 @@ import CompanySelector from "./CompanySelector";
 import AIInsightPanel from "./AIInsightPanel";
 import CountryOutlookPanel from "./CountryOutlookPanel";
 import GlobalMap from "./GlobalMap";
+import CompanyDashboard from "./CompanyDashboard";
 import { useUnifiedSignals } from "@/hooks/useUnifiedSignals";
 import { useLang } from "@/i18n/LanguageContext";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 
 export type DashboardMode = "resilience" | "genz";
+export type ViewTab = "dashboard" | "map";
 
 const LiveClock = () => {
   const [now, setNow] = useState(new Date());
-  const { lang, t } = useLang();
+  const { t } = useLang();
   useEffect(() => {
     const timer = setInterval(() => setNow(new Date()), 1000);
     return () => clearInterval(timer);
   }, []);
   const locale = t("clock.locale");
   return (
-    <span className="font-mono text-[11px] text-muted-foreground tabular-nums">
-      {now.toLocaleDateString(locale, { weekday: "short", month: "short", day: "numeric", year: "numeric" })}
-      {" · "}
+    <span className="font-mono text-[10px] text-muted-foreground/70 tabular-nums">
+      {now.toLocaleDateString(locale, { month: "short", day: "numeric", year: "numeric" })}
+      {" "}
       {now.toLocaleTimeString(locale, { hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false })}
     </span>
   );
@@ -33,6 +36,7 @@ const LiveClock = () => {
 
 const DashboardLayout = () => {
   const { lang, setLang, t } = useLang();
+  const [activeTab, setActiveTab] = useState<ViewTab>("dashboard");
   const [mode, setMode] = useState<DashboardMode>("resilience");
   const [activeDomains, setActiveDomains] = useState<DomainId[]>(["work", "selfhood", "community", "aging", "environment"]);
   const [activeMindset] = useState<MindsetId>("cracks");
@@ -67,6 +71,12 @@ const DashboardLayout = () => {
     setSelectedCountry(null);
   }, []);
 
+  const handleDashboardSignalClick = useCallback((signal: UnifiedSignal) => {
+    setSelectedSignal(signal);
+    setSelectedCountry(null);
+    setActiveTab("map");
+  }, []);
+
   const handleCountryClick = useCallback((countryName: string, _geo: any) => {
     setSelectedCountry(countryName);
     setSelectedSignal(null);
@@ -79,51 +89,79 @@ const DashboardLayout = () => {
 
   return (
     <div className="h-screen flex flex-col bg-background overflow-hidden">
-      {/* Top bar */}
-      <header className="flex items-center justify-between px-6 py-2.5 border-b border-border bg-card">
-        <div className="flex flex-col">
-          <h1 className="text-lg font-bold tracking-tight text-foreground">
-            {t("app.title")}
-          </h1>
-          <span className="text-[11px] text-muted-foreground">
-            {t("app.subtitle")}
-          </span>
+      {/* Header — 44px max */}
+      <header className="flex items-center justify-between px-4 h-[44px] border-b border-border bg-card shrink-0">
+        {/* Left: title + tabs */}
+        <div className="flex items-center gap-4">
+          <TooltipProvider>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <h1 className="text-[13px] font-bold tracking-tight text-foreground whitespace-nowrap">
+                  {t("app.title")}
+                </h1>
+              </TooltipTrigger>
+              <TooltipContent side="bottom" className="text-[10px]">
+                {t("app.subtitle")}
+              </TooltipContent>
+            </Tooltip>
+          </TooltipProvider>
+
+          <div className="h-4 w-px bg-border" />
+
+          {/* Tab buttons */}
+          <div className="flex gap-1">
+            <button
+              onClick={() => setActiveTab("dashboard")}
+              className={`px-3 py-1 text-[10px] font-mono font-semibold uppercase tracking-wider rounded-sm transition-colors ${
+                activeTab === "dashboard"
+                  ? "bg-primary text-primary-foreground"
+                  : "text-muted-foreground hover:text-foreground"
+              }`}
+            >
+              {lang === "jp" ? "ダッシュボード" : "Dashboard"}
+            </button>
+            <button
+              onClick={() => setActiveTab("map")}
+              className={`px-3 py-1 text-[10px] font-mono font-semibold uppercase tracking-wider rounded-sm transition-colors ${
+                activeTab === "map"
+                  ? "bg-primary text-primary-foreground"
+                  : "text-muted-foreground hover:text-foreground"
+              }`}
+            >
+              {lang === "jp" ? "グローバルマップ" : "Global Map"}
+            </button>
+          </div>
         </div>
 
-        {/* Center info strip */}
-        <div className="flex items-center gap-4">
+        {/* Center: info */}
+        <div className="flex items-center gap-3">
           <LiveClock />
-          <div className="h-4 w-px bg-border" />
-          <span className="text-[11px] font-semibold text-primary tabular-nums">
-            {signalCount} {t("header.activeSignals")}
+          <div className="h-3 w-px bg-border" />
+          <span className="text-[10px] font-mono font-semibold text-primary tabular-nums">
+            {signalCount} {lang === "jp" ? "件" : "signals"}
           </span>
           {isLive && (
             <>
-              <div className="h-4 w-px bg-border" />
-              <span className="text-[9px] font-bold text-green-400 uppercase tracking-wider flex items-center gap-1">
-                <span className="h-1.5 w-1.5 rounded-full bg-green-400 animate-pulse" />
+              <span className="text-[9px] font-mono font-bold text-emerald-400 uppercase tracking-wider flex items-center gap-1">
+                <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse" />
                 {t("header.live")}
               </span>
             </>
           )}
-          <div className="h-4 w-px bg-border" />
-          <div className="flex items-center gap-0.5">
+          <div className="h-3 w-px bg-border" />
+          <div className="flex gap-0.5">
             <button
               onClick={() => setLang("en")}
-              className={`px-2 py-0.5 text-[10px] font-bold rounded-l-md transition-colors ${
-                lang === "en"
-                  ? "bg-primary text-primary-foreground"
-                  : "bg-secondary text-muted-foreground hover:text-foreground"
+              className={`px-2 py-0.5 text-[9px] font-mono font-semibold rounded-sm transition-colors ${
+                lang === "en" ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground"
               }`}
             >
               EN
             </button>
             <button
               onClick={() => setLang("jp")}
-              className={`px-2 py-0.5 text-[10px] font-bold rounded-r-md transition-colors ${
-                lang === "jp"
-                  ? "bg-primary text-primary-foreground"
-                  : "bg-secondary text-muted-foreground hover:text-foreground"
+              className={`px-2 py-0.5 text-[9px] font-mono font-semibold rounded-sm transition-colors ${
+                lang === "jp" ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground"
               }`}
             >
               JP
@@ -131,85 +169,96 @@ const DashboardLayout = () => {
           </div>
         </div>
 
-        <div className="flex items-center gap-4">
-          <div className="w-52">
-            <CompanySelector selectedCompany={selectedCompany} onSelect={setSelectedCompany} />
-          </div>
-
-          <div className="flex items-center gap-2">
+        {/* Right: mode toggle + company */}
+        <div className="flex items-center gap-3">
+          <div className="flex gap-1">
             <button
               onClick={() => setMode("resilience")}
-              className={`px-4 py-1.5 text-sm font-semibold rounded-oval transition-colors ${
+              className={`px-3 py-1 text-[10px] font-mono font-semibold uppercase tracking-wider rounded-sm transition-colors ${
                 mode === "resilience"
                   ? "bg-primary text-primary-foreground"
-                  : "bg-secondary text-muted-foreground hover:text-foreground"
+                  : "text-muted-foreground hover:text-foreground"
               }`}
             >
               {t("mode.resilience")}
             </button>
             <button
               onClick={() => setMode("genz")}
-              className={`px-4 py-1.5 text-sm font-semibold rounded-oval transition-colors ${
+              className={`px-3 py-1 text-[10px] font-mono font-semibold uppercase tracking-wider rounded-sm transition-colors ${
                 mode === "genz"
                   ? "bg-genz text-white"
-                  : "bg-secondary text-muted-foreground hover:text-foreground"
+                  : "text-muted-foreground hover:text-foreground"
               }`}
             >
               {t("mode.genz")}
             </button>
           </div>
+          <div className="w-44">
+            <CompanySelector selectedCompany={selectedCompany} onSelect={setSelectedCompany} />
+          </div>
         </div>
       </header>
 
-      {/* Main area: map + right panel */}
-      <div className="flex-1 flex overflow-hidden relative">
-        <div className="flex-1 relative">
-          <GlobalMap
-            mode={mode}
-            activeDomains={activeDomains}
-            activeMindset={activeMindset}
-            activeCategories={activeCategories}
+      {/* Main content */}
+      {activeTab === "dashboard" ? (
+        <div className="flex-1 overflow-hidden">
+          <CompanyDashboard
             selectedCompany={selectedCompany}
-            onSignalClick={handleSignalClick}
-            onCountryClick={handleCountryClick}
-            selectedSignalId={selectedSignal?.id || null}
-            selectedCountry={selectedCountry}
             signals={visibleSignals}
+            onSignalClick={handleDashboardSignalClick}
           />
-
-          {/* Bottom-left floating domain/category selector */}
-          <div className="absolute bottom-4 left-4 z-10 bg-card/90 backdrop-blur-md border border-border rounded-lg p-2 shadow-lg">
-            {mode === "resilience" ? (
-              <DomainSelector activeDomains={activeDomains} onToggle={toggleDomain} />
-            ) : (
-              <GenZCategorySelector activeCategories={activeCategories} onToggle={toggleCategory} />
-            )}
-          </div>
         </div>
-
-        {/* Right Panel */}
-        <div className="w-[420px] shrink-0">
-          {selectedCountry && !selectedSignal ? (
-            <CountryOutlookPanel
-              countryName={selectedCountry}
-              mode={mode}
-              selectedCompany={selectedCompany}
-              onClose={handleClosePanel}
-              onSignalClick={(signal: any) => handleSignalClick(signal)}
-            />
-          ) : (
-            <AIInsightPanel
+      ) : (
+        <div className="flex-1 flex overflow-hidden relative">
+          <div className="flex-1 relative">
+            <GlobalMap
               mode={mode}
               activeDomains={activeDomains}
               activeMindset={activeMindset}
               activeCategories={activeCategories}
               selectedCompany={selectedCompany}
-              selectedSignal={selectedSignal}
-              onClose={handleClosePanel}
+              onSignalClick={handleSignalClick}
+              onCountryClick={handleCountryClick}
+              selectedSignalId={selectedSignal?.id || null}
+              selectedCountry={selectedCountry}
+              signals={visibleSignals}
             />
-          )}
+
+            {/* Bottom-left floating domain/category selector */}
+            <div className="absolute bottom-3 left-3 z-10 bg-[rgba(6,10,12,0.85)] backdrop-blur-lg border border-border rounded-sm p-2">
+              {mode === "resilience" ? (
+                <DomainSelector activeDomains={activeDomains} onToggle={toggleDomain} />
+              ) : (
+                <GenZCategorySelector activeCategories={activeCategories} onToggle={toggleCategory} />
+              )}
+            </div>
+          </div>
+
+          {/* Right Panel */}
+          <div className="w-[400px] shrink-0">
+            {selectedCountry && !selectedSignal ? (
+              <CountryOutlookPanel
+                countryName={selectedCountry}
+                mode={mode}
+                selectedCompany={selectedCompany}
+                onClose={handleClosePanel}
+                onSignalClick={(signal: any) => handleSignalClick(signal)}
+              />
+            ) : (
+              <AIInsightPanel
+                mode={mode}
+                activeDomains={activeDomains}
+                activeMindset={activeMindset}
+                activeCategories={activeCategories}
+                selectedCompany={selectedCompany}
+                selectedSignal={selectedSignal}
+                onClose={handleClosePanel}
+                signals={visibleSignals}
+              />
+            )}
+          </div>
         </div>
-      </div>
+      )}
     </div>
   );
 };

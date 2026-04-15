@@ -213,34 +213,31 @@ const CountryOutlookPanel = ({ countryName, mode, selectedCompany, onClose, onSi
 
   return (
     <div className="h-full flex flex-col bg-card border-l border-border">
-      <div className="px-4 py-3 border-b border-border">
+      <div className="px-3 py-2 border-b border-border">
         <button
           onClick={onClose}
-          className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors mb-2"
+          className="flex items-center gap-1 text-[10px] font-mono text-muted-foreground hover:text-foreground transition-colors mb-1.5 uppercase tracking-widest"
         >
-          <ArrowLeft className="h-3.5 w-3.5" />
+          <ArrowLeft className="h-3 w-3" />
           {t("country.backToGlobal")}
         </button>
-        <h2 className="text-xl font-bold text-foreground leading-tight">{displayName}</h2>
-        <span className="text-[11px] text-muted-foreground">{region}</span>
+        <h2 className="text-lg font-bold text-foreground leading-tight">{displayName}</h2>
+        <span className="text-[10px] font-mono text-muted-foreground">{region}</span>
       </div>
 
       <ScrollArea className="flex-1">
-        <div className="px-4 py-4 space-y-5">
+        <div className="px-3 py-3 space-y-3">
           {/* Resilience Exposure Score */}
-          <div className={`rounded-lg border p-4 ${scoreBg}`}>
+          <div className={`rounded-sm border p-3 ${scoreBg}`}>
             <div className="flex items-center justify-between">
               <div>
-                <h4 className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">{t("country.resilienceExposure")}</h4>
-                <div className={`text-3xl font-black mt-1 ${scoreColor}`}>{score}</div>
-              </div>
-              <div className="w-12 h-12 rounded-full border-2 flex items-center justify-center" style={{ borderColor: score >= 70 ? "#34d399" : score >= 50 ? "#fbbf24" : "#f87171" }}>
-                <Globe2 className="h-5 w-5" style={{ color: score >= 70 ? "#34d399" : score >= 50 ? "#fbbf24" : "#f87171" }} />
+                <h4 className="text-[9px] font-mono font-bold uppercase tracking-widest text-muted-foreground">{t("country.resilienceExposure")}</h4>
+                <div className={`text-2xl font-mono font-semibold mt-1 ${scoreColor}`}>{score}</div>
               </div>
             </div>
-            <div className="mt-2 h-1.5 bg-background/40 rounded-full overflow-hidden">
+            <div className="mt-2 h-1 bg-background/40 rounded-sm overflow-hidden">
               <div
-                className="h-full rounded-full transition-all duration-700"
+                className="h-full rounded-sm transition-all duration-700"
                 style={{
                   width: `${score}%`,
                   backgroundColor: score >= 70 ? "#34d399" : score >= 50 ? "#fbbf24" : "#f87171",
@@ -251,19 +248,19 @@ const CountryOutlookPanel = ({ countryName, mode, selectedCompany, onClose, onSi
 
           {/* Company insight */}
           <div>
-            <h4 className="text-xs font-bold uppercase tracking-wider text-primary mb-2">
+            <h4 className="text-[10px] font-mono font-bold uppercase tracking-widest text-primary mb-1.5">
               {company ? `${t("country.whatThisMeans")} ${company.name}` : t("country.strategicContext")}
             </h4>
-            <p className="text-[12px] text-foreground/80 leading-relaxed">{companyInsight}</p>
+            <p className="text-[11px] text-foreground/80 leading-snug">{companyInsight}</p>
           </div>
 
           {/* Recent Signals */}
           {allSignals.length > 0 && (
             <div>
-              <h4 className="text-xs font-bold uppercase tracking-wider text-primary mb-2">
+              <h4 className="text-[10px] font-mono font-bold uppercase tracking-widest text-primary mb-1.5">
                 {t("country.recentSignals")} ({allSignals.length})
               </h4>
-              <div className="space-y-1.5">
+              <div className="space-y-1">
                 {allSignals.map((signal) => {
                   const isResilience = 'domain' in signal;
                   const urgency = getUrgency(signal.intensity, lang);
@@ -271,13 +268,13 @@ const CountryOutlookPanel = ({ countryName, mode, selectedCompany, onClose, onSi
                     <button
                       key={signal.id}
                       onClick={() => onSignalClick(signal)}
-                      className="w-full text-left rounded-lg border border-border bg-background/50 hover:bg-accent/10 p-2.5 transition-colors group"
+                      className="w-full text-left rounded-sm border border-border bg-background/50 hover:bg-secondary/30 p-2 transition-colors group"
                     >
                       <div className="flex items-center justify-between gap-2">
-                        <h5 className="text-[11px] font-semibold text-foreground group-hover:text-primary transition-colors leading-snug flex-1">
+                        <h5 className="text-[10px] font-semibold text-foreground group-hover:text-primary transition-colors leading-snug flex-1">
                           {signal.title}
                         </h5>
-                        <span className={`shrink-0 inline-block px-1.5 py-0.5 text-[9px] font-bold rounded border ${urgency.style}`}>
+                        <span className={`shrink-0 inline-block px-1.5 py-0.5 text-[8px] font-mono font-bold rounded-sm border ${urgency.style}`}>
                           {urgency.label}
                         </span>
                       </div>
@@ -289,8 +286,8 @@ const CountryOutlookPanel = ({ countryName, mode, selectedCompany, onClose, onSi
           )}
 
           {allSignals.length === 0 && (
-            <div className="text-center py-6">
-              <p className="text-xs text-muted-foreground">{t("country.noSignals")} {displayName} {t("country.yet")}</p>
+            <div className="text-center py-4">
+              <p className="text-[10px] font-mono text-muted-foreground">{t("country.noSignals")} {displayName} {t("country.yet")}</p>
             </div>
           )}
 
@@ -302,25 +299,22 @@ const CountryOutlookPanel = ({ countryName, mode, selectedCompany, onClose, onSi
 
           {/* Japan Perception */}
           <div>
-            <h4 className="text-xs font-bold uppercase tracking-wider text-muted-foreground mb-2 flex items-center gap-1.5">
-              🇯🇵 {t("country.japanPerception")}
+            <h4 className="text-[10px] font-mono font-bold uppercase tracking-widest text-muted-foreground mb-1.5">
+              {t("country.japanPerception")}
             </h4>
-            <p className="text-[11px] text-foreground/70 leading-relaxed">{japanPerception}</p>
+            <p className="text-[10px] text-foreground/70 leading-snug">{japanPerception}</p>
           </div>
 
           {/* Recommended Actions */}
           <div>
-            <h4 className="text-xs font-bold uppercase tracking-wider mb-2" style={{ color: "#ff6701" }}>
-              <span className="flex items-center gap-1.5">
-                <TrendingUp className="h-3.5 w-3.5" />
-                {t("country.recommendedActions")}
-              </span>
+            <h4 className="text-[10px] font-mono font-bold uppercase tracking-widest mb-1.5" style={{ color: "#ff6701" }}>
+              {t("country.recommendedActions")}
             </h4>
-            <div className="space-y-2">
+            <div className="space-y-1.5">
               {actions.map((action, i) => (
-                <div key={i} className="flex gap-2 text-[11px]">
-                  <span className="font-black shrink-0" style={{ color: "#ff6701" }}>{i + 1}.</span>
-                  <span className="text-foreground/80 leading-relaxed">{action}</span>
+                <div key={i} className="flex gap-2 text-[10px]">
+                  <span className="font-mono font-bold shrink-0" style={{ color: "#ff6701" }}>{i + 1}.</span>
+                  <span className="text-foreground/80 leading-snug">{action}</span>
                 </div>
               ))}
             </div>

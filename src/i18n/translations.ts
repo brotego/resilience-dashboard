@@ -6,6 +6,8 @@ const t = {
   "app.subtitle": { en: "Anchorstar × Mori Building", jp: "アンカースター × 森ビル" },
   "header.activeSignals": { en: "active signals", jp: "件のアクティブシグナル" },
   "header.live": { en: "LIVE", jp: "ライブ" },
+  "tab.dashboard": { en: "Dashboard", jp: "ダッシュボード" },
+  "tab.map": { en: "Global Map", jp: "グローバルマップ" },
 
   // Mode toggle
   "mode.resilience": { en: "Global Resilience", jp: "グローバルレジリエンス" },

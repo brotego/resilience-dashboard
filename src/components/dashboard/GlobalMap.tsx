@@ -329,15 +329,10 @@ const GlobalMap = memo(({
 
   return (
     <div ref={containerRef} className="w-full h-full bg-background relative">
-      {/* Zoom indicator */}
-      <div className="absolute top-3 left-3 z-10 bg-background/80 backdrop-blur-sm border border-border rounded-md px-2 py-1 text-xs font-mono text-muted-foreground">
-        {liveZoom.toFixed(1)}x
-      </div>
-
       {/* Zoom controls */}
-      <div className="absolute bottom-4 right-4 z-10 flex flex-col gap-1">
-        <button onClick={zoomIn} className="w-8 h-8 flex items-center justify-center bg-background/80 backdrop-blur-sm border border-border rounded-md text-foreground hover:bg-accent transition-colors" aria-label="Zoom in"><Plus size={16} /></button>
-        <button onClick={zoomOut} className="w-8 h-8 flex items-center justify-center bg-background/80 backdrop-blur-sm border border-border rounded-md text-foreground hover:bg-accent transition-colors" aria-label="Zoom out"><Minus size={16} /></button>
+      <div className="absolute bottom-3 right-3 z-10 flex flex-col gap-0.5">
+        <button onClick={zoomIn} className="w-7 h-7 flex items-center justify-center bg-[rgba(6,10,12,0.85)] backdrop-blur-sm border border-border rounded-sm text-foreground hover:text-primary transition-colors" aria-label="Zoom in"><Plus size={14} /></button>
+        <button onClick={zoomOut} className="w-7 h-7 flex items-center justify-center bg-[rgba(6,10,12,0.85)] backdrop-blur-sm border border-border rounded-sm text-foreground hover:text-primary transition-colors" aria-label="Zoom out"><Minus size={14} /></button>
       </div>
 
       <ComposableMap projection="geoMercator" projectionConfig={{ scale: 140, center: [0, 20] }} style={{ width: "100%", height: "100%" }}>
@@ -539,15 +534,15 @@ const GlobalMap = memo(({
       {/* Tooltip overlay */}
       {tooltip && (
         <div className="absolute z-50 pointer-events-none" style={{ left: tooltip.x, top: tooltip.y, transform: "translateY(-100%)" }}>
-          <div className="bg-card/95 backdrop-blur-sm border border-border rounded-lg px-3 py-2 shadow-lg max-w-[240px]">
-            <p className="text-[11px] font-bold text-foreground leading-tight truncate">{tooltip.title}</p>
-            <div className="flex items-center gap-2 mt-1">
-              <span className="text-[10px] text-muted-foreground">{tooltip.location}</span>
-              <span className="text-[9px] font-bold uppercase tracking-wider text-primary">{tooltip.urgency}</span>
+          <div className="bg-card/95 backdrop-blur-sm border border-border rounded-sm px-2.5 py-1.5 max-w-[220px]">
+            <p className="text-[10px] font-bold text-foreground leading-tight truncate">{tooltip.title}</p>
+            <div className="flex items-center gap-2 mt-0.5">
+              <span className="text-[9px] font-mono text-muted-foreground">{tooltip.location}</span>
+              <span className="text-[8px] font-mono font-bold uppercase tracking-wider text-primary">{tooltip.urgency}</span>
             </div>
-            <div className="flex items-center gap-1 mt-1">
-              <span className="text-[9px] text-muted-foreground">Resilience Exposure:</span>
-              <span className="text-[10px] font-bold text-primary">{tooltip.score}/10</span>
+            <div className="flex items-center gap-1 mt-0.5">
+              <span className="text-[8px] font-mono text-muted-foreground">RE:</span>
+              <span className="text-[9px] font-mono font-bold text-primary">{tooltip.score}/10</span>
             </div>
           </div>
         </div>
