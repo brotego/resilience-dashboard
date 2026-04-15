@@ -534,15 +534,15 @@ const GlobalMap = memo(({
       {/* Tooltip overlay */}
       {tooltip && (
         <div className="absolute z-50 pointer-events-none" style={{ left: tooltip.x, top: tooltip.y, transform: "translateY(-100%)" }}>
-          <div className="bg-card/95 backdrop-blur-sm border border-border rounded-lg px-3 py-2 shadow-lg max-w-[240px]">
-            <p className="text-[11px] font-bold text-foreground leading-tight truncate">{tooltip.title}</p>
-            <div className="flex items-center gap-2 mt-1">
-              <span className="text-[10px] text-muted-foreground">{tooltip.location}</span>
-              <span className="text-[9px] font-bold uppercase tracking-wider text-primary">{tooltip.urgency}</span>
+          <div className="bg-card/95 backdrop-blur-sm border border-border rounded-sm px-2.5 py-1.5 max-w-[220px]">
+            <p className="text-[10px] font-bold text-foreground leading-tight truncate">{tooltip.title}</p>
+            <div className="flex items-center gap-2 mt-0.5">
+              <span className="text-[9px] font-mono text-muted-foreground">{tooltip.location}</span>
+              <span className="text-[8px] font-mono font-bold uppercase tracking-wider text-primary">{tooltip.urgency}</span>
             </div>
-            <div className="flex items-center gap-1 mt-1">
-              <span className="text-[9px] text-muted-foreground">Resilience Exposure:</span>
-              <span className="text-[10px] font-bold text-primary">{tooltip.score}/10</span>
+            <div className="flex items-center gap-1 mt-0.5">
+              <span className="text-[8px] font-mono text-muted-foreground">RE:</span>
+              <span className="text-[9px] font-mono font-bold text-primary">{tooltip.score}/10</span>
             </div>
           </div>
         </div>
