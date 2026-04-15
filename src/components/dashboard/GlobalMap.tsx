@@ -329,15 +329,10 @@ const GlobalMap = memo(({
 
   return (
     <div ref={containerRef} className="w-full h-full bg-background relative">
-      {/* Zoom indicator */}
-      <div className="absolute top-3 left-3 z-10 bg-background/80 backdrop-blur-sm border border-border rounded-md px-2 py-1 text-xs font-mono text-muted-foreground">
-        {liveZoom.toFixed(1)}x
-      </div>
-
       {/* Zoom controls */}
-      <div className="absolute bottom-4 right-4 z-10 flex flex-col gap-1">
-        <button onClick={zoomIn} className="w-8 h-8 flex items-center justify-center bg-background/80 backdrop-blur-sm border border-border rounded-md text-foreground hover:bg-accent transition-colors" aria-label="Zoom in"><Plus size={16} /></button>
-        <button onClick={zoomOut} className="w-8 h-8 flex items-center justify-center bg-background/80 backdrop-blur-sm border border-border rounded-md text-foreground hover:bg-accent transition-colors" aria-label="Zoom out"><Minus size={16} /></button>
+      <div className="absolute bottom-3 right-3 z-10 flex flex-col gap-0.5">
+        <button onClick={zoomIn} className="w-7 h-7 flex items-center justify-center bg-[rgba(6,10,12,0.85)] backdrop-blur-sm border border-border rounded-sm text-foreground hover:text-primary transition-colors" aria-label="Zoom in"><Plus size={14} /></button>
+        <button onClick={zoomOut} className="w-7 h-7 flex items-center justify-center bg-[rgba(6,10,12,0.85)] backdrop-blur-sm border border-border rounded-sm text-foreground hover:text-primary transition-colors" aria-label="Zoom out"><Minus size={14} /></button>
       </div>
 
       <ComposableMap projection="geoMercator" projectionConfig={{ scale: 140, center: [0, 20] }} style={{ width: "100%", height: "100%" }}>

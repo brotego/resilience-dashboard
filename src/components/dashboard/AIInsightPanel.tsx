@@ -30,6 +30,7 @@ interface Props {
   selectedCompany: CompanyId | null;
   selectedSignal: UnifiedSignal | null;
   onClose: () => void;
+  signals?: UnifiedSignal[];
 }
 
 function timeAgo(date: Date, lang: string): string {
@@ -57,37 +58,89 @@ const UrgencyBadge = ({ level }: { level: string }) => {
   const colors: Record<string, string> = {
     critical: "bg-red-600/25 text-red-300 border-red-500/40",
     high: "bg-red-500/20 text-red-400 border-red-500/30",
-    medium: "bg-yellow-500/20 text-yellow-400 border-yellow-500/30",
-    low: "bg-green-500/20 text-green-400 border-green-500/30",
+    medium: "bg-amber-500/20 text-amber-400 border-amber-500/30",
+    low: "bg-emerald-500/20 text-emerald-400 border-emerald-500/30",
   };
   const urgencyKey = `urgency.${level}` as any;
   const translated = t(urgencyKey);
   return (
-    <span className={`text-[10px] font-bold uppercase tracking-wider px-2.5 py-0.5 rounded-oval border ${colors[level] || colors.medium}`}>
+    <span className={`text-[9px] font-mono font-bold uppercase tracking-wider px-2 py-0.5 rounded-sm border ${colors[level] || colors.medium}`}>
       {translated} {t("panel.urgency")}
     </span>
   );
 };
 
 const Tag = ({ label, color }: { label: string; color: string }) => (
-  <span className="inline-block px-2.5 py-0.5 text-[10px] font-semibold rounded-oval" style={{ backgroundColor: color, color: "#fff" }}>
+  <span className="inline-block px-2 py-0.5 text-[9px] font-mono font-semibold rounded-sm" style={{ backgroundColor: color, color: "#fff" }}>
     {label}
   </span>
 );
 
 const SectionHeader = ({ children, color = "text-primary" }: { children: React.ReactNode; color?: string }) => (
-  <h4 className={`text-xs font-bold uppercase tracking-wider ${color} mb-1.5`}>{children}</h4>
+  <h4 className={`text-[10px] font-mono font-bold uppercase tracking-widest ${color} mb-1`}>{children}</h4>
 );
 
 const ScoreBar = ({ score, label }: { score: number; label: string }) => (
   <div className="flex items-center gap-2">
-    <span className="text-[9px] text-muted-foreground w-24 shrink-0">{label}</span>
-    <div className="flex-1 h-1.5 bg-muted rounded-full overflow-hidden">
-      <div className="h-full bg-primary rounded-full transition-all" style={{ width: `${score * 10}%` }} />
+    <span className="text-[9px] font-mono text-muted-foreground w-24 shrink-0">{label}</span>
+    <div className="flex-1 h-1 bg-muted rounded-sm overflow-hidden">
+      <div className="h-full bg-primary rounded-sm transition-all" style={{ width: `${score * 10}%` }} />
     </div>
-    <span className="text-[9px] font-bold text-foreground w-4 text-right">{score}</span>
+    <span className="text-[9px] font-mono font-bold text-foreground w-4 text-right">{score}</span>
   </div>
 );
+
+/** Auto-cycling preview of top signals when nothing is selected */
+const AutoCyclePreview = ({ signals, onSignalClick }: { signals: UnifiedSignal[]; onSignalClick: (s: UnifiedSignal) => void }) => {
+  const { lang } = useLang();
+  const topSignals = signals
+    .sort((a, b) => b.resilienceScore - a.resilienceScore)
+    .slice(0, 3);
+  const [index, setIndex] = useState(0);
+  const [fade, setFade] = useState(true);
+
+  useEffect(() => {
+    if (topSignals.length === 0) return;
+    const interval = setInterval(() => {
+      setFade(false);
+      setTimeout(() => {
+        setIndex(prev => (prev + 1) % topSignals.length);
+        setFade(true);
+      }, 300);
+    }, 4000);
+    return () => clearInterval(interval);
+  }, [topSignals.length]);
+
+  if (topSignals.length === 0) return null;
+  const signal = topSignals[index % topSignals.length];
+  if (!signal) return null;
+
+  return (
+    <div className="flex-1 flex flex-col">
+      <button
+        onClick={() => onSignalClick(signal)}
+        className={`flex-1 flex flex-col justify-center px-4 transition-opacity duration-300 hover:bg-secondary/20 ${fade ? "opacity-100" : "opacity-0"}`}
+      >
+        <div className="space-y-2">
+          <UrgencyBadge level={signal.urgency} />
+          <h3 className="text-sm font-bold text-foreground leading-snug">{signal.title}</h3>
+          <p className="text-[10px] font-mono text-muted-foreground">{signal.location}</p>
+          <p className="text-[11px] text-foreground/60 leading-snug line-clamp-2">{signal.description}</p>
+        </div>
+      </button>
+      <div className="px-4 pb-2 flex items-center justify-between">
+        <div className="flex gap-1">
+          {topSignals.map((_, i) => (
+            <span key={i} className={`h-1 w-4 rounded-sm transition-colors ${i === index % topSignals.length ? "bg-primary" : "bg-muted"}`} />
+          ))}
+        </div>
+        <span className="text-[8px] font-mono text-muted-foreground/50 uppercase tracking-widest">
+          {lang === "jp" ? "自動巡回中" : "auto-cycling"}
+        </span>
+      </div>
+    </div>
+  );
+};
 
 const AIInsightPanel = ({
   mode,
@@ -97,6 +150,7 @@ const AIInsightPanel = ({
   selectedCompany,
   selectedSignal,
   onClose,
+  signals = [],
 }: Props) => {
   const { lang, t } = useLang();
   const [contextOpen, setContextOpen] = useState(false);
@@ -152,18 +206,10 @@ const AIInsightPanel = ({
   if (!selectedSignal) {
     return (
       <div className="h-full flex flex-col bg-card border-l border-border">
-        <div className="px-4 py-3 border-b border-border">
-          <p className="text-[10px] font-mono font-bold uppercase tracking-[0.15em] text-primary mb-1">{modeLabel}</p>
-          <h3 className="text-sm font-bold uppercase tracking-wider text-foreground">{t("panel.intelligencePanel")}</h3>
+        <div className="px-3 py-2 border-b border-border">
+          <p className="text-[9px] font-mono font-bold uppercase tracking-widest text-primary">{modeLabel}</p>
         </div>
-        <div className="flex-1 flex items-center justify-center px-6">
-          <div className="text-center space-y-2">
-            <p className="text-sm font-semibold text-foreground">{t("panel.clickSignal")}</p>
-            <p className="text-xs text-muted-foreground leading-relaxed">
-              {t("panel.clickSignalDesc")}{company ? ` ${t("panel.tailoredFor")} ${company.name}` : ""}.
-            </p>
-          </div>
-        </div>
+        <AutoCyclePreview signals={signals} onSignalClick={(s) => { onClose(); setTimeout(() => onClose(), 0); }} />
       </div>
     );
   }
@@ -175,7 +221,7 @@ const AIInsightPanel = ({
       : null;
 
   const companyLabel = company?.name;
-  const numberedIcon = (i: number) => ["①", "②", "③"][i] || `${i + 1}`;
+  const numberedIcon = (i: number) => `${i + 1}`;
 
   const signalDate = selectedSignal.date ? new Date(selectedSignal.date) : new Date();
   const relativeTime = timeAgo(signalDate, lang);
@@ -194,35 +240,35 @@ const AIInsightPanel = ({
   return (
     <div className="h-full flex flex-col bg-card border-l border-border">
       {/* Mode header + urgency */}
-      <div className="px-4 py-3 border-b border-border">
-        <p className="text-[10px] font-mono font-bold uppercase tracking-[0.15em] text-primary mb-2">{modeLabel}</p>
+      <div className="px-3 py-2 border-b border-border">
+        <p className="text-[9px] font-mono font-bold uppercase tracking-widest text-primary mb-1.5">{modeLabel}</p>
         <div className="flex items-start justify-between gap-2">
-          <div className="flex items-center gap-2 flex-wrap">
+          <div className="flex items-center gap-1.5 flex-wrap">
             {insight && <UrgencyBadge level={insight.urgency} />}
             {domainOrCategory && <Tag label={domainOrCategory.label} color="#1241ea" />}
             {insight?.patternTag && <Tag label={insight.patternTag} color="hsl(220, 14%, 30%)" />}
           </div>
           <button onClick={onClose} className="text-muted-foreground hover:text-foreground transition-colors p-0.5 shrink-0">
-            <X className="h-4 w-4" />
+            <X className="h-3.5 w-3.5" />
           </button>
         </div>
       </div>
 
       {/* Scrollable content */}
-      <div className="flex-1 overflow-y-auto px-4 py-4 space-y-4">
+      <div className="flex-1 overflow-y-auto px-3 py-3 space-y-3">
         {/* 1. NEWS TITLE */}
         <div>
-          <h2 className="text-base font-bold text-foreground leading-snug">{selectedSignal.title}</h2>
-          <p className="text-[11px] text-muted-foreground mt-1">
-            {selectedSignal.location} · {selectedSignal.source || "Signal"} · <span className="text-primary/70">{relativeTime}</span>
+          <h2 className="text-[13px] font-bold text-foreground leading-snug">{selectedSignal.title}</h2>
+          <p className="text-[10px] font-mono text-muted-foreground mt-1">
+            {selectedSignal.location} · <span className="text-accent">{selectedSignal.source || "Signal"}</span> · <span className="text-muted-foreground/60">{relativeTime}</span>
           </p>
         </div>
 
         {/* RESILIENCE EXPOSURE SCORE */}
-        <div className="rounded-xl bg-muted/30 border border-border p-3 space-y-1.5">
+        <div className="rounded-sm bg-muted/30 border border-border p-2.5 space-y-1">
           <div className="flex items-center justify-between">
-            <h4 className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">{t("panel.resilienceExposure")}</h4>
-            <span className="text-lg font-bold text-primary">{scoreBreakdown.total}<span className="text-[10px] text-muted-foreground font-normal">/10</span></span>
+            <h4 className="text-[9px] font-mono font-bold uppercase tracking-widest text-muted-foreground">{t("panel.resilienceExposure")}</h4>
+            <span className="text-base font-mono font-semibold text-primary">{scoreBreakdown.total}<span className="text-[9px] text-muted-foreground font-normal">/10</span></span>
           </div>
           <ScoreBar score={scoreBreakdown.domainRelevance} label={t("panel.domainFit")} />
           <ScoreBar score={scoreBreakdown.keywordMatch} label={t("panel.keywordMatch")} />
@@ -231,29 +277,29 @@ const AIInsightPanel = ({
         </div>
 
         {loading && (
-          <div className="flex items-center gap-2 text-muted-foreground text-xs py-8 justify-center">
-            <Loader2 className="h-4 w-4 animate-spin" />
+          <div className="flex items-center gap-2 text-muted-foreground text-[11px] py-6 justify-center">
+            <Loader2 className="h-3.5 w-3.5 animate-spin" />
             {t("panel.generating")}
           </div>
         )}
 
-        {error && <div className="text-xs text-red-400 bg-red-500/10 rounded-lg p-3">{error}</div>}
+        {error && <div className="text-[11px] text-red-400 bg-red-500/10 rounded-sm p-2.5">{error}</div>}
 
         {insight && (
           <>
             {insight.headline && (
-              <p className="text-[12px] text-foreground/80 leading-relaxed italic border-l-2 border-primary pl-3">{insight.headline}</p>
+              <p className="text-[11px] text-foreground/80 leading-snug italic border-l-2 border-primary pl-2.5">{insight.headline}</p>
             )}
 
             {/* WHAT TO DO */}
-            <div className="rounded-xl bg-accent/10 border border-accent/20 p-3">
-              <h4 className="text-xs font-bold uppercase tracking-wider text-accent mb-2">
+            <div className="rounded-sm bg-accent/10 border border-accent/20 p-2.5">
+              <h4 className="text-[10px] font-mono font-bold uppercase tracking-widest text-accent mb-1.5">
                 {t("panel.whatToDo")}{companyLabel ? ` — ${companyLabel}` : ""}
               </h4>
-              <div className="space-y-2">
+              <div className="space-y-1.5">
                 {insight.actions.map((a, i) => (
-                  <div key={i} className="flex gap-2 text-[12px] text-foreground leading-snug">
-                    <span className="text-accent font-bold shrink-0">{numberedIcon(i)}</span>
+                  <div key={i} className="flex gap-2 text-[11px] text-foreground leading-snug">
+                    <span className="text-accent font-mono font-bold shrink-0">{numberedIcon(i)}.</span>
                     <span>{a}</span>
                   </div>
                 ))}
@@ -261,55 +307,55 @@ const AIInsightPanel = ({
             </div>
 
             {/* RISKS & OPPORTUNITIES */}
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-2 gap-2">
               <div>
                 <SectionHeader color="text-red-400">{t("panel.risks")}</SectionHeader>
                 {insight.risks.map((r, i) => (
                   <div key={i} className="flex items-start gap-1.5 mb-1">
                     <span className="mt-1.5 h-1.5 w-1.5 rounded-full bg-red-400 shrink-0" />
-                    <p className="text-[11px] text-foreground/70 leading-snug">{r}</p>
+                    <p className="text-[10px] text-foreground/70 leading-snug">{r}</p>
                   </div>
                 ))}
               </div>
               <div>
-                <SectionHeader color="text-green-400">{t("panel.opportunities")}</SectionHeader>
+                <SectionHeader color="text-emerald-400">{t("panel.opportunities")}</SectionHeader>
                 {insight.opportunities.map((o, i) => (
                   <div key={i} className="flex items-start gap-1.5 mb-1">
-                    <span className="mt-1.5 h-1.5 w-1.5 rounded-full bg-green-400 shrink-0" />
-                    <p className="text-[11px] text-foreground/70 leading-snug">{o}</p>
+                    <span className="mt-1.5 h-1.5 w-1.5 rounded-full bg-emerald-400 shrink-0" />
+                    <p className="text-[10px] text-foreground/70 leading-snug">{o}</p>
                   </div>
                 ))}
               </div>
             </div>
 
             {/* WHY IT MATTERS */}
-            <div className="rounded-xl bg-primary/10 border border-primary/20 p-3">
-              <h4 className="text-xs font-bold uppercase tracking-wider text-primary mb-1.5">
+            <div className="rounded-sm bg-primary/10 border border-primary/20 p-2.5">
+              <h4 className="text-[10px] font-mono font-bold uppercase tracking-widest text-primary mb-1">
                 {t("panel.whyMatters")}{companyLabel ? ` — ${companyLabel}` : ""}
               </h4>
-              <p className="text-[12px] text-foreground leading-relaxed">{insight.whyItMatters}</p>
+              <p className="text-[11px] text-foreground leading-snug">{insight.whyItMatters}</p>
             </div>
 
             {/* DEEPER CONTEXT */}
             <div className="border-t border-border pt-2">
               <button
                 onClick={() => setContextOpen(!contextOpen)}
-                className="flex items-center gap-1 text-[11px] font-semibold text-muted-foreground hover:text-foreground transition-colors w-full"
+                className="flex items-center gap-1 text-[10px] font-mono font-semibold text-muted-foreground hover:text-foreground transition-colors w-full uppercase tracking-widest"
               >
                 {contextOpen ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
                 {t("panel.deeperContext")}
               </button>
               {contextOpen && (
-                <div className="mt-3 space-y-3">
+                <div className="mt-2 space-y-2">
                   {insight.genzSignal && (
                     <div>
                       <SectionHeader color="text-genz">{t("panel.genzSignal")}</SectionHeader>
-                      <p className="text-[12px] text-foreground/80 leading-relaxed">{insight.genzSignal}</p>
+                      <p className="text-[11px] text-foreground/80 leading-snug">{insight.genzSignal}</p>
                     </div>
                   )}
                   <div>
                     <SectionHeader color="text-muted-foreground">{t("panel.originalSignal")}</SectionHeader>
-                    <p className="text-[11px] text-foreground/60 leading-relaxed">{selectedSignal.description}</p>
+                    <p className="text-[10px] text-foreground/60 leading-snug">{selectedSignal.description}</p>
                   </div>
                 </div>
               )}
