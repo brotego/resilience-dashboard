@@ -16,6 +16,7 @@ export default {
       fontFamily: {
         sans: ["'Noto Sans JP'", "system-ui", "sans-serif"],
         display: ["'Noto Sans JP'", "system-ui", "sans-serif"],
+        mono: ["'JetBrains Mono'", "monospace"],
       },
       colors: {
         border: "hsl(var(--border))",

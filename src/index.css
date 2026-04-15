@@ -22,17 +22,17 @@
     --muted: 220 14% 14%;
     --muted-foreground: 220 10% 55%;
 
-    --accent: 24 100% 50%;
+    --accent: 38 85% 58%;
     --accent-foreground: 0 0% 100%;
 
-    --destructive: 0 62% 50%;
+    --destructive: 0 70% 55%;
     --destructive-foreground: 0 0% 100%;
 
-    --border: 220 14% 18%;
-    --input: 220 14% 18%;
+    --border: 213 20% 18%;
+    --input: 213 20% 18%;
     --ring: 226 89% 53%;
 
-    --radius: 0.625rem;
+    --radius: 0.25rem;
 
     --sidebar-background: 220 18% 7%;
     --sidebar-foreground: 0 0% 100%;
@@ -53,16 +53,17 @@
   body {
     @apply bg-background text-foreground;
     font-family: 'Noto Sans JP', system-ui, sans-serif;
+    line-height: 1.4;
   }
 }
 
 .maplibregl-popup-content {
   background: hsl(220 18% 11%) !important;
   color: hsl(0 0% 100%) !important;
-  border: 1px solid hsl(220 14% 18%) !important;
-  border-radius: 12px !important;
-  padding: 1rem !important;
-  box-shadow: 0 10px 30px -10px rgba(0,0,0,0.6) !important;
+  border: 1px solid hsl(213 20% 18%) !important;
+  border-radius: 4px !important;
+  padding: 0.5rem 0.75rem !important;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.4) !important;
   font-family: 'Noto Sans JP', system-ui, sans-serif !important;
 }
 
@@ -76,7 +77,7 @@
 }
 
 .hover-tooltip .maplibregl-popup-content {
-  padding: 0.625rem 0.75rem !important;
+  padding: 0.5rem 0.625rem !important;
   pointer-events: none;
 }
 
