@@ -2,3 +2,6 @@ project_id = "apvaqqpozztiqadgoroy"
 
 [functions.ai-insight]
 verify_jwt = false
+
+[functions.thenewsapi]
+verify_jwt = false
