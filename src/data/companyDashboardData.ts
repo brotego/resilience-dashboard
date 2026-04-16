@@ -9,6 +9,28 @@ export interface CompanyDashboardData {
     priorities: { en: string; jp: string }[];
     keyMarkets: { en: string; jp: string };
   };
+  sentiment?: {
+    global: {
+      summary: { en: string; jp: string };
+      items: {
+        title: { en: string; jp: string };
+        source: { en: string; jp: string };
+        time: { en: string; jp: string };
+        impact: { en: string; jp: string };
+        sentiment: "positive" | "mixed" | "negative";
+      }[];
+    };
+    japan: {
+      summary: { en: string; jp: string };
+      items: {
+        title: { en: string; jp: string };
+        source: { en: string; jp: string };
+        time: { en: string; jp: string };
+        impact: { en: string; jp: string };
+        sentiment: "positive" | "mixed" | "negative";
+      }[];
+    };
+  };
 }
 
 export const COMPANY_DASHBOARD_DATA: Record<CompanyId, CompanyDashboardData> = {
@@ -40,6 +62,66 @@ export const COMPANY_DASHBOARD_DATA: Record<CompanyId, CompanyDashboardData> = {
         { en: "Develop AI-enhanced editorial tools for faster content cycles", jp: "AI強化された編集ツールでコンテンツサイクルを高速化" },
       ],
       keyMarkets: { en: "Japan, North America, Southeast Asia, Europe", jp: "日本、北米、東南アジア、ヨーロッパ" },
+    },
+    sentiment: {
+      global: {
+        summary: {
+          en: "International coverage reflects cautious optimism around Kodansha's licensing expansion, with concerns over AI-generated content and IP protection.",
+          jp: "海外報道では、Kodanshaのライセンス拡大に慎重な楽観論がある一方、AI生成コンテンツとIP保護への懸念も示されています。",
+        },
+        items: [
+          {
+            title: { en: "Kodansha's Anime Adaptations Continue Global Box Office Momentum", jp: "講談社作品のアニメ実写化が世界興行で勢いを維持" },
+            source: { en: "Variety", jp: "Variety" },
+            time: { en: "6h ago", jp: "6時間前" },
+            impact: { en: "Global IP momentum remains strong.", jp: "グローバルIPの勢いは引き続き強い。" },
+            sentiment: "positive",
+          },
+          {
+            title: { en: "Manga Publishers Face New AI Copyright Challenges", jp: "マンガ出版社がAI著作権問題に直面" },
+            source: { en: "The Verge", jp: "The Verge" },
+            time: { en: "9h ago", jp: "9時間前" },
+            impact: { en: "Defensive legal posture needed.", jp: "防御的な法務対応が必要。" },
+            sentiment: "mixed",
+          },
+          {
+            title: { en: "Digital Subscription Growth Offsets Print Decline", jp: "デジタル購読の成長が紙媒体減少を一部補完" },
+            source: { en: "Nikkei Asia", jp: "Nikkei Asia" },
+            time: { en: "1d ago", jp: "1日前" },
+            impact: { en: "Monetization mix is improving.", jp: "収益構成の改善が進んでいる。" },
+            sentiment: "positive",
+          },
+        ],
+      },
+      japan: {
+        summary: {
+          en: "Domestic sentiment is mixed: strong franchise traction is offset by pressure on print economics and creator retention.",
+          jp: "国内センチメントは強弱混在で、主要IPの好調さの一方、紙媒体収益とクリエイター確保に圧力があります。",
+        },
+        items: [
+          {
+            title: { en: "Weekly Manga Sales Stay Resilient Despite Print Contraction", jp: "紙市場縮小下でも週刊マンガ販売は底堅い" },
+            source: { en: "Oricon", jp: "オリコン" },
+            time: { en: "4h ago", jp: "4時間前" },
+            impact: { en: "Core domestic fanbase remains durable.", jp: "国内コアファン基盤は堅調。" },
+            sentiment: "positive",
+          },
+          {
+            title: { en: "Young Creators Shift Toward Independent Platforms", jp: "若手クリエイターの独立系プラットフォーム志向が拡大" },
+            source: { en: "ITmedia", jp: "ITmedia" },
+            time: { en: "11h ago", jp: "11時間前" },
+            impact: { en: "Creator pipeline risk is rising.", jp: "クリエイターパイプラインのリスクが上昇。" },
+            sentiment: "negative",
+          },
+          {
+            title: { en: "Licensing Partnerships with Streamers Expand Reach", jp: "配信プラットフォームとのライセンス提携が拡大" },
+            source: { en: "Toyo Keizai", jp: "東洋経済" },
+            time: { en: "1d ago", jp: "1日前" },
+            impact: { en: "Cross-media discovery is improving.", jp: "クロスメディアでの発見性が向上。" },
+            sentiment: "mixed",
+          },
+        ],
+      },
     },
   },
   persol: {

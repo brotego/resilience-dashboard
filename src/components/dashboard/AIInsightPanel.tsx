@@ -30,6 +30,8 @@ interface Props {
   selectedCompany: CompanyId | null;
   selectedSignal: UnifiedSignal | null;
   onClose: () => void;
+  onMoreInfo?: (signal: UnifiedSignal) => void;
+  showMoreInfoButton?: boolean;
   signals?: UnifiedSignal[];
 }
 
@@ -150,6 +152,8 @@ const AIInsightPanel = ({
   selectedCompany,
   selectedSignal,
   onClose,
+  onMoreInfo,
+  showMoreInfoButton = false,
   signals = [],
 }: Props) => {
   const { lang, t } = useLang();
@@ -363,6 +367,16 @@ const AIInsightPanel = ({
           </>
         )}
       </div>
+      {showMoreInfoButton && (
+        <div className="px-3 py-2 border-t border-border bg-card/90">
+          <button
+            onClick={() => onMoreInfo?.(selectedSignal)}
+            className="w-full rounded-sm border border-primary/40 bg-primary/10 hover:bg-primary/20 text-primary text-[10px] font-mono font-semibold uppercase tracking-widest py-2 transition-colors"
+          >
+            {lang === "jp" ? "詳細を見る" : "More info"}
+          </button>
+        </div>
+      )}
     </div>
   );
 };

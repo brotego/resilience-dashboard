@@ -82,6 +82,7 @@ Deno.serve(async (req) => {
       source: a.source?.name || 'Unknown',
       date: a.publishedAt,
       description: a.description || '',
+      content: a.content || '',
       url: a.url,
     }));
 

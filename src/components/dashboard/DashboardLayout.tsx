@@ -13,6 +13,7 @@ import CompanyDashboard from "./CompanyDashboard";
 import { useUnifiedSignals } from "@/hooks/useUnifiedSignals";
 import { useLang } from "@/i18n/LanguageContext";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import { useLocation, useNavigate } from "react-router-dom";
 
 export type DashboardMode = "resilience" | "genz";
 export type ViewTab = "dashboard" | "map";
@@ -35,6 +36,8 @@ const LiveClock = () => {
 };
 
 const DashboardLayout = () => {
+  const navigate = useNavigate();
+  const location = useLocation();
   const { lang, setLang, t } = useLang();
   const [activeTab, setActiveTab] = useState<ViewTab>("dashboard");
   const [mode, setMode] = useState<DashboardMode>("resilience");
@@ -86,6 +89,36 @@ const DashboardLayout = () => {
     setSelectedSignal(null);
     setSelectedCountry(null);
   }, []);
+
+  useEffect(() => {
+    const routeState = (location.state as { returnTab?: ViewTab; returnMode?: DashboardMode } | null);
+    const returnTab = routeState?.returnTab;
+    const returnMode = routeState?.returnMode;
+
+    if (returnMode === "resilience" || returnMode === "genz") {
+      setMode(returnMode);
+    }
+    if (returnTab === "dashboard" || returnTab === "map") {
+      setActiveTab(returnTab);
+    }
+    if (returnTab || returnMode) {
+      navigate(location.pathname, { replace: true, state: {} });
+    }
+  }, [location.pathname, location.state, navigate]);
+
+  const handleMoreInfo = useCallback((signal: UnifiedSignal) => {
+    navigate(`/signal/${signal.id}`, {
+      state: {
+        signal,
+        mode,
+        selectedCompany,
+        activeDomains,
+        activeCategories,
+        originTab: activeTab,
+        originMode: mode,
+      },
+    });
+  }, [navigate, mode, selectedCompany, activeDomains, activeCategories, activeTab]);
 
   return (
     <div className="h-screen flex flex-col bg-background overflow-hidden">
@@ -253,6 +286,8 @@ const DashboardLayout = () => {
                 selectedCompany={selectedCompany}
                 selectedSignal={selectedSignal}
                 onClose={handleClosePanel}
+                onMoreInfo={handleMoreInfo}
+                showMoreInfoButton
                 signals={visibleSignals}
               />
             )}

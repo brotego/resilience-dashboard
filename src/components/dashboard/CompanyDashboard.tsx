@@ -8,6 +8,7 @@ import { useLang } from "@/i18n/LanguageContext";
 import { ChevronDown, ChevronUp, ArrowRight } from "lucide-react";
 
 type TimeFilter = "24h" | "7d" | "30d";
+type SentimentRegion = "global" | "japan";
 
 interface Props {
   selectedCompany: CompanyId | null;
@@ -59,6 +60,7 @@ const CompanyDashboard = ({ selectedCompany, signals, onSignalClick }: Props) =>
   const { lang, t } = useLang();
   const [timeFilter, setTimeFilter] = useState<TimeFilter>("7d");
   const [briefOpen, setBriefOpen] = useState(false);
+  const [sentimentRegion, setSentimentRegion] = useState<SentimentRegion>("global");
 
   const companyId = selectedCompany || "mori_building";
   const company = COMPANIES.find(c => c.id === companyId)!;
@@ -87,6 +89,123 @@ const CompanyDashboard = ({ selectedCompany, signals, onSignalClick }: Props) =>
 
   const scoreTrend = overallScore > 65 ? "up" : overallScore < 50 ? "down" : "stable";
 
+  const newsletter = useMemo(() => {
+    const top = filteredSignals.slice(0, 5);
+    const positives = top.filter((s) => s.urgency === "low" || s.urgency === "medium");
+    const negatives = top.filter((s) => s.urgency === "high" || s.urgency === "critical");
+    const hotspots = Array.from(new Set(top.map((s) => s.location))).slice(0, 3);
+    const domains = Array.from(new Set(top.map((s) => s.domain || s.category || "cross-market"))).slice(0, 3);
+    const refs = top
+      .slice(0, 3)
+      .map((s) => ({
+        title: s.title,
+        source: s.source || (lang === "jp" ? "Signal Feed" : "Signal Feed"),
+      }));
+
+    const refLineEn = refs.length
+      ? refs.map((r) => `"${r.title}" (${r.source})`).join(", ")
+      : "recent company-relevant coverage";
+    const refLineJp = refs.length
+      ? refs.map((r) => `「${r.title}」（${r.source}）`).join("、")
+      : "直近の関連報道";
+
+    const articleRoundup = top.map((s, i) => ({
+      index: i + 1,
+      title: s.title,
+      source: s.source || (lang === "jp" ? "Signal Feed" : "Signal Feed"),
+      location: s.location,
+      sentiment: s.urgency === "critical" || s.urgency === "high" ? "negative" : s.urgency === "medium" ? "mixed" : "positive",
+      summary:
+        lang === "jp"
+          ? `${company.name}にとって${s.location}発のこの動向は、短期の実行判断と中期の戦略設計の両面に影響します。${s.description.slice(0, 90)}...`
+          : `For ${company.name}, this development from ${s.location} impacts both near-term operating choices and medium-term strategic positioning. ${s.description.slice(0, 100)}...`,
+    }));
+
+    if (lang === "jp") {
+      return {
+        title: `${company.name} 週次ニュースレター`,
+        dek: `今週の注目記事を横断し、経営判断に必要な要点を1本に要約したエグゼクティブ・ダイジェスト。`,
+        paragraphs: [
+          `${refLineJp}といった記事群を起点に今週の論点を整理すると、${company.name}を取り巻く市場環境は、機会拡大と実行リスクが同時進行する局面です。見出し単体よりも、複数記事の共通テーマを横断して読むことで、どこに経営資源を集中すべきかが明確になります。`,
+          `記事ベースで見ると、高優先シグナルは${negatives.length}件、機会寄りシグナルは${positives.length}件で、全体トーンは「慎重な前進」です。特に競争圧力・規制変化・需要シフトに関する報道は、短期の運用判断に直接影響しやすいため、意思決定のリードタイムを縮める体制が重要になります。`,
+          `地域では${hotspots.join(" / ") || "グローバル"}の露出が高く、テーマは${domains.join(" / ")}に集中しています。次の7日間は、記事で示唆された変化を前提に、パートナー戦略、現場実行、対外メッセージを一体化して運用することで、ノイズの多いニュース環境でも優位性を維持しやすくなります。`,
+        ],
+        roundupTitle: "記事ラウンドアップ",
+        articleRoundup,
+      };
+    }
+
+    return {
+      title: `${company.name} Weekly Newsletter`,
+      dek: `An editorial-style digest that turns this week's most relevant headlines into a single readable brief for leadership.`,
+      paragraphs: [
+        `This week's newsletter is built directly from the most relevant article set for ${company.name}, led by ${refLineEn}. Read together, these stories show a market narrative where expansion potential is real, but execution quality will determine whether momentum converts into durable advantage.`,
+        `At the article level, ${negatives.length} high-priority developments signal near-term pressure on positioning, operating cadence, or risk exposure. In parallel, ${positives.length} opportunity-leaning articles point to upside if leadership can sequence decisions quickly and avoid fragmented responses across teams.`,
+        `Coverage intensity is strongest in ${hotspots.join(" / ") || "Global"}, and the dominant theme stack is ${domains.join(" / ")}. For the next seven days, treat these headlines as directional inputs for partnership moves, resource allocation, and external messaging so tactical actions stay aligned with the broader market story.`,
+      ],
+      roundupTitle: "Article Roundup",
+      articleRoundup,
+    };
+  }, [filteredSignals, company.name, lang]);
+
+  const sentimentData = useMemo(() => {
+    const fallbackSummary = {
+      en: `Coverage suggests ${company.name}'s sentiment is mixed with clear upside in strategic execution and ongoing risk pressure.`,
+      jp: `${company.name}に対する報道センチメントは、戦略実行への期待と継続的なリスク圧力が混在しています。`,
+    };
+    const fallbackItems = [
+      {
+        title: {
+          en: `${company.name} expands strategic partnerships`,
+          jp: `${company.name}が戦略的パートナーシップを拡大`,
+        },
+        source: { en: "Business Wire", jp: "Business Wire" },
+        time: { en: "8h ago", jp: "8時間前" },
+        impact: { en: "Execution confidence improves.", jp: "実行力への信頼が向上。" },
+        sentiment: "positive" as const,
+      },
+      {
+        title: {
+          en: `Analysts watch cost and talent pressure at ${company.name}`,
+          jp: `${company.name}のコスト・人材圧力をアナリストが注視`,
+        },
+        source: { en: "Reuters", jp: "Reuters" },
+        time: { en: "13h ago", jp: "13時間前" },
+        impact: { en: "Operating discipline remains critical.", jp: "オペレーション規律が重要。" },
+        sentiment: "mixed" as const,
+      },
+      {
+        title: {
+          en: `Competitive intensity rises in ${company.sector}`,
+          jp: `${company.sector}で競争が激化`,
+        },
+        source: { en: "Bloomberg", jp: "Bloomberg" },
+        time: { en: "1d ago", jp: "1日前" },
+        impact: { en: "Share defense needs attention.", jp: "シェア防衛への対応が必要。" },
+        sentiment: "negative" as const,
+      },
+    ];
+
+    return {
+      global: dashData.sentiment?.global || { summary: fallbackSummary, items: fallbackItems },
+      japan: dashData.sentiment?.japan || { summary: fallbackSummary, items: fallbackItems },
+    };
+  }, [dashData.sentiment, company.name, company.sector]);
+
+  const activeSentiment = sentimentData[sentimentRegion];
+
+  const sentimentBadgeClasses: Record<"positive" | "mixed" | "negative", string> = {
+    positive: "text-emerald-300 border-emerald-500/40 bg-emerald-500/10",
+    mixed: "text-sky-300 border-sky-500/40 bg-sky-500/10",
+    negative: "text-red-300 border-red-500/40 bg-red-500/10",
+  };
+
+  const newsletterToneClasses: Record<"positive" | "mixed" | "negative", string> = {
+    positive: "text-emerald-300 border-emerald-500/40 bg-emerald-500/10",
+    mixed: "text-sky-300 border-sky-500/40 bg-sky-500/10",
+    negative: "text-red-300 border-red-500/40 bg-red-500/10",
+  };
+
   return (
     <ScrollArea className="h-full">
       <div className="max-w-[1400px] mx-auto px-6 py-4">
@@ -108,7 +227,7 @@ const CompanyDashboard = ({ selectedCompany, signals, onSignalClick }: Props) =>
               </span>
               <div className="mb-1.5">
                 <span className="text-[10px] font-mono uppercase tracking-widest text-muted-foreground block">
-                  {lang === "jp" ? "レジリエンスエクスポージャー" : "RESILIENCE EXPOSURE"}
+                  {lang === "jp" ? "COMPANY FIT" : "COMPANY FIT"}
                 </span>
                 <div className="w-32 h-[3px] bg-muted rounded-sm mt-1 overflow-hidden">
                   <div className="h-full bg-primary rounded-sm" style={{ width: `${overallScore}%` }} />
@@ -199,6 +318,45 @@ const CompanyDashboard = ({ selectedCompany, signals, onSignalClick }: Props) =>
 
           {/* RIGHT: Intelligence Summary — 40% */}
           <div className="flex-[2] min-w-0 space-y-4">
+            <div className="border border-border rounded-sm bg-card/60 p-3">
+              <h3 className="text-[10px] font-mono font-semibold uppercase tracking-widest text-primary mb-2">
+                {lang === "jp" ? "ニュースレター要約" : "NEWSLETTER SUMMARY"}
+              </h3>
+              <h4 className="text-[12px] font-semibold text-foreground mb-1">{newsletter.title}</h4>
+              <p className="text-[10px] text-muted-foreground mb-2 leading-snug">{newsletter.dek}</p>
+              <div className="mt-2 space-y-2">
+                {newsletter.paragraphs.map((paragraph, i) => (
+                  <p key={i} className="text-[11px] text-foreground/80 leading-relaxed">
+                    {paragraph}
+                  </p>
+                ))}
+              </div>
+
+              <div className="mt-3 pt-3 border-t border-border/70">
+                <h5 className="text-[10px] font-mono font-semibold uppercase tracking-widest text-accent mb-2">
+                  {newsletter.roundupTitle}
+                </h5>
+                <div className="space-y-2">
+                  {newsletter.articleRoundup.map((article) => (
+                    <div key={article.index} className="border border-border/70 rounded-sm p-2 bg-background/40">
+                      <div className="flex items-start justify-between gap-2">
+                        <p className="text-[11px] text-foreground leading-snug">
+                          {article.index}. {article.title}
+                        </p>
+                        <span className={`shrink-0 px-1.5 py-0.5 rounded-sm border text-[8px] font-mono font-semibold uppercase tracking-wider ${newsletterToneClasses[article.sentiment as "positive" | "mixed" | "negative"]}`}>
+                          {article.sentiment}
+                        </span>
+                      </div>
+                      <p className="text-[9px] font-mono text-muted-foreground mt-1 uppercase tracking-wider">
+                        {article.source} · {article.location}
+                      </p>
+                      <p className="text-[10px] text-foreground/70 mt-1 leading-snug">{article.summary}</p>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+
             {/* Rising Risks */}
             <div>
               <h3 className="text-[10px] font-mono font-semibold uppercase tracking-widest text-red-400 mb-2">
@@ -224,26 +382,6 @@ const CompanyDashboard = ({ selectedCompany, signals, onSignalClick }: Props) =>
                   <div key={i} className="flex items-start gap-2">
                     <span className="mt-1.5 h-1.5 w-1.5 rounded-full bg-emerald-400 shrink-0" />
                     <p className="text-[11px] text-foreground/80 leading-snug">{o[lang] || o.en}</p>
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            {/* Gen Z Archetype Activation */}
-            <div>
-              <h3 className="text-[10px] font-mono font-semibold uppercase tracking-widest text-genz mb-2">
-                {lang === "jp" ? "Z世代アーキタイプ活性度" : "GEN Z ARCHETYPE ACTIVATION"}
-              </h3>
-              <div className="space-y-2">
-                {dashData.archetypes.map((a, i) => (
-                  <div key={i} className="flex items-center gap-2">
-                    <span className="text-[10px] font-mono text-foreground/70 w-28 shrink-0 truncate">
-                      {a.name[lang] || a.name.en}
-                    </span>
-                    <div className="flex-1 h-[4px] bg-muted rounded-sm overflow-hidden">
-                      <div className="h-full bg-genz rounded-sm transition-all" style={{ width: `${a.score * 20}%` }} />
-                    </div>
-                    <span className="text-[10px] font-mono font-semibold text-genz w-4 text-right">{a.score}</span>
                   </div>
                 ))}
               </div>
@@ -282,6 +420,63 @@ const CompanyDashboard = ({ selectedCompany, signals, onSignalClick }: Props) =>
                 </div>
               )}
             </div>
+          </div>
+        </div>
+
+        <div className="mt-6 border-t border-border pt-4">
+          <div className="flex items-center justify-between mb-3">
+            <h3 className="text-[10px] font-mono font-semibold uppercase tracking-widest text-accent">
+              {lang === "jp" ? "センチメント分析" : "SENTIMENT ANALYSIS"}
+            </h3>
+            <div className="flex gap-1">
+              <button
+                onClick={() => setSentimentRegion("global")}
+                className={`px-2 py-0.5 text-[9px] font-mono font-semibold uppercase tracking-wider rounded-sm transition-colors ${
+                  sentimentRegion === "global" ? "bg-accent text-accent-foreground" : "bg-secondary text-muted-foreground hover:text-foreground"
+                }`}
+              >
+                {lang === "jp" ? "GLOBAL" : "GLOBAL"}
+              </button>
+              <button
+                onClick={() => setSentimentRegion("japan")}
+                className={`px-2 py-0.5 text-[9px] font-mono font-semibold uppercase tracking-wider rounded-sm transition-colors ${
+                  sentimentRegion === "japan" ? "bg-accent text-accent-foreground" : "bg-secondary text-muted-foreground hover:text-foreground"
+                }`}
+              >
+                {lang === "jp" ? "JAPAN" : "JAPAN"}
+              </button>
+            </div>
+          </div>
+
+          <div className="border border-border rounded-sm bg-card/60 px-3 py-2 mb-2">
+            <p className="text-[11px] text-foreground/85 leading-snug">
+              {activeSentiment.summary[lang] || activeSentiment.summary.en}
+            </p>
+          </div>
+
+          <div className="divide-y divide-border border border-border rounded-sm overflow-hidden">
+            {activeSentiment.items.map((item, idx) => (
+              <div key={`${sentimentRegion}-${idx}`} className="px-3 py-2.5">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <p className="text-[11px] text-foreground leading-snug">
+                      {item.title[lang] || item.title.en}
+                    </p>
+                    <p className="text-[9px] font-mono text-muted-foreground mt-1 uppercase tracking-wider">
+                      {(item.source[lang] || item.source.en)} · {(item.time[lang] || item.time.en)}
+                    </p>
+                    <p className="text-[10px] text-foreground/65 mt-1">
+                      {item.impact[lang] || item.impact.en}
+                    </p>
+                  </div>
+                  <span
+                    className={`shrink-0 px-1.5 py-0.5 rounded-sm border text-[8px] font-mono font-semibold uppercase tracking-wider ${sentimentBadgeClasses[item.sentiment]}`}
+                  >
+                    {item.sentiment}
+                  </span>
+                </div>
+              </div>
+            ))}
           </div>
         </div>
       </div>

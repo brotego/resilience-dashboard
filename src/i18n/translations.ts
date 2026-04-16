@@ -39,7 +39,7 @@ const t = {
   "panel.clickSignal": { en: "Click a signal on the map", jp: "マップ上のシグナルをクリック" },
   "panel.clickSignalDesc": { en: "Select a dot to view its AI intelligence brief", jp: "ドットを選択してAIインテリジェンスブリーフを表示" },
   "panel.tailoredFor": { en: "tailored for", jp: "向けにカスタマイズ" },
-  "panel.resilienceExposure": { en: "Resilience Exposure", jp: "レジリエンスエクスポージャー" },
+  "panel.resilienceExposure": { en: "Company Fit", jp: "Company Fit" },
   "panel.domainFit": { en: "Domain fit", jp: "ドメイン適合度" },
   "panel.keywordMatch": { en: "Keyword match", jp: "キーワード一致度" },
   "panel.recency": { en: "Recency", jp: "新しさ" },
@@ -62,7 +62,7 @@ const t = {
 
   // Country Outlook Panel
   "country.backToGlobal": { en: "Back to Global", jp: "グローバルに戻る" },
-  "country.resilienceExposure": { en: "Resilience Exposure", jp: "レジリエンスエクスポージャー" },
+  "country.resilienceExposure": { en: "Company Fit", jp: "Company Fit" },
   "country.whatThisMeans": { en: "What This Means for", jp: "これが意味すること：" },
   "country.strategicContext": { en: "Strategic Context", jp: "戦略的コンテキスト" },
   "country.recentSignals": { en: "Recent Signals", jp: "最近のシグナル" },

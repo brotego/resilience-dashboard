@@ -27,6 +27,10 @@ export interface UnifiedSignal {
 
   /** News source name */
   source?: string;
+  /** Original article URL when available */
+  articleUrl?: string;
+  /** Full/partial article text from feed when available */
+  articleContent?: string;
   /** ISO date string */
   date?: string;
 

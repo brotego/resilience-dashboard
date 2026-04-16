@@ -6,6 +6,7 @@ export interface NewsArticle {
   source: string;
   date: string;
   description: string;
+  content?: string;
   url: string;
 }
 

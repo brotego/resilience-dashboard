@@ -150,6 +150,8 @@ export function useUnifiedSignals(
                 resilienceScore: score.total,
                 urgency: scoreToUrgency(score.total),
                 source: a.source,
+                articleUrl: a.url,
+                articleContent: a.content,
                 date: a.date,
                 isJapan: country.code === "jp",
               } as UnifiedSignal;
@@ -179,6 +181,8 @@ export function useUnifiedSignals(
                 resilienceScore: score.total,
                 urgency: scoreToUrgency(score.total),
                 source: a.source,
+                articleUrl: a.url,
+                articleContent: a.content,
                 date: a.date,
                 isJapan: country.code === "jp",
               } as UnifiedSignal;
