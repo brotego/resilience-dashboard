@@ -11,9 +11,9 @@ interface CacheEntry {
 const CACHE_DURATION = 60 * 60 * 1000; // 1 hour
 const cache = new Map<string, CacheEntry>();
 
-// Countries to fetch domain news from, with coordinates for placing dots
+// Countries to fetch TheNewsAPI domain coverage from, with map coordinates.
 const NEWS_COUNTRIES: { code: string; name: string; coords: [number, number] }[] = [
-  { code: "us", name: "United States", coords: [-98, 39] },
+  { code: "us", name: "United States of America", coords: [-98, 39] },
   { code: "gb", name: "United Kingdom", coords: [-0.12, 51.51] },
   { code: "jp", name: "Japan", coords: [139.69, 35.69] },
   { code: "de", name: "Germany", coords: [13.41, 52.52] },
@@ -24,23 +24,8 @@ const NEWS_COUNTRIES: { code: string; name: string; coords: [number, number] }[]
   { code: "kr", name: "South Korea", coords: [126.98, 37.57] },
   { code: "sg", name: "Singapore", coords: [103.82, 1.35] },
   { code: "ng", name: "Nigeria", coords: [3.39, 6.45] },
-  { code: "ae", name: "UAE", coords: [55.27, 25.20] },
+  { code: "ae", name: "United Arab Emirates", coords: [55.27, 25.20] },
 ];
-
-const COUNTRY_FULL_NAMES: Record<string, string> = {
-  "United States": "United States of America",
-  "United Kingdom": "United Kingdom",
-  "Japan": "Japan",
-  "Germany": "Germany",
-  "France": "France",
-  "India": "India",
-  "Brazil": "Brazil",
-  "Australia": "Australia",
-  "South Korea": "South Korea",
-  "Singapore": "Singapore",
-  "Nigeria": "Nigeria",
-  "UAE": "United Arab Emirates",
-};
 
 function jitter(coords: [number, number], index: number, domainIndex: number): [number, number] {
   const seed = index + domainIndex * 7;
@@ -50,7 +35,7 @@ function jitter(coords: [number, number], index: number, domainIndex: number): [
 }
 
 /**
- * Fetches live news from NewsAPI for each active domain across multiple countries.
+ * Fetches live news from TheNewsAPI for each active domain across multiple countries.
  * Returns ResilienceSignal[] that can be rendered as map dots.
  * Falls back to hardcoded SIGNALS if API is unavailable.
  */
@@ -98,7 +83,7 @@ export function useLiveSignals(activeDomains: DomainId[]) {
         return countries.map(async (country) => {
           try {
             const { data } = await supabase.functions.invoke("news-feed", {
-              body: { type: "domain", domain, countryName: country.name, pageSize: 3 },
+              body: { type: "domain", domain, countryCode: country.code, countryName: country.name, pageSize: 3 },
             });
 
             if (data?.articles && !data?.fallback && data.articles.length > 0) {

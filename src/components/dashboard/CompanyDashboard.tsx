@@ -1,14 +1,16 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { COMPANIES, CompanyId } from "@/data/companies";
 import { COMPANY_DASHBOARD_DATA } from "@/data/companyDashboardData";
 import { UnifiedSignal } from "@/data/unifiedSignalTypes";
 import { calculateResilienceScore } from "@/lib/resilienceScore";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { useLang } from "@/i18n/LanguageContext";
+import { supabase } from "@/integrations/supabase/client";
 import { ChevronDown, ChevronUp, ArrowRight } from "lucide-react";
 
 type TimeFilter = "24h" | "7d" | "30d";
-type SentimentRegion = "global" | "japan";
+type SentimentView = "company" | "japan";
+type SentimentArticle = { title: string; source: string; description: string; date: string; url: string };
 
 interface Props {
   selectedCompany: CompanyId | null;
@@ -56,11 +58,27 @@ const DOMAIN_LABELS: Record<string, { en: string; jp: string }> = {
   environment: { en: "Environment", jp: "環境" },
 };
 
+function toneFromArticle(article: SentimentArticle): "positive" | "mixed" | "negative" {
+  const text = `${article.title} ${article.description}`.toLowerCase();
+  const positiveHints = ["partnership", "growth", "expands", "trusted", "innovation", "agreement"];
+  const negativeHints = ["tension", "risk", "decline", "pressure", "conflict", "crisis"];
+  const hasPositive = positiveHints.some((hint) => text.includes(hint));
+  const hasNegative = negativeHints.some((hint) => text.includes(hint));
+  if (hasPositive && !hasNegative) return "positive";
+  if (hasNegative && !hasPositive) return "negative";
+  return "mixed";
+}
+
 const CompanyDashboard = ({ selectedCompany, signals, onSignalClick }: Props) => {
   const { lang, t } = useLang();
   const [timeFilter, setTimeFilter] = useState<TimeFilter>("7d");
   const [briefOpen, setBriefOpen] = useState(false);
-  const [sentimentRegion, setSentimentRegion] = useState<SentimentRegion>("global");
+  const [sentimentView, setSentimentView] = useState<SentimentView>("company");
+  const [sentimentLoading, setSentimentLoading] = useState(false);
+  const [sentimentArticles, setSentimentArticles] = useState<Record<SentimentView, SentimentArticle[]>>({
+    company: [],
+    japan: [],
+  });
 
   const companyId = selectedCompany || "mori_building";
   const company = COMPANIES.find(c => c.id === companyId)!;
@@ -148,51 +166,14 @@ const CompanyDashboard = ({ selectedCompany, signals, onSignalClick }: Props) =>
     };
   }, [filteredSignals, company.name, lang]);
 
-  const sentimentData = useMemo(() => {
-    const fallbackSummary = {
-      en: `Coverage suggests ${company.name}'s sentiment is mixed with clear upside in strategic execution and ongoing risk pressure.`,
-      jp: `${company.name}に対する報道センチメントは、戦略実行への期待と継続的なリスク圧力が混在しています。`,
-    };
-    const fallbackItems = [
-      {
-        title: {
-          en: `${company.name} expands strategic partnerships`,
-          jp: `${company.name}が戦略的パートナーシップを拡大`,
-        },
-        source: { en: "Business Wire", jp: "Business Wire" },
-        time: { en: "8h ago", jp: "8時間前" },
-        impact: { en: "Execution confidence improves.", jp: "実行力への信頼が向上。" },
-        sentiment: "positive" as const,
-      },
-      {
-        title: {
-          en: `Analysts watch cost and talent pressure at ${company.name}`,
-          jp: `${company.name}のコスト・人材圧力をアナリストが注視`,
-        },
-        source: { en: "Reuters", jp: "Reuters" },
-        time: { en: "13h ago", jp: "13時間前" },
-        impact: { en: "Operating discipline remains critical.", jp: "オペレーション規律が重要。" },
-        sentiment: "mixed" as const,
-      },
-      {
-        title: {
-          en: `Competitive intensity rises in ${company.sector}`,
-          jp: `${company.sector}で競争が激化`,
-        },
-        source: { en: "Bloomberg", jp: "Bloomberg" },
-        time: { en: "1d ago", jp: "1日前" },
-        impact: { en: "Share defense needs attention.", jp: "シェア防衛への対応が必要。" },
-        sentiment: "negative" as const,
-      },
-    ];
-
-    return {
-      global: dashData.sentiment?.global || { summary: fallbackSummary, items: fallbackItems },
-      japan: dashData.sentiment?.japan || { summary: fallbackSummary, items: fallbackItems },
-    };
-  }, [dashData.sentiment, company.name, company.sector]);
-
-  const activeSentiment = sentimentData[sentimentRegion];
+  const activeSentimentArticles = sentimentArticles[sentimentView];
+  const activeSentimentSummary = sentimentView === "japan"
+    ? (lang === "jp"
+      ? "グローバル報道における日本関連センチメントを表示。"
+      : "Global coverage sentiment related to Japan.")
+    : (lang === "jp"
+      ? `${company.name}に関するグローバル報道センチメントを表示。`
+      : `Global coverage sentiment related to ${company.name}.`);
 
   const sentimentBadgeClasses: Record<"positive" | "mixed" | "negative", string> = {
     positive: "text-emerald-300 border-emerald-500/40 bg-emerald-500/10",
@@ -205,6 +186,41 @@ const CompanyDashboard = ({ selectedCompany, signals, onSignalClick }: Props) =>
     mixed: "text-sky-300 border-sky-500/40 bg-sky-500/10",
     negative: "text-red-300 border-red-500/40 bg-red-500/10",
   };
+
+  useEffect(() => {
+    const companyKeywords = company.keywords.slice(0, 4).map((k) => `"${k}"`).join(" | ");
+    const companyQuery = `"${company.name}"${companyKeywords ? ` | (${companyKeywords})` : ""}`;
+    const japanQuery = `"Japan" | Japanese | "Japanese government" | "Japanese companies"`;
+
+    let cancelled = false;
+    setSentimentLoading(true);
+
+    Promise.all([
+      supabase.functions.invoke("news-feed", {
+        body: { type: "sentiment", topicQuery: companyQuery, pageSize: 8 },
+      }),
+      supabase.functions.invoke("news-feed", {
+        body: { type: "sentiment", topicQuery: japanQuery, pageSize: 8 },
+      }),
+    ])
+      .then(([companyData, japanData]) => {
+        if (cancelled) return;
+        setSentimentArticles({
+          company: companyData.data?.articles || [],
+          japan: japanData.data?.articles || [],
+        });
+        setSentimentLoading(false);
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setSentimentArticles({ company: [], japan: [] });
+        setSentimentLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [company.id]);
 
   return (
     <ScrollArea className="h-full">
@@ -220,22 +236,22 @@ const CompanyDashboard = ({ selectedCompany, signals, onSignalClick }: Props) =>
                 {company.sector}
               </span>
             </div>
-            {/* Resilience score */}
-            <div className="mt-3 flex items-end gap-3">
-              <span className="text-[42px] font-mono font-semibold leading-none text-primary tabular-nums">
-                {overallScore}
+            {/* Company fit position bar */}
+            <div className="mt-3">
+              <span className="text-[10px] font-mono uppercase tracking-widest text-muted-foreground block">
+                {lang === "jp" ? "COMPANY FIT" : "COMPANY FIT"}
               </span>
-              <div className="mb-1.5">
-                <span className="text-[10px] font-mono uppercase tracking-widest text-muted-foreground block">
-                  {lang === "jp" ? "COMPANY FIT" : "COMPANY FIT"}
-                </span>
-                <div className="w-32 h-[3px] bg-muted rounded-sm mt-1 overflow-hidden">
-                  <div className="h-full bg-primary rounded-sm" style={{ width: `${overallScore}%` }} />
-                </div>
+              <div className="relative w-56 h-[6px] bg-muted rounded-sm mt-1 overflow-hidden">
+                <div className="absolute inset-y-0 left-0 bg-primary/30 rounded-sm" style={{ width: `${overallScore}%` }} />
+                <div
+                  className="absolute top-1/2 -translate-y-1/2 h-2.5 w-2.5 rounded-full border border-primary bg-primary"
+                  style={{ left: `calc(${overallScore}% - 5px)` }}
+                />
               </div>
-              <span className={`text-[10px] font-mono mb-1.5 ${scoreTrend === "up" ? "text-emerald-400" : scoreTrend === "down" ? "text-red-400" : "text-muted-foreground"}`}>
-                {scoreTrend === "up" ? "+" : scoreTrend === "down" ? "-" : "~"}
-              </span>
+              <div className="mt-1.5 w-56 flex items-center justify-between text-[9px] font-mono text-muted-foreground">
+                <span>Marginal signal</span>
+                <span>Company fit</span>
+              </div>
             </div>
           </div>
 
@@ -430,17 +446,17 @@ const CompanyDashboard = ({ selectedCompany, signals, onSignalClick }: Props) =>
             </h3>
             <div className="flex gap-1">
               <button
-                onClick={() => setSentimentRegion("global")}
+                onClick={() => setSentimentView("company")}
                 className={`px-2 py-0.5 text-[9px] font-mono font-semibold uppercase tracking-wider rounded-sm transition-colors ${
-                  sentimentRegion === "global" ? "bg-accent text-accent-foreground" : "bg-secondary text-muted-foreground hover:text-foreground"
+                  sentimentView === "company" ? "bg-accent text-accent-foreground" : "bg-secondary text-muted-foreground hover:text-foreground"
                 }`}
               >
-                {lang === "jp" ? "GLOBAL" : "GLOBAL"}
+                {lang === "jp" ? "COMPANY" : "COMPANY"}
               </button>
               <button
-                onClick={() => setSentimentRegion("japan")}
+                onClick={() => setSentimentView("japan")}
                 className={`px-2 py-0.5 text-[9px] font-mono font-semibold uppercase tracking-wider rounded-sm transition-colors ${
-                  sentimentRegion === "japan" ? "bg-accent text-accent-foreground" : "bg-secondary text-muted-foreground hover:text-foreground"
+                  sentimentView === "japan" ? "bg-accent text-accent-foreground" : "bg-secondary text-muted-foreground hover:text-foreground"
                 }`}
               >
                 {lang === "jp" ? "JAPAN" : "JAPAN"}
@@ -450,33 +466,47 @@ const CompanyDashboard = ({ selectedCompany, signals, onSignalClick }: Props) =>
 
           <div className="border border-border rounded-sm bg-card/60 px-3 py-2 mb-2">
             <p className="text-[11px] text-foreground/85 leading-snug">
-              {activeSentiment.summary[lang] || activeSentiment.summary.en}
+              {activeSentimentSummary}
             </p>
           </div>
 
           <div className="divide-y divide-border border border-border rounded-sm overflow-hidden">
-            {activeSentiment.items.map((item, idx) => (
-              <div key={`${sentimentRegion}-${idx}`} className="px-3 py-2.5">
-                <div className="flex items-start justify-between gap-3">
-                  <div className="min-w-0">
-                    <p className="text-[11px] text-foreground leading-snug">
-                      {item.title[lang] || item.title.en}
-                    </p>
-                    <p className="text-[9px] font-mono text-muted-foreground mt-1 uppercase tracking-wider">
-                      {(item.source[lang] || item.source.en)} · {(item.time[lang] || item.time.en)}
-                    </p>
-                    <p className="text-[10px] text-foreground/65 mt-1">
-                      {item.impact[lang] || item.impact.en}
-                    </p>
-                  </div>
-                  <span
-                    className={`shrink-0 px-1.5 py-0.5 rounded-sm border text-[8px] font-mono font-semibold uppercase tracking-wider ${sentimentBadgeClasses[item.sentiment]}`}
-                  >
-                    {item.sentiment}
-                  </span>
-                </div>
+            {sentimentLoading ? (
+              <div className="px-3 py-2.5 text-[10px] text-muted-foreground">
+                {lang === "jp" ? "関連報道を読み込み中..." : "Loading relevant coverage..."}
               </div>
-            ))}
+            ) : activeSentimentArticles.length > 0 ? (
+              activeSentimentArticles.map((article, idx) => {
+                const sentiment = toneFromArticle(article);
+                const date = article.date ? new Date(article.date) : new Date();
+                return (
+                  <div key={`${sentimentView}-${idx}`} className="px-3 py-2.5">
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <p className="text-[11px] text-foreground leading-snug">
+                          {article.title}
+                        </p>
+                        <p className="text-[9px] font-mono text-muted-foreground mt-1 uppercase tracking-wider">
+                          {article.source} · {timeAgo(date, lang)}
+                        </p>
+                        <p className="text-[10px] text-foreground/65 mt-1">
+                          {article.description || (lang === "jp" ? "要約なし" : "No summary available")}
+                        </p>
+                      </div>
+                      <span
+                        className={`shrink-0 px-1.5 py-0.5 rounded-sm border text-[8px] font-mono font-semibold uppercase tracking-wider ${sentimentBadgeClasses[sentiment]}`}
+                      >
+                        {sentiment}
+                      </span>
+                    </div>
+                  </div>
+                );
+              })
+            ) : (
+              <div className="px-3 py-2.5 text-[10px] text-muted-foreground">
+                {lang === "jp" ? "この条件の関連報道はまだありません。" : "No relevant coverage found for this filter yet."}
+              </div>
+            )}
           </div>
         </div>
       </div>

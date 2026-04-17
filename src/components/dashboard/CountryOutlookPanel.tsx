@@ -1,4 +1,5 @@
 import { ArrowLeft, AlertTriangle, TrendingUp, Globe2 } from "lucide-react";
+import { useEffect, useState } from "react";
 import { SIGNALS } from "@/data/signals";
 import { GENZ_SIGNALS } from "@/data/genzSignals";
 import { DOMAINS } from "@/data/domains";
@@ -11,6 +12,7 @@ import { DashboardMode } from "./DashboardLayout";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import NewsFeedSection from "./NewsFeedSection";
 import { useLang } from "@/i18n/LanguageContext";
+import { supabase } from "@/integrations/supabase/client";
 
 interface Props {
   countryName: string;
@@ -19,6 +21,9 @@ interface Props {
   onClose: () => void;
   onSignalClick: (signal: any) => void;
 }
+
+type SentimentView = "company" | "japan";
+type SentimentArticle = { title: string; source: string; description: string; date: string; url: string };
 
 function matchesCountry(location: string, countryName: string): boolean {
   if (location.toLowerCase().includes(countryName.toLowerCase())) return true;
@@ -179,6 +184,35 @@ function getRecommendedActions(companyId: CompanyId | null, countryName: string,
   ];
 }
 
+function toneFromArticle(article: SentimentArticle): "positive" | "mixed" | "negative" {
+  const text = `${article.title} ${article.description}`.toLowerCase();
+  const positiveHints = ["partnership", "growth", "expands", "trusted", "innovation", "agreement"];
+  const negativeHints = ["tension", "risk", "decline", "pressure", "conflict", "crisis"];
+  const hasPositive = positiveHints.some((hint) => text.includes(hint));
+  const hasNegative = negativeHints.some((hint) => text.includes(hint));
+  if (hasPositive && !hasNegative) return "positive";
+  if (hasNegative && !hasPositive) return "negative";
+  return "mixed";
+}
+
+const COUNTRY_CODES: Record<string, string> = {
+  "United States of America": "us", "Japan": "jp", "United Kingdom": "gb",
+  "Germany": "de", "France": "fr", "China": "cn", "India": "in",
+  "Brazil": "br", "Australia": "au", "South Korea": "kr", "Indonesia": "id",
+  "Nigeria": "ng", "Kenya": "ke", "Thailand": "th", "Sweden": "se",
+  "Denmark": "dk", "Singapore": "sg", "Egypt": "eg", "South Africa": "za",
+  "Colombia": "co", "Argentina": "ar", "Vietnam": "vn", "Philippines": "ph",
+  "Belgium": "be", "Netherlands": "nl", "Ghana": "gh", "Kazakhstan": "kz",
+  "United Arab Emirates": "ae", "Peru": "pe", "Chile": "cl",
+  "Russia": "ru", "Canada": "ca", "Mexico": "mx", "Turkey": "tr",
+  "Iran": "ir", "Saudi Arabia": "sa", "Italy": "it", "Spain": "es",
+  "Poland": "pl", "Ukraine": "ua", "Romania": "ro", "Czech Republic": "cz",
+  "Austria": "at", "Switzerland": "ch", "Portugal": "pt", "Greece": "gr",
+  "Hungary": "hu", "Norway": "no", "Finland": "fi", "Ireland": "ie",
+  "New Zealand": "nz", "Israel": "il", "Malaysia": "my", "Taiwan": "tw",
+  "Pakistan": "pk", "Bangladesh": "bd", "Sri Lanka": "lk",
+};
+
 const URGENCY_COLORS: Record<string, string> = {
   high: "bg-red-500/20 text-red-400 border-red-500/30",
   medium: "bg-amber-500/20 text-amber-400 border-amber-500/30",
@@ -193,6 +227,9 @@ function getUrgency(intensity: number, lang: string): { label: string; style: st
 
 const CountryOutlookPanel = ({ countryName, mode, selectedCompany, onClose, onSignalClick }: Props) => {
   const { lang, t } = useLang();
+  const [sentimentView, setSentimentView] = useState<SentimentView>("japan");
+  const [sentimentArticles, setSentimentArticles] = useState<Record<SentimentView, SentimentArticle[]>>({ company: [], japan: [] });
+  const [sentimentLoading, setSentimentLoading] = useState(false);
   const matchNames = findAllMatchingCountryNames(countryName);
   const matchSignal = (location: string) => matchNames.some((name) => matchesCountry(location, name));
 
@@ -207,9 +244,77 @@ const CountryOutlookPanel = ({ countryName, mode, selectedCompany, onClose, onSi
   const actions = getRecommendedActions(selectedCompany, countryName, lang);
   const company = selectedCompany ? COMPANIES.find(c => c.id === selectedCompany) : null;
   const displayName = lang === "jp" ? (COUNTRY_NAMES_JP[countryName] || countryName) : countryName;
+  const activeSentimentArticles = sentimentArticles[sentimentView];
+  const activeSentimentText = sentimentView === "japan"
+    ? (lang === "jp"
+      ? `${displayName}における日本関連報道の最新センチメント。`
+      : `Latest sentiment from ${countryName} coverage related to Japan.`)
+    : (company
+      ? (lang === "jp"
+        ? `${displayName}における${company.name}関連報道の最新センチメント。`
+        : `Latest sentiment from ${countryName} coverage related to ${company.name}.`)
+      : (lang === "jp"
+        ? "企業を選択すると企業センチメントを表示します。"
+        : "Select a company to view company sentiment."));
+  const perceptionToneClasses: Record<"positive" | "mixed" | "negative", string> = {
+    positive: "text-emerald-300 border-emerald-500/40 bg-emerald-500/10",
+    mixed: "text-sky-300 border-sky-500/40 bg-sky-500/10",
+    negative: "text-red-300 border-red-500/40 bg-red-500/10",
+  };
 
   const scoreColor = score >= 70 ? "text-emerald-400" : score >= 50 ? "text-amber-400" : "text-red-400";
   const scoreBg = score >= 70 ? "bg-emerald-500/10 border-emerald-500/20" : score >= 50 ? "bg-amber-500/10 border-amber-500/20" : "bg-red-500/10 border-red-500/20";
+
+  useEffect(() => {
+    const countryCode = COUNTRY_CODES[countryName] || "us";
+    const companyName = company?.name;
+    const companyKeywords = company?.keywords.slice(0, 4).map((k) => `"${k}"`).join(" | ");
+    const companyQuery = companyName
+      ? `"${companyName}"${companyKeywords ? ` | (${companyKeywords})` : ""}`
+      : "";
+    const japanQuery = `"Japan" | Japanese | "Japanese government" | "Japanese companies"`;
+
+    let cancelled = false;
+    setSentimentLoading(true);
+
+    Promise.all([
+      companyQuery
+        ? supabase.functions.invoke("news-feed", {
+            body: {
+              type: "sentiment",
+              countryCode,
+              countryName,
+              topicQuery: companyQuery,
+              pageSize: 6,
+            },
+          })
+        : Promise.resolve({ data: { articles: [] } }),
+      supabase.functions.invoke("news-feed", {
+        body: {
+          type: "sentiment",
+          countryCode,
+          countryName,
+          topicQuery: japanQuery,
+          pageSize: 6,
+        },
+      }),
+    ]).then(([companyData, japanData]) => {
+      if (cancelled) return;
+      setSentimentArticles({
+        company: companyData.data?.articles || [],
+        japan: japanData.data?.articles || [],
+      });
+      setSentimentLoading(false);
+    }).catch(() => {
+      if (cancelled) return;
+      setSentimentArticles({ company: [], japan: [] });
+      setSentimentLoading(false);
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [countryName, company?.id]);
 
   return (
     <div className="h-full flex flex-col bg-card border-l border-border">
@@ -227,22 +332,29 @@ const CountryOutlookPanel = ({ countryName, mode, selectedCompany, onClose, onSi
 
       <ScrollArea className="flex-1">
         <div className="px-3 py-3 space-y-3">
-          {/* Resilience Exposure Score */}
+          {/* Company fit position bar */}
           <div className={`rounded-sm border p-3 ${scoreBg}`}>
-            <div className="flex items-center justify-between">
-              <div>
-                <h4 className="text-[9px] font-mono font-bold uppercase tracking-widest text-muted-foreground">{t("country.resilienceExposure")}</h4>
-                <div className={`text-2xl font-mono font-semibold mt-1 ${scoreColor}`}>{score}</div>
-              </div>
-            </div>
-            <div className="mt-2 h-1 bg-background/40 rounded-sm overflow-hidden">
+            <h4 className="text-[9px] font-mono font-bold uppercase tracking-widest text-muted-foreground">{t("country.resilienceExposure")}</h4>
+            <div className="relative mt-2 h-[6px] bg-background/40 rounded-sm overflow-hidden">
               <div
-                className="h-full rounded-sm transition-all duration-700"
+                className="absolute inset-y-0 left-0 rounded-sm transition-all duration-700"
                 style={{
                   width: `${score}%`,
                   backgroundColor: score >= 70 ? "#34d399" : score >= 50 ? "#fbbf24" : "#f87171",
                 }}
               />
+              <div
+                className="absolute top-1/2 -translate-y-1/2 h-2.5 w-2.5 rounded-full border"
+                style={{
+                  left: `calc(${score}% - 5px)`,
+                  backgroundColor: score >= 70 ? "#34d399" : score >= 50 ? "#fbbf24" : "#f87171",
+                  borderColor: score >= 70 ? "#34d399" : score >= 50 ? "#fbbf24" : "#f87171",
+                }}
+              />
+            </div>
+            <div className="mt-1.5 flex items-center justify-between text-[9px] font-mono text-muted-foreground">
+              <span>Marginal signal</span>
+              <span>Company fit</span>
             </div>
           </div>
 
@@ -297,12 +409,65 @@ const CountryOutlookPanel = ({ countryName, mode, selectedCompany, onClose, onSi
           {/* Gen Z Signal Feed */}
           <NewsFeedSection countryName={countryName} type="genz" />
 
-          {/* Japan Perception */}
+          {/* Sentiment toggle: company vs Japan lens */}
           <div>
-            <h4 className="text-[10px] font-mono font-bold uppercase tracking-widest text-muted-foreground mb-1.5">
-              {t("country.japanPerception")}
-            </h4>
-            <p className="text-[10px] text-foreground/70 leading-snug">{japanPerception}</p>
+            <div className="flex items-center justify-between mb-1.5">
+              <h4 className="text-[10px] font-mono font-bold uppercase tracking-widest text-muted-foreground">
+                {lang === "jp" ? "センチメント分析" : "SENTIMENT ANALYSIS"}
+              </h4>
+              <div className="flex gap-1">
+                <button
+                  onClick={() => setSentimentView("company")}
+                  disabled={!company}
+                  className={`px-2 py-0.5 text-[8px] font-mono font-semibold uppercase tracking-wider rounded-sm transition-colors ${
+                    sentimentView === "company" ? "bg-accent text-accent-foreground" : "bg-secondary text-muted-foreground hover:text-foreground"
+                  } ${!company ? "opacity-50 cursor-not-allowed" : ""}`}
+                >
+                  {lang === "jp" ? "COMPANY" : "COMPANY"}
+                </button>
+                <button
+                  onClick={() => setSentimentView("japan")}
+                  className={`px-2 py-0.5 text-[8px] font-mono font-semibold uppercase tracking-wider rounded-sm transition-colors ${
+                    sentimentView === "japan" ? "bg-accent text-accent-foreground" : "bg-secondary text-muted-foreground hover:text-foreground"
+                  }`}
+                >
+                  {lang === "jp" ? "JAPAN" : "JAPAN"}
+                </button>
+              </div>
+            </div>
+            <div className="border border-border rounded-sm overflow-hidden bg-card/60">
+              <div className="px-2 py-2 border-b border-border bg-background/30">
+                <p className="text-[10px] text-foreground/80 leading-snug">{activeSentimentText}</p>
+              </div>
+              <div className="divide-y divide-border">
+                {sentimentLoading ? (
+                  <div className="px-2 py-2 text-[10px] text-muted-foreground">
+                    {lang === "jp" ? "関連報道を読み込み中..." : "Loading relevant coverage..."}
+                  </div>
+                ) : activeSentimentArticles.length > 0 ? (
+                  activeSentimentArticles.map((article, idx) => {
+                    const tone = toneFromArticle(article);
+                    return (
+                      <div key={`perception-${idx}`} className="px-2 py-2 flex items-start justify-between gap-2">
+                        <div>
+                          <p className="text-[10px] text-foreground/85 leading-snug">{article.title}</p>
+                          <p className="text-[9px] text-muted-foreground mt-0.5 uppercase tracking-wider">{article.source}</p>
+                        </div>
+                        <span
+                          className={`shrink-0 px-1.5 py-0.5 rounded-sm border text-[8px] font-mono font-semibold uppercase tracking-wider ${perceptionToneClasses[tone]}`}
+                        >
+                          {tone}
+                        </span>
+                      </div>
+                    );
+                  })
+                ) : (
+                  <div className="px-2 py-2 text-[10px] text-muted-foreground">
+                    {lang === "jp" ? "この条件の関連報道はまだありません。" : "No relevant coverage found for this filter yet."}
+                  </div>
+                )}
+              </div>
+            </div>
           </div>
 
           {/* Recommended Actions */}

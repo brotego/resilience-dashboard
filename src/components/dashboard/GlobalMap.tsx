@@ -27,6 +27,7 @@ interface Props {
   onSignalClick: (signal: UnifiedSignal) => void;
   onCountryClick: (countryName: string, geo: any) => void;
   selectedSignalId: string | null;
+  readSignalIds: string[];
   selectedCountry: string | null;
   signals: UnifiedSignal[];
 }
@@ -188,6 +189,7 @@ const GlobalMap = memo(({
   onSignalClick,
   onCountryClick,
   selectedSignalId,
+  readSignalIds,
   selectedCountry,
   signals,
 }: Props) => {
@@ -467,7 +469,10 @@ const GlobalMap = memo(({
             const color = getSignalColor(signal);
             const score = signal.resilienceScore;
             const relevant = selectedCompany ? isRelevantToCompany(`${signal.title} ${signal.description}`, selectedCompany) : false;
+            const isSelected = selectedSignalId === signal.id;
+            const isRead = readSignalIds.includes(signal.id);
             const dimmed = !!(selectedCompany && !relevant && signal.layer !== "live-news");
+            const renderColor = (isSelected || isRead) ? "hsl(220, 8%, 48%)" : color;
 
             const urgencyMultiplier = score >= 9 ? 2.0 : score >= 7 ? 1.5 : score >= 4 ? 1.0 : 0.7;
             const isCritical = score >= 9;
@@ -476,7 +481,6 @@ const GlobalMap = memo(({
 
             const baseR = (relevant ? 5 : 3.5) * urgencyMultiplier;
             const r = baseR * dotScale;
-            const isSelected = selectedSignalId === signal.id;
 
             return (
               <Marker
@@ -486,19 +490,19 @@ const GlobalMap = memo(({
                 style={{ cursor: "pointer" }}
               >
                 {isCritical && !dimmed && (
-                  <circle r={r * 3} fill={color} opacity={0}>
+                  <circle r={r * 3} fill={renderColor} opacity={0}>
                     <animate attributeName="r" from={String(r * 1.5)} to={String(r * 4)} dur="2s" repeatCount="indefinite" />
                     <animate attributeName="opacity" from="0.25" to="0" dur="2s" repeatCount="indefinite" />
                   </circle>
                 )}
                 {isHigh && !isCritical && !dimmed && (
-                  <circle r={r * 2.2} fill={color} opacity={0.12} />
+                  <circle r={r * 2.2} fill={renderColor} opacity={0.12} />
                 )}
-                <circle r={r * 2} fill={color} opacity={dimmed ? 0.04 : 0.15} />
+                <circle r={r * 2} fill={renderColor} opacity={dimmed ? 0.04 : 0.15} />
                 <circle
                   r={r}
-                  fill={color}
-                  stroke={color}
+                  fill={renderColor}
+                  stroke={renderColor}
                   strokeWidth={1 * dotScale}
                   opacity={dimmed ? 0.45 : score < 4 ? 0.55 : 1}
                   style={{ transition: "r 150ms ease, opacity 150ms ease" }}

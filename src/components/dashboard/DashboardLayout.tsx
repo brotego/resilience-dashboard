@@ -17,6 +17,7 @@ import { useLocation, useNavigate } from "react-router-dom";
 
 export type DashboardMode = "resilience" | "genz";
 export type ViewTab = "dashboard" | "map";
+const READ_SIGNALS_STORAGE_KEY = "read-signal-ids";
 
 const LiveClock = () => {
   const [now, setNow] = useState(new Date());
@@ -47,6 +48,16 @@ const DashboardLayout = () => {
   const [selectedCompany, setSelectedCompany] = useState<CompanyId | null>("mori_building");
   const [selectedSignal, setSelectedSignal] = useState<UnifiedSignal | null>(null);
   const [selectedCountry, setSelectedCountry] = useState<string | null>(null);
+  const [readSignalIds, setReadSignalIds] = useState<string[]>(() => {
+    try {
+      const raw = localStorage.getItem(READ_SIGNALS_STORAGE_KEY);
+      if (!raw) return [];
+      const parsed = JSON.parse(raw);
+      return Array.isArray(parsed) ? parsed.filter((id): id is string => typeof id === "string") : [];
+    } catch {
+      return [];
+    }
+  });
 
   const { signals, isLive } = useUnifiedSignals(mode, activeDomains, activeCategories, selectedCompany);
 
@@ -72,12 +83,14 @@ const DashboardLayout = () => {
   const handleSignalClick = useCallback((signal: UnifiedSignal) => {
     setSelectedSignal(signal);
     setSelectedCountry(null);
+    setReadSignalIds((prev) => (prev.includes(signal.id) ? prev : [...prev, signal.id]));
   }, []);
 
   const handleDashboardSignalClick = useCallback((signal: UnifiedSignal) => {
     setSelectedSignal(signal);
     setSelectedCountry(null);
     setActiveTab("map");
+    setReadSignalIds((prev) => (prev.includes(signal.id) ? prev : [...prev, signal.id]));
   }, []);
 
   const handleCountryClick = useCallback((countryName: string, _geo: any) => {
@@ -105,6 +118,10 @@ const DashboardLayout = () => {
       navigate(location.pathname, { replace: true, state: {} });
     }
   }, [location.pathname, location.state, navigate]);
+
+  useEffect(() => {
+    localStorage.setItem(READ_SIGNALS_STORAGE_KEY, JSON.stringify(readSignalIds));
+  }, [readSignalIds]);
 
   const handleMoreInfo = useCallback((signal: UnifiedSignal) => {
     navigate(`/signal/${signal.id}`, {
@@ -253,6 +270,7 @@ const DashboardLayout = () => {
               onSignalClick={handleSignalClick}
               onCountryClick={handleCountryClick}
               selectedSignalId={selectedSignal?.id || null}
+              readSignalIds={readSignalIds}
               selectedCountry={selectedCountry}
               signals={visibleSignals}
             />

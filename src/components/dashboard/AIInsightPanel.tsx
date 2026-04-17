@@ -82,16 +82,6 @@ const SectionHeader = ({ children, color = "text-primary" }: { children: React.R
   <h4 className={`text-[10px] font-mono font-bold uppercase tracking-widest ${color} mb-1`}>{children}</h4>
 );
 
-const ScoreBar = ({ score, label }: { score: number; label: string }) => (
-  <div className="flex items-center gap-2">
-    <span className="text-[9px] font-mono text-muted-foreground w-24 shrink-0">{label}</span>
-    <div className="flex-1 h-1 bg-muted rounded-sm overflow-hidden">
-      <div className="h-full bg-primary rounded-sm transition-all" style={{ width: `${score * 10}%` }} />
-    </div>
-    <span className="text-[9px] font-mono font-bold text-foreground w-4 text-right">{score}</span>
-  </div>
-);
-
 /** Auto-cycling preview of top signals when nothing is selected */
 const AutoCyclePreview = ({ signals, onSignalClick }: { signals: UnifiedSignal[]; onSignalClick: (s: UnifiedSignal) => void }) => {
   const { lang } = useLang();
@@ -270,14 +260,20 @@ const AIInsightPanel = ({
 
         {/* RESILIENCE EXPOSURE SCORE */}
         <div className="rounded-sm bg-muted/30 border border-border p-2.5 space-y-1">
-          <div className="flex items-center justify-between">
-            <h4 className="text-[9px] font-mono font-bold uppercase tracking-widest text-muted-foreground">{t("panel.resilienceExposure")}</h4>
-            <span className="text-base font-mono font-semibold text-primary">{scoreBreakdown.total}<span className="text-[9px] text-muted-foreground font-normal">/10</span></span>
+          <h4 className="text-[9px] font-mono font-bold uppercase tracking-widest text-muted-foreground">{t("panel.resilienceExposure")}</h4>
+          <div className="pt-1">
+            <div className="relative h-2 rounded-sm bg-muted overflow-hidden">
+              <div className="absolute inset-y-0 left-0 bg-primary/30 rounded-sm transition-all" style={{ width: `${scoreBreakdown.total * 10}%` }} />
+              <div
+                className="absolute top-1/2 -translate-y-1/2 h-3 w-3 rounded-full border border-primary bg-primary shadow-[0_0_0_2px_rgba(18,65,234,0.2)] transition-all"
+                style={{ left: `calc(${scoreBreakdown.total * 10}% - 6px)` }}
+              />
+            </div>
+            <div className="mt-1.5 flex items-center justify-between text-[9px] font-mono text-muted-foreground">
+              <span>Marginal signal</span>
+              <span>Company fit</span>
+            </div>
           </div>
-          <ScoreBar score={scoreBreakdown.domainRelevance} label={t("panel.domainFit")} />
-          <ScoreBar score={scoreBreakdown.keywordMatch} label={t("panel.keywordMatch")} />
-          <ScoreBar score={scoreBreakdown.recency} label={t("panel.recency")} />
-          <ScoreBar score={scoreBreakdown.sourceAuthority} label={t("panel.sourceQuality")} />
         </div>
 
         {loading && (

@@ -18,7 +18,7 @@ interface CacheEntry {
 const CACHE_DURATION = 60 * 60 * 1000; // 1 hour
 const cache = new Map<string, CacheEntry>();
 
-// Country name to ISO 2-letter code for NewsAPI top-headlines
+// Country name to ISO 2-letter locale code for TheNewsAPI requests.
 const COUNTRY_CODES: Record<string, string> = {
   "United States of America": "us", "Japan": "jp", "United Kingdom": "gb",
   "Germany": "de", "France": "fr", "China": "cn", "India": "in",

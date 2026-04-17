@@ -5,6 +5,7 @@ import { GenZCategoryId } from "@/data/genzTypes";
 import { CompanyId } from "@/data/companies";
 import { SIGNALS } from "@/data/signals";
 import { GENZ_SIGNALS } from "@/data/genzSignals";
+import { WORLD_CITIES } from "@/data/capitals";
 import { UnifiedSignal } from "@/data/unifiedSignalTypes";
 import { calculateResilienceScore, scoreToUrgency } from "@/lib/resilienceScore";
 import { DashboardMode } from "@/components/dashboard/DashboardLayout";
@@ -16,27 +17,108 @@ interface CacheEntry {
 
 const CACHE_DURATION = 60 * 60 * 1000;
 const cache = new Map<string, CacheEntry>();
+const BUSINESS_ARTICLES_PER_PAGE = 15;
+const BUSINESS_PAGES = 2;
+const GENZ_ARTICLES_PER_PAGE = 10;
+const GENZ_PAGES = 2;
+const COUNTRY_CODES: Record<string, string> = {
+  "United States of America": "us",
+  "United Kingdom": "gb",
+  "Japan": "jp",
+  "Germany": "de",
+  "France": "fr",
+  "India": "in",
+  "Brazil": "br",
+  "Australia": "au",
+  "Canada": "ca",
+  "South Korea": "kr",
+  "Mexico": "mx",
+  "Indonesia": "id",
+  "Egypt": "eg",
+  "Argentina": "ar",
+  "Turkey": "tr",
+  "Thailand": "th",
+  "Saudi Arabia": "sa",
+  "Iran": "ir",
+  "Italy": "it",
+  "Spain": "es",
+  "South Africa": "za",
+  "Nigeria": "ng",
+  "Kenya": "ke",
+  "Poland": "pl",
+  "Ukraine": "ua",
+  "Colombia": "co",
+  "Peru": "pe",
+  "Vietnam": "vn",
+  "Sweden": "se",
+  "Singapore": "sg",
+  "Netherlands": "nl",
+  "Belgium": "be",
+  "Denmark": "dk",
+  "Norway": "no",
+  "Finland": "fi",
+  "Portugal": "pt",
+  "Austria": "at",
+  "Romania": "ro",
+  "Philippines": "ph",
+  "Chile": "cl",
+  "Ghana": "gh",
+  "Malaysia": "my",
+  "United Arab Emirates": "ae",
+  "Pakistan": "pk",
+  "Bangladesh": "bd",
+};
 
-const NEWS_COUNTRIES: { code: string; name: string; coords: [number, number] }[] = [
-  { code: "us", name: "United States of America", coords: [-98, 39] },
-  { code: "gb", name: "United Kingdom", coords: [-0.12, 51.51] },
-  { code: "jp", name: "Japan", coords: [139.69, 35.69] },
-  { code: "de", name: "Germany", coords: [13.41, 52.52] },
-  { code: "fr", name: "France", coords: [2.35, 48.86] },
-  { code: "in", name: "India", coords: [77.21, 28.61] },
-  { code: "br", name: "Brazil", coords: [-47.93, -15.78] },
-  { code: "au", name: "Australia", coords: [149.13, -35.28] },
-  { code: "kr", name: "South Korea", coords: [126.98, 37.57] },
-  { code: "sg", name: "Singapore", coords: [103.82, 1.35] },
-  { code: "ng", name: "Nigeria", coords: [3.39, 6.45] },
-  { code: "ae", name: "UAE", coords: [55.27, 25.20] },
-];
+const NEWS_COUNTRIES = WORLD_CITIES
+  .filter((city) => city.isCapital && COUNTRY_CODES[city.country])
+  .map((city) => ({
+    code: COUNTRY_CODES[city.country],
+    name: city.country,
+    coords: city.coordinates,
+  }))
+  .filter((country, index, arr) => arr.findIndex((item) => item.name === country.name) === index);
 
 function jitter(coords: [number, number], index: number, offset = 0): [number, number] {
   const seed = index + offset * 7;
   const angle = (seed * 137.5) * (Math.PI / 180);
   const r = 2 + (seed % 5) * 1.2;
   return [coords[0] + r * Math.cos(angle), coords[1] + r * Math.sin(angle)];
+}
+
+async function fetchPagedArticles(
+  type: "business" | "genz",
+  country: { code: string; name: string },
+  pageSize: number,
+  pages: number,
+) {
+  const responses = await Promise.all(
+    Array.from({ length: pages }, (_, pageIndex) =>
+      supabase.functions.invoke("news-feed", {
+        body: {
+          type,
+          countryCode: country.code,
+          countryName: country.name,
+          pageSize,
+          page: pageIndex + 1,
+        },
+      }),
+    ),
+  );
+
+  const seen = new Set<string>();
+  const articles: any[] = [];
+
+  responses.forEach(({ data }) => {
+    if (data?.fallback || !Array.isArray(data?.articles)) return;
+    data.articles.forEach((article: any) => {
+      const dedupeKey = article.url || `${article.title}-${article.date}-${article.source}`;
+      if (seen.has(dedupeKey)) return;
+      seen.add(dedupeKey);
+      articles.push(article);
+    });
+  });
+
+  return articles;
 }
 
 /**
@@ -128,20 +210,19 @@ export function useUnifiedSignals(
       const results: UnifiedSignal[] = [];
       let gotLive = false;
 
-      // Fetch business + genz news from key countries
+      // Fetch substantially larger business + Gen Z batches so the map can render well over 100 live signals.
       const promises = NEWS_COUNTRIES.flatMap((country, ci) => {
-        const biz = supabase.functions.invoke("news-feed", {
-          body: { type: "business", countryCode: country.code, countryName: country.name, pageSize: 3 },
-        }).then(({ data }) => {
-          if (data?.articles && !data?.fallback && data.articles.length > 0) {
+        const biz = fetchPagedArticles("business", country, BUSINESS_ARTICLES_PER_PAGE, BUSINESS_PAGES)
+        .then((articles) => {
+          if (articles.length > 0) {
             gotLive = true;
-            return data.articles.map((a: any, i: number) => {
+            return articles.map((a: any, i: number) => {
               const score = calculateResilienceScore({
                 title: a.title || "", description: a.description || "",
                 source: a.source, date: a.date, companyId: selectedCompany,
               });
               return {
-                id: `live-biz-${country.code}-${i}`,
+                id: `live-biz-${country.code}-${a.url || i}`,
                 title: a.title || "Untitled",
                 description: a.description || "",
                 location: country.name,
@@ -160,18 +241,17 @@ export function useUnifiedSignals(
           return [];
         }).catch(() => [] as UnifiedSignal[]);
 
-        const gz = supabase.functions.invoke("news-feed", {
-          body: { type: "genz", countryCode: country.code, countryName: country.name, pageSize: 2 },
-        }).then(({ data }) => {
-          if (data?.articles && !data?.fallback && data.articles.length > 0) {
+        const gz = fetchPagedArticles("genz", country, GENZ_ARTICLES_PER_PAGE, GENZ_PAGES)
+        .then((articles) => {
+          if (articles.length > 0) {
             gotLive = true;
-            return data.articles.map((a: any, i: number) => {
+            return articles.map((a: any, i: number) => {
               const score = calculateResilienceScore({
                 title: a.title || "", description: a.description || "",
                 source: a.source, date: a.date, companyId: selectedCompany,
               });
               return {
-                id: `live-gz-${country.code}-${i}`,
+                id: `live-gz-${country.code}-${a.url || i}`,
                 title: a.title || "Untitled",
                 description: a.description || "",
                 location: country.name,
