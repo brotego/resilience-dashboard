@@ -1,6 +1,6 @@
 /**
  * Shared sizing for signal markers: 2D map (SVG px) and 3D globe (deg on sphere).
- * Mirrors GlobalMap: urgency multiplier, relevance base width, inverse-zoom scale.
+ * Mirrors GlobalMap: urgency multiplier, relevance base width, and `map2dDotScaleFromZoom`.
  */
 
 export function getUrgencyMultiplier(score: number): number {
@@ -9,6 +9,17 @@ export function getUrgencyMultiplier(score: number): number {
 
 export function getSignalBaseR(relevant: boolean): number {
   return relevant ? 5 : 3.5;
+}
+
+/**
+ * 2D map (react-simple-maps): ZoomableGroup scales content by `zoom`. Using pure 1/zoom
+ * for dot radius cancels that and keeps dots a constant *screen* size — they stay huge
+ * when zoomed out. An exponent below 1 lets markers shrink when zoomed out and grow when zoomed in.
+ */
+export function map2dDotScaleFromZoom(zoom: number): number {
+  const z = Math.max(0.85, Math.min(22, zoom));
+  const comp = 0.62;
+  return 1 / Math.pow(z, comp);
 }
 
 /** GlobalMap uses dotScale = 1 / liveZoom (default liveZoom ~1.5). Map globe camera altitude to the same intent. */

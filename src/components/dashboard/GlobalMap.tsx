@@ -22,7 +22,7 @@ import {
   getCountryTier,
   getMinZoomForTier,
 } from "@/data/countryMapLabels";
-import { getSignalBaseR, getUrgencyMultiplier } from "./signalMarkerStyle";
+import { getSignalBaseR, getUrgencyMultiplier, map2dDotScaleFromZoom } from "./signalMarkerStyle";
 import SignalMapDot from "./SignalMapDot";
 import { clampPositionsToContainingCountry, spreadCoincidentSignalPositions } from "./coincidentSignalPositions";
 import { useLang } from "@/i18n/LanguageContext";
@@ -293,7 +293,9 @@ const GlobalMap = memo(({
   const zoomIn = useCallback(() => animateZoom(clampZoom(targetZoomRef.current * ZOOM_STEP)), [animateZoom]);
   const zoomOut = useCallback(() => animateZoom(clampZoom(targetZoomRef.current / ZOOM_STEP)), [animateZoom]);
 
-  const dotScale = 1 / liveZoom;
+  /** Partial inverse zoom so dots scale with the map (smaller when zoomed out). */
+  const dotScale = map2dDotScaleFromZoom(liveZoom);
+  const mapSignalSizeFactor = 0.68;
   const labelFontSize = Math.max(0.6, 5 / Math.pow(liveZoom, 1.05));
   const capitalFontSize = Math.max(0.5, 4 / Math.pow(liveZoom, 1.05));
   const capitalDotR = Math.max(0.4, 1.2 * dotScale);
@@ -463,7 +465,7 @@ const GlobalMap = memo(({
             const urgencyLabel = t(urgencyKey);
             const disp = getSignalDisplay(signal);
 
-            const baseR = getSignalBaseR(relevant) * urgencyMultiplier;
+            const baseR = getSignalBaseR(relevant) * urgencyMultiplier * mapSignalSizeFactor;
             const r = baseR * dotScale;
 
             return (

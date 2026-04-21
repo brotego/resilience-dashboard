@@ -38,7 +38,7 @@ const SignalMapDot = memo(
     const isHigh = score >= 7 && !isCritical;
 
     const vb = r * 4.5;
-    const px = Math.max(28, Math.min(120, r * 10));
+    const px = Math.max(14, Math.min(72, r * 7.5));
 
     const handleMainEnter = useCallback(
       (e: React.MouseEvent<SVGCircleElement>) => {
