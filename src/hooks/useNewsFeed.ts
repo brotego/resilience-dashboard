@@ -277,7 +277,9 @@ const GENZ_SEED: Record<string, NewsArticle[]> = {
   ],
 };
 
-export function useNewsFeed(countryName: string, type: "business" | "genz") {
+const FEED_TIMEOUT_MS = 12000;
+
+export function useNewsFeed(countryName: string, type: "business" | "genz", topicQuery?: string) {
   const [articles, setArticles] = useState<NewsArticle[]>([]);
   const [loading, setLoading] = useState(true);
   /** True only when showing built-in seed articles (no API key). */
@@ -288,7 +290,8 @@ export function useNewsFeed(countryName: string, type: "business" | "genz") {
 
   useEffect(() => {
     const configured = isNewsApiAiConfigured();
-    const cacheKey = `${configured ? "api" : "seed"}:${type}:${countryName}`;
+    const topicScope = (topicQuery || "").trim().toLowerCase();
+    const cacheKey = `${configured ? "api" : "seed"}:${type}:${countryName}:${topicScope}`;
     const cached = cache.get(cacheKey);
 
     if (cached && Date.now() - cached.timestamp < CACHE_DURATION) {
@@ -320,6 +323,16 @@ export function useNewsFeed(countryName: string, type: "business" | "genz") {
 
     const countryCode = COUNTRY_CODES[countryName] || "us";
 
+    const withTimeout = async <T,>(promise: Promise<T>, ms: number, fallback: T): Promise<T> => {
+      let timeout: ReturnType<typeof setTimeout> | null = null;
+      const timeoutPromise = new Promise<T>((resolve) => {
+        timeout = setTimeout(() => resolve(fallback), ms);
+      });
+      const result = await Promise.race([promise, timeoutPromise]);
+      if (timeout) clearTimeout(timeout);
+      return result;
+    };
+
     const keepCachedArticlesOnFailure = () => {
       const snap = cache.get(cacheKey);
       if (snap?.articles?.length) {
@@ -330,17 +343,56 @@ export function useNewsFeed(countryName: string, type: "business" | "genz") {
       return false;
     };
 
-    invokeNewsFeed({ type, countryCode, countryName })
-      .then(({ data, error }) => {
+    (async () => {
+      try {
+        const primary = await withTimeout(
+          invokeNewsFeed({ type, countryCode, countryName, topicQuery }),
+          FEED_TIMEOUT_MS,
+          { data: { articles: [], fallback: true, error: "Request timeout" }, error: null },
+        );
         if (controller.signal.aborted) return;
 
         const configured = isNewsApiAiConfigured();
-        if (error || data?.fallback || !data?.articles?.length) {
+        const primaryFailed = !!(primary.error || primary.data?.fallback || !primary.data);
+        const primaryArticles = Array.isArray(primary.data?.articles) ? primary.data!.articles : [];
+        const needsBroadBusinessFallback = type === "business" && (!!topicQuery) && (primaryFailed || primaryArticles.length === 0);
+
+        if (needsBroadBusinessFallback) {
+          const broad = await withTimeout(
+            invokeNewsFeed({ type, countryCode, countryName }),
+            FEED_TIMEOUT_MS,
+            { data: { articles: [], fallback: true, error: "Request timeout" }, error: null },
+          );
+          if (controller.signal.aborted) return;
+          const broadFailed = !!(broad.error || broad.data?.fallback || !broad.data);
+          const broadArticles = Array.isArray(broad.data?.articles) ? broad.data!.articles : [];
+
+          if (!broadFailed && broadArticles.length > 0) {
+            setArticles(broadArticles);
+            setIsFallback(false);
+            setFetchError(null);
+            const now = Date.now();
+            cache.set(cacheKey, { articles: broadArticles, timestamp: now });
+            writeSessionCache(cacheKey, broadArticles);
+            setLoading(false);
+            return;
+          }
+        }
+
+        if (primaryFailed) {
           if (configured) {
             if (!keepCachedArticlesOnFailure()) {
-              setArticles([]);
-              setIsFallback(false);
-              setFetchError(data?.error || error?.message || "News request failed");
+              // Final safety net: keep business panel populated even when provider fails.
+              if (type === "business") {
+                const seed = BUSINESS_SEED[countryName] || BUSINESS_SEED.default || [];
+                setArticles(seed);
+                setIsFallback(true);
+                setFetchError(null);
+              } else {
+                setArticles([]);
+                setIsFallback(false);
+                setFetchError(primary.data?.error || primary.error?.message || "News request failed");
+              }
             }
           } else {
             const seed = type === "business" ? BUSINESS_SEED : GENZ_SEED;
@@ -349,23 +401,33 @@ export function useNewsFeed(countryName: string, type: "business" | "genz") {
             setIsFallback(true);
             setFetchError(null);
           }
-        } else {
-          setArticles(data.articles);
-          setIsFallback(false);
-          setFetchError(null);
+          setLoading(false);
+          return;
+        }
+
+        setArticles(primaryArticles);
+        setIsFallback(false);
+        setFetchError(null);
+        if (primaryArticles.length > 0) {
           const now = Date.now();
-          cache.set(cacheKey, { articles: data.articles, timestamp: now });
-          writeSessionCache(cacheKey, data.articles);
+          cache.set(cacheKey, { articles: primaryArticles, timestamp: now });
+          writeSessionCache(cacheKey, primaryArticles);
         }
         setLoading(false);
-      })
-      .catch(() => {
+      } catch {
         if (controller.signal.aborted) return;
         if (isNewsApiAiConfigured()) {
           if (!keepCachedArticlesOnFailure()) {
-            setArticles([]);
-            setIsFallback(false);
-            setFetchError("Network error");
+            if (type === "business") {
+              const seed = BUSINESS_SEED[countryName] || BUSINESS_SEED.default || [];
+              setArticles(seed);
+              setIsFallback(true);
+              setFetchError(null);
+            } else {
+              setArticles([]);
+              setIsFallback(false);
+              setFetchError("Network error");
+            }
           }
         } else {
           const seed = type === "business" ? BUSINESS_SEED : GENZ_SEED;
@@ -374,10 +436,11 @@ export function useNewsFeed(countryName: string, type: "business" | "genz") {
           setFetchError(null);
         }
         setLoading(false);
-      });
+      }
+    })();
 
     return () => controller.abort();
-  }, [countryName, type]);
+  }, [countryName, type, topicQuery]);
 
   return { articles, loading, isFallback, fetchError };
 }

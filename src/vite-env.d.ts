@@ -3,6 +3,10 @@
 interface ImportMetaEnv {
   /** NewsAPI.ai (Event Registry) — news feed; key from https://newsapi.ai/dashboard */
   readonly VITE_NEWSAPI_AI_KEY?: string;
+  /** Anthropic API key for AI insight generation */
+  readonly VITE_ANTHROPIC_API_KEY?: string;
+  /** Optional Anthropic model override (exact API model slug) */
+  readonly VITE_ANTHROPIC_MODEL?: string;
   /** Override Event Registry origin (default https://eventregistry.org) */
   readonly VITE_NEWSAPI_AI_ORIGIN?: string;
   readonly VITE_SUPABASE_URL?: string;

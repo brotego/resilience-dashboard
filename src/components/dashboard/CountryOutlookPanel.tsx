@@ -1,30 +1,28 @@
-import { ArrowLeft, AlertTriangle, TrendingUp, Globe2 } from "lucide-react";
+import { ArrowLeft } from "lucide-react";
 import { useEffect, useState } from "react";
-import { SIGNALS } from "@/data/signals";
-import { GENZ_SIGNALS } from "@/data/genzSignals";
 import { DOMAINS } from "@/data/domains";
 import { GENZ_CATEGORIES } from "@/data/genzCategories";
 import { COUNTRY_ALIASES } from "./GlobalMap";
 import { COMPANIES, CompanyId } from "@/data/companies";
-import { ResilienceSignal } from "@/data/types";
-import { GenZSignal } from "@/data/genzTypes";
+import { UnifiedSignal } from "@/data/unifiedSignalTypes";
 import { DashboardMode } from "./DashboardLayout";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import NewsFeedSection from "./NewsFeedSection";
 import { useLang } from "@/i18n/LanguageContext";
 import { invokeNewsFeed } from "@/api/newsFeed";
-import { isNewsApiAiConfigured } from "@/lib/newsApiConfigured";
+import { invokeArticleSentimentBatch, invokeSentimentFallbackOpinion, invokeCountryCompanyInsight, ArticleSentiment } from "@/api/aiInsight";
 
 interface Props {
   countryName: string;
   mode: DashboardMode;
   selectedCompany: CompanyId | null;
+  signals: UnifiedSignal[];
   onClose: () => void;
   onSignalClick: (signal: any) => void;
 }
 
 type SentimentView = "company" | "japan";
-type SentimentArticle = { title: string; source: string; description: string; date: string; url: string };
+type SentimentArticle = { id: string; title: string; source: string; description: string; date: string; url: string };
 
 function matchesCountry(location: string, countryName: string): boolean {
   if (location.toLowerCase().includes(countryName.toLowerCase())) return true;
@@ -185,15 +183,28 @@ function getRecommendedActions(companyId: CompanyId | null, countryName: string,
   ];
 }
 
-function toneFromArticle(article: SentimentArticle): "positive" | "mixed" | "negative" {
-  const text = `${article.title} ${article.description}`.toLowerCase();
-  const positiveHints = ["partnership", "growth", "expands", "trusted", "innovation", "agreement"];
-  const negativeHints = ["tension", "risk", "decline", "pressure", "conflict", "crisis"];
-  const hasPositive = positiveHints.some((hint) => text.includes(hint));
-  const hasNegative = negativeHints.some((hint) => text.includes(hint));
-  if (hasPositive && !hasNegative) return "positive";
-  if (hasNegative && !hasPositive) return "negative";
-  return "mixed";
+function includesAny(text: string, keywords: string[]): boolean {
+  return keywords.some((kw) => text.includes(kw.toLowerCase()));
+}
+
+function pickWithFallback<T>(items: T[], strict: (item: T) => boolean, limit: number): T[] {
+  const strictMatches = items.filter(strict).slice(0, limit);
+  if (strictMatches.length > 0) return strictMatches;
+  return items.slice(0, limit);
+}
+
+function isJapanArticle(article: SentimentArticle): boolean {
+  const text = `${article.title} ${article.description} ${article.source}`.toLowerCase();
+  return includesAny(text, ["japan", "japanese", "tokyo", "osaka", "jp"]);
+}
+
+function isCompanyOrIndustryArticle(article: SentimentArticle, companyName: string, sector: string, keywords: string[]): boolean {
+  const text = `${article.title} ${article.description} ${article.source}`.toLowerCase();
+  const sectorTokens = sector
+    .toLowerCase()
+    .split(/[^a-z0-9]+/)
+    .filter((token) => token.length >= 4);
+  return includesAny(text, [companyName, ...keywords, ...sectorTokens]);
 }
 
 const COUNTRY_CODES: Record<string, string> = {
@@ -226,35 +237,48 @@ function getUrgency(intensity: number, lang: string): { label: string; style: st
   return { label: lang === "jp" ? "低" : "Low", style: URGENCY_COLORS.low };
 }
 
-const CountryOutlookPanel = ({ countryName, mode, selectedCompany, onClose, onSignalClick }: Props) => {
+const CountryOutlookPanel = ({ countryName, mode, selectedCompany, signals, onClose, onSignalClick }: Props) => {
   const { lang, t } = useLang();
   const [sentimentView, setSentimentView] = useState<SentimentView>("japan");
   const [sentimentArticles, setSentimentArticles] = useState<Record<SentimentView, SentimentArticle[]>>({ company: [], japan: [] });
+  const [sentimentLabels, setSentimentLabels] = useState<Record<SentimentView, Record<string, ArticleSentiment>>>({ company: {}, japan: {} });
+  const [sentimentFallbackOpinion, setSentimentFallbackOpinion] = useState<Record<SentimentView, { tone: ArticleSentiment; opinion: string } | null>>({ company: null, japan: null });
   const [sentimentLoading, setSentimentLoading] = useState(false);
+  const [companyInsightText, setCompanyInsightText] = useState<string>("");
+  const [companyInsightLoading, setCompanyInsightLoading] = useState(false);
   const matchNames = findAllMatchingCountryNames(countryName);
   const matchSignal = (location: string) => matchNames.some((name) => matchesCountry(location, name));
 
-  const useStaticDemoSignals = !isNewsApiAiConfigured();
-  const resilienceSignals = useStaticDemoSignals ? SIGNALS.filter((s) => matchSignal(s.location)) : [];
-  const genzSignals = useStaticDemoSignals ? GENZ_SIGNALS.filter((s) => matchSignal(s.location)) : [];
-  const allSignals = [...resilienceSignals, ...genzSignals];
+  const allSignals = signals.filter((s) => {
+    if (!matchSignal(s.location)) return false;
+    if (mode === "resilience") return s.layer === "resilience" || s.layer === "live-news";
+    return s.layer === "genz" || s.layer === "live-news";
+  });
 
   const score = RESILIENCE_SCORES[countryName] ?? Math.floor(Math.random() * 40 + 30);
   const region = lang === "jp" ? (COUNTRY_REGIONS_JP[countryName] || COUNTRY_REGIONS[countryName] || "グローバル") : (COUNTRY_REGIONS[countryName] || "Global");
   const japanPerception = lang === "jp" ? (JAPAN_PERCEPTION_JP[countryName] || JAPAN_PERCEPTION[countryName] || `${COUNTRY_NAMES_JP[countryName] || countryName}は日本のブランドと文化への認知が高まっており、戦略的な文化交流とビジネスパートナーシップを通じたより深いエンゲージメントの機会があります。`) : (JAPAN_PERCEPTION[countryName] || `${countryName} has growing awareness of Japanese brands and culture, with opportunities for deeper engagement through strategic cultural exchange and business partnerships.`);
-  const companyInsight = getCompanyCountryInsight(selectedCompany, countryName, lang);
-  const actions = getRecommendedActions(selectedCompany, countryName, lang);
+  const companyInsight = companyInsightText || getCompanyCountryInsight(selectedCompany, countryName, lang);
   const company = selectedCompany ? COMPANIES.find(c => c.id === selectedCompany) : null;
+  const businessIndustryQuery = company
+    ? [
+        company.sector,
+        ...company.keywords.slice(0, 4),
+        ...company.relevantDomains,
+      ]
+        .filter(Boolean)
+        .join(" ")
+    : undefined;
   const displayName = lang === "jp" ? (COUNTRY_NAMES_JP[countryName] || countryName) : countryName;
   const activeSentimentArticles = sentimentArticles[sentimentView];
   const activeSentimentText = sentimentView === "japan"
     ? (lang === "jp"
-      ? `${displayName}における日本関連報道の最新センチメント。`
-      : `Latest sentiment from ${countryName} coverage related to Japan.`)
+      ? `${displayName}の主要報道における日本への見方を、見出し・論調・リスク認識の観点から整理して表示します。直近の報道温度感をもとに、友好的な評価か、慎重姿勢か、懸念が強いかを読み取り、対外メッセージや連携方針の調整に活用できます。`
+      : `This view summarizes how media in ${countryName} is framing Japan across recent coverage, including tone, risk perception, and narrative direction. Use it to gauge whether the current sentiment climate is supportive, cautious, or adverse when shaping local partnerships and communications.`)
     : (company
       ? (lang === "jp"
-        ? `${displayName}における${company.name}関連報道の最新センチメント。`
-        : `Latest sentiment from ${countryName} coverage related to ${company.name}.`)
+        ? `${displayName}の報道文脈における${company.name}への評価を、期待・懸念・実行リスクの3点で可視化します。好意的な論調だけでなく、慎重論や逆風シグナルも含めて把握することで、現地での優先アクションと打ち手の順序を明確にできます。`
+        : `This view shows how coverage in ${countryName} perceives ${company.name}, including positive momentum, caution signals, and execution risk themes. The goal is to help prioritize local actions based on the current narrative, not just headline-level sentiment.`)
       : (lang === "jp"
         ? "企業を選択すると企業センチメントを表示します。"
         : "Select a company to view company sentiment."));
@@ -266,6 +290,16 @@ const CountryOutlookPanel = ({ countryName, mode, selectedCompany, onClose, onSi
 
   const scoreColor = score >= 70 ? "text-emerald-400" : score >= 50 ? "text-amber-400" : "text-red-400";
   const scoreBg = score >= 70 ? "bg-emerald-500/10 border-emerald-500/20" : score >= 50 ? "bg-amber-500/10 border-amber-500/20" : "bg-red-500/10 border-red-500/20";
+
+  const withTimeout = async <T,>(promise: Promise<T>, ms: number, fallback: T): Promise<T> => {
+    let timeout: ReturnType<typeof setTimeout> | null = null;
+    const timeoutPromise = new Promise<T>((resolve) => {
+      timeout = setTimeout(() => resolve(fallback), ms);
+    });
+    const result = await Promise.race([promise, timeoutPromise]);
+    if (timeout) clearTimeout(timeout);
+    return result;
+  };
 
   useEffect(() => {
     const countryCode = COUNTRY_CODES[countryName] || "us";
@@ -280,39 +314,174 @@ const CountryOutlookPanel = ({ countryName, mode, selectedCompany, onClose, onSi
     setSentimentLoading(true);
 
     Promise.all([
-      companyQuery
-        ? invokeNewsFeed({
-            type: "sentiment",
-            countryCode,
+      withTimeout(
+        companyQuery
+          ? invokeNewsFeed({
+              type: "sentiment",
+              countryCode,
+              countryName,
+              topicQuery: companyQuery,
+              pageSize: 6,
+            })
+          : Promise.resolve({ data: { articles: [] }, error: null }),
+        12000,
+        { data: { articles: [] }, error: new Error("timeout") },
+      ),
+      withTimeout(
+        invokeNewsFeed({
+          type: "sentiment",
+          countryCode,
+          countryName,
+          topicQuery: japanQuery,
+          pageSize: 6,
+        }),
+        12000,
+        { data: { articles: [] }, error: new Error("timeout") },
+      ),
+    ]).then(async ([companyData, japanData]) => {
+      if (cancelled) return;
+      const rawCompanyArticles = (companyData.data?.articles || [])
+        .map((a, idx) => ({ ...a, id: a.url || `${a.title}-${idx}` }));
+      const rawJapanArticles = (japanData.data?.articles || [])
+        .map((a, idx) => ({ ...a, id: a.url || `${a.title}-${idx}` }));
+
+      const companyArticles = pickWithFallback(
+        rawCompanyArticles,
+        (a) => !company || isCompanyOrIndustryArticle(a, company.name, company.sector, company.keywords),
+        6,
+      );
+      const japanArticles = pickWithFallback(rawJapanArticles, (a) => isJapanArticle(a), 6);
+
+      const [companySentiment, japanSentiment, companyOpinion, japanOpinion] = await Promise.all([
+        withTimeout(
+          invokeArticleSentimentBatch({
+            lens: "company",
+            company: company?.name || null,
+            industry: company?.sector || null,
             countryName,
-            topicQuery: companyQuery,
-            pageSize: 6,
-          })
-        : Promise.resolve({ data: { articles: [] }, error: null }),
-      invokeNewsFeed({
-        type: "sentiment",
-        countryCode,
-        countryName,
-        topicQuery: japanQuery,
-        pageSize: 6,
-      }),
-    ]).then(([companyData, japanData]) => {
+            language: lang,
+            articles: companyArticles.map((a) => ({
+              id: a.id,
+              title: a.title,
+              description: a.description,
+              source: a.source,
+              date: a.date,
+              url: a.url,
+            })),
+          }),
+          12000,
+          { data: {}, error: new Error("timeout") },
+        ),
+        withTimeout(
+          invokeArticleSentimentBatch({
+            lens: "japan",
+            countryName,
+            language: lang,
+            articles: japanArticles.map((a) => ({
+              id: a.id,
+              title: a.title,
+              description: a.description,
+              source: a.source,
+              date: a.date,
+              url: a.url,
+            })),
+          }),
+          12000,
+          { data: {}, error: new Error("timeout") },
+        ),
+        companyArticles.length === 0
+          ? withTimeout(
+              invokeSentimentFallbackOpinion({
+                lens: "company",
+                company: company?.name || null,
+                industry: company?.sector || null,
+                countryName,
+                language: lang,
+              }),
+              12000,
+              { data: null, error: new Error("timeout") },
+            )
+          : Promise.resolve({ data: null, error: null }),
+        japanArticles.length === 0
+          ? withTimeout(
+              invokeSentimentFallbackOpinion({
+                lens: "japan",
+                countryName,
+                language: lang,
+              }),
+              12000,
+              { data: null, error: new Error("timeout") },
+            )
+          : Promise.resolve({ data: null, error: null }),
+      ]);
+
       if (cancelled) return;
       setSentimentArticles({
-        company: companyData.data?.articles || [],
-        japan: japanData.data?.articles || [],
+        company: companyArticles,
+        japan: japanArticles,
+      });
+      setSentimentLabels({
+        company: companySentiment.data || {},
+        japan: japanSentiment.data || {},
+      });
+      setSentimentFallbackOpinion({
+        company: companyOpinion.data || null,
+        japan: japanOpinion.data || null,
       });
       setSentimentLoading(false);
     }).catch(() => {
       if (cancelled) return;
       setSentimentArticles({ company: [], japan: [] });
+      setSentimentLabels({ company: {}, japan: {} });
+      setSentimentFallbackOpinion({ company: null, japan: null });
       setSentimentLoading(false);
     });
 
     return () => {
       cancelled = true;
     };
-  }, [countryName, company?.id]);
+  }, [countryName, company?.id, lang]);
+
+  useEffect(() => {
+    let cancelled = false;
+    if (!company) {
+      setCompanyInsightText("");
+      setCompanyInsightLoading(false);
+      return;
+    }
+    setCompanyInsightLoading(true);
+    withTimeout(
+      invokeCountryCompanyInsight({
+        company: company.name,
+        industry: company.sector,
+        countryName,
+        language: lang,
+        signals: allSignals.map((s) => ({
+          title: s.title,
+          description: s.description,
+          source: s.source,
+          location: s.location,
+          domain: s.domain || s.category,
+          urgency: s.urgency,
+        })),
+      }),
+      12000,
+      { data: null, error: new Error("timeout") },
+    )
+      .then((result) => {
+        if (cancelled) return;
+        setCompanyInsightText(result.data?.insight || getCompanyCountryInsight(selectedCompany, countryName, lang));
+        setCompanyInsightLoading(false);
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setCompanyInsightText(getCompanyCountryInsight(selectedCompany, countryName, lang));
+        setCompanyInsightLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [company?.id, countryName, lang, allSignals.length]);
 
   return (
     <div className="h-full flex flex-col bg-card border-l border-border">
@@ -361,7 +530,9 @@ const CountryOutlookPanel = ({ countryName, mode, selectedCompany, onClose, onSi
             <h4 className="text-[10px] font-mono font-bold uppercase tracking-widest text-primary mb-1.5">
               {company ? `${t("country.whatThisMeans")} ${company.name}` : t("country.strategicContext")}
             </h4>
-            <p className="text-[11px] text-foreground/80 leading-snug">{companyInsight}</p>
+            <p className="text-[11px] text-foreground/80 leading-snug">
+              {companyInsightLoading ? (lang === "jp" ? "分析中..." : "Analyzing signals...") : companyInsight}
+            </p>
           </div>
 
           {/* Recent Signals */}
@@ -372,8 +543,7 @@ const CountryOutlookPanel = ({ countryName, mode, selectedCompany, onClose, onSi
               </h4>
               <div className="space-y-1">
                 {allSignals.map((signal) => {
-                  const isResilience = 'domain' in signal;
-                  const urgency = getUrgency(signal.intensity, lang);
+                  const urgency = getUrgency(Math.round(signal.resilienceScore), lang);
                   return (
                     <button
                       key={signal.id}
@@ -402,10 +572,7 @@ const CountryOutlookPanel = ({ countryName, mode, selectedCompany, onClose, onSi
           )}
 
           {/* Business News Feed */}
-          <NewsFeedSection countryName={countryName} type="business" />
-
-          {/* Gen Z Signal Feed */}
-          <NewsFeedSection countryName={countryName} type="genz" />
+          <NewsFeedSection countryName={countryName} type="business" topicQuery={businessIndustryQuery} />
 
           {/* Sentiment toggle: company vs Japan lens */}
           <div>
@@ -444,7 +611,7 @@ const CountryOutlookPanel = ({ countryName, mode, selectedCompany, onClose, onSi
                   </div>
                 ) : activeSentimentArticles.length > 0 ? (
                   activeSentimentArticles.map((article, idx) => {
-                    const tone = toneFromArticle(article);
+                    const tone = sentimentLabels[sentimentView][article.id] || "mixed";
                     return (
                       <div key={`perception-${idx}`} className="px-2 py-2 flex items-start justify-between gap-2">
                         <div>
@@ -461,27 +628,29 @@ const CountryOutlookPanel = ({ countryName, mode, selectedCompany, onClose, onSi
                   })
                 ) : (
                   <div className="px-2 py-2 text-[10px] text-muted-foreground">
-                    {lang === "jp" ? "この条件の関連報道はまだありません。" : "No relevant coverage found for this filter yet."}
+                    {sentimentFallbackOpinion[sentimentView] ? (
+                      <div className="space-y-1.5">
+                        <span
+                          className={`inline-flex px-1.5 py-0.5 rounded-sm border text-[8px] font-mono font-semibold uppercase tracking-wider ${perceptionToneClasses[sentimentFallbackOpinion[sentimentView]!.tone]}`}
+                        >
+                          {sentimentFallbackOpinion[sentimentView]!.tone}
+                        </span>
+                        <p className="text-[10px] text-foreground/85 leading-snug">
+                          {sentimentFallbackOpinion[sentimentView]!.opinion}
+                        </p>
+                        <p className="text-[9px] text-muted-foreground">
+                          {lang === "jp" ? "関連記事が不足しているため、Claudeの推定意見を表示しています。" : "Showing Claude fallback opinion because no matching articles were found."}
+                        </p>
+                      </div>
+                    ) : (
+                      lang === "jp" ? "この条件の関連報道はまだありません。" : "No relevant coverage found for this filter yet."
+                    )}
                   </div>
                 )}
               </div>
             </div>
           </div>
 
-          {/* Recommended Actions */}
-          <div>
-            <h4 className="text-[10px] font-mono font-bold uppercase tracking-widest mb-1.5" style={{ color: "#ff6701" }}>
-              {t("country.recommendedActions")}
-            </h4>
-            <div className="space-y-1.5">
-              {actions.map((action, i) => (
-                <div key={i} className="flex gap-2 text-[10px]">
-                  <span className="font-mono font-bold shrink-0" style={{ color: "#ff6701" }}>{i + 1}.</span>
-                  <span className="text-foreground/80 leading-snug">{action}</span>
-                </div>
-              ))}
-            </div>
-          </div>
         </div>
       </ScrollArea>
     </div>

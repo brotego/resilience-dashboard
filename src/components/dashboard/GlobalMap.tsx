@@ -23,9 +23,10 @@ import {
   getMinZoomForTier,
 } from "@/data/countryMapLabels";
 import { getSignalBaseR, getUrgencyMultiplier } from "./signalMarkerStyle";
-import { spreadCoincidentSignalPositions } from "./coincidentSignalPositions";
+import { clampPositionsToContainingCountry, spreadCoincidentSignalPositions } from "./coincidentSignalPositions";
 
 const GEO_URL = "https://cdn.jsdelivr.net/npm/world-atlas@2/countries-50m.json";
+const COUNTRY_GEOJSON_URL = "https://raw.githubusercontent.com/holtzy/D3-graph-gallery/master/DATA/world.geojson";
 
 interface Props {
   mode: DashboardMode;
@@ -116,9 +117,16 @@ function calcCountryZoom(geo: any): number {
   return Math.min(MAX_ZOOM, Math.max(2, 120 / maxSpan));
 }
 
-function getSignalColor(signal: UnifiedSignal): string {
+function getSignalColor(signal: UnifiedSignal, mode: DashboardMode): string {
   if (signal.layer === "genz") return GENZ_COLOR;
-  if (signal.layer === "live-news") return signal.category ? "#ff6701" : "#3b82f6";
+  if (signal.layer === "live-news") {
+    if (mode === "genz") return GENZ_COLOR;
+    if (signal.domain) {
+      const domain = DOMAINS.find((d) => d.id === signal.domain);
+      if (domain?.color) return domain.color;
+    }
+    return "#3b82f6";
+  }
   if (signal.domain) {
     const domain = DOMAINS.find(d => d.id === signal.domain);
     return domain?.color || "hsl(38, 90%, 55%)";
@@ -139,11 +147,29 @@ const GlobalMap = memo(({
   selectedCountry,
   signals,
 }: Props) => {
+  const [countries, setCountries] = useState<any[]>([]);
   const [position, setPosition] = useState<{ coordinates: [number, number]; zoom: number }>({
     coordinates: [30, 20], zoom: 1.5,
   });
   const [liveZoom, setLiveZoom] = useState(1.5);
   const [tooltip, setTooltip] = useState<{ x: number; y: number; title: string; location: string; urgency: string; score: number } | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    fetch(COUNTRY_GEOJSON_URL)
+      .then((r) => r.json())
+      .then((fc) => {
+        if (cancelled) return;
+        const features = Array.isArray(fc?.features) ? fc.features : [];
+        setCountries(features);
+      })
+      .catch(() => {
+        if (!cancelled) setCountries([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   const positionRef = useRef({ coordinates: [30, 20] as [number, number], zoom: 1.5 });
   const targetZoomRef = useRef(1.5);
   const animFrameRef = useRef<number | null>(null);
@@ -267,7 +293,10 @@ const GlobalMap = memo(({
   const capitalDotR = Math.max(0.4, 1.2 * dotScale);
   const currentZoom = liveZoom;
 
-  const spreadPositions = useMemo(() => spreadCoincidentSignalPositions(signals), [signals]);
+  const spreadPositions = useMemo(() => {
+    const raw = spreadCoincidentSignalPositions(signals);
+    return clampPositionsToContainingCountry(signals, raw, countries as { geometry: unknown }[]);
+  }, [signals, countries]);
 
   const handleCountryClickCb = useCallback((geo: any) => {
     const name = geo.properties?.name || geo.properties?.NAME;
@@ -414,7 +443,7 @@ const GlobalMap = memo(({
 
           {/* UNIFIED SIGNAL DOTS */}
           {signals.map(signal => {
-            const color = getSignalColor(signal);
+            const color = getSignalColor(signal, mode);
             const score = signal.resilienceScore;
             const relevant = selectedCompany ? isRelevantToCompany(`${signal.title} ${signal.description}`, selectedCompany) : false;
             const isSelected = selectedSignalId === signal.id;

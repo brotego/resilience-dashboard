@@ -8,6 +8,27 @@ const MAX_ARTICLE_BODY_STORE_CHARS = 150_000;
 const STANDARD_PLAN_MAX_LIMIT = 100;
 const DEFAULT_ARTICLE_LIMIT = 5;
 const DEFAULT_EVENT_REGISTRY_ORIGIN = "https://eventregistry.org";
+const PROVIDER_COOLDOWN_MS = 8 * 1000;
+const MIN_REQUEST_SPACING_MS = 350;
+let providerCooldownUntil = 0;
+let lastRequestAt = 0;
+let requestGate: Promise<void> = Promise.resolve();
+
+function isProviderLimitedMessage(msg: string): boolean {
+  return /429|403|forbidden|rate|too many|quota|limit exceeded|throttl/i.test(msg);
+}
+
+function parseRetryAfterMs(value: string | null): number | null {
+  if (!value) return null;
+  const seconds = Number(value);
+  if (Number.isFinite(seconds) && seconds > 0) return Math.trunc(seconds * 1000);
+  const when = Date.parse(value);
+  if (Number.isFinite(when)) {
+    const delta = when - Date.now();
+    return delta > 0 ? delta : null;
+  }
+  return null;
+}
 
 /** POST target for Event Registry `getArticles` (dev uses Vite proxy — see vite.config.ts). */
 function getEventRegistryArticleUrl(): string {
@@ -186,62 +207,95 @@ function eventRegistryArticlePayload(
 async function postEventRegistry(
   payload: Record<string, unknown>,
 ): Promise<{ data: NewsFeedData | null; error: Error | null }> {
-  const url = getEventRegistryArticleUrl();
-  const response = await fetch(url, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload),
+  // Global gate: serialize provider calls so we don't burst multiple requests at once.
+  const prior = requestGate;
+  let release!: () => void;
+  requestGate = new Promise<void>((resolve) => {
+    release = resolve;
   });
+  await prior;
 
-  const text = await response.text();
-  let json: Record<string, unknown> | null = null;
-  if (text) {
-    try {
-      json = JSON.parse(text) as Record<string, unknown>;
-    } catch {
-      json = null;
+  const sinceLast = Date.now() - lastRequestAt;
+  if (sinceLast < MIN_REQUEST_SPACING_MS) {
+    await new Promise((r) => setTimeout(r, MIN_REQUEST_SPACING_MS - sinceLast));
+  }
+
+  if (Date.now() < providerCooldownUntil) {
+    // Soft cooldown: pause briefly, then probe again so requests/logs don't go silent.
+    const waitMs = Math.min(providerCooldownUntil - Date.now(), 2000);
+    if (waitMs > 0) {
+      await new Promise((r) => setTimeout(r, waitMs));
     }
   }
 
-  if (!response.ok) {
-    let msg: string;
-    if (json && json.error !== undefined) {
-      msg = typeof json.error === "string" ? json.error : JSON.stringify(json.error);
-    } else {
-      msg = text?.trim() || `HTTP ${response.status}`;
+  try {
+    lastRequestAt = Date.now();
+    const url = getEventRegistryArticleUrl();
+    const response = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+
+    const text = await response.text();
+    let json: Record<string, unknown> | null = null;
+    if (text) {
+      try {
+        json = JSON.parse(text) as Record<string, unknown>;
+      } catch {
+        json = null;
+      }
     }
+
+    if (!response.ok) {
+      const retryAfterMs = parseRetryAfterMs(response.headers.get("retry-after"));
+      if (response.status === 429 || response.status === 403) {
+        providerCooldownUntil = Date.now() + (retryAfterMs ?? PROVIDER_COOLDOWN_MS);
+      }
+      let msg: string;
+      if (json && json.error !== undefined) {
+        msg = typeof json.error === "string" ? json.error : JSON.stringify(json.error);
+      } else {
+        msg = text?.trim() || `HTTP ${response.status}`;
+      }
+      return {
+        data: {
+          articles: [],
+          fallback: true,
+          error: `NewsAPI.ai: ${msg}`,
+        },
+        error: null,
+      };
+    }
+
+    if (!json) {
+      return {
+        data: { articles: [], fallback: true, error: "NewsAPI.ai: empty or non-JSON response" },
+        error: null,
+      };
+    }
+
+    if (json.error !== undefined) {
+      const msg =
+        typeof json.error === "string" ? json.error : JSON.stringify(json.error);
+      if (isProviderLimitedMessage(msg)) {
+        providerCooldownUntil = Date.now() + PROVIDER_COOLDOWN_MS;
+      }
+      return { data: { articles: [], fallback: true, error: msg }, error: null };
+    }
+
+    const results =
+      json.articles && typeof json.articles === "object"
+        ? (json.articles as { results?: unknown }).results
+        : undefined;
+
     return {
-      data: {
-        articles: [],
-        fallback: true,
-        error: `NewsAPI.ai: ${msg}`,
-      },
+      data: { articles: normalizeErArticles(results), meta: json },
       error: null,
     };
+  } finally {
+    release();
   }
-
-  if (!json) {
-    return {
-      data: { articles: [], fallback: true, error: "NewsAPI.ai: empty or non-JSON response" },
-      error: null,
-    };
-  }
-
-  if (json.error !== undefined) {
-    const msg =
-      typeof json.error === "string" ? json.error : JSON.stringify(json.error);
-    return { data: { articles: [], fallback: true, error: msg }, error: null };
-  }
-
-  const results =
-    json.articles && typeof json.articles === "object"
-      ? (json.articles as { results?: unknown }).results
-      : undefined;
-
-  return {
-    data: { articles: normalizeErArticles(results), meta: json },
-    error: null,
-  };
 }
 
 /**
@@ -289,18 +343,20 @@ export async function invokeNewsFeed(body: NewsFeedRequestBody): Promise<{ data:
       if (!locUri) {
         return { data: { articles: [], error: "Missing countryName for business feed" }, error: null };
       }
+      const keyword = topicQuery
+        ? `business finance economy markets stocks ${topicQuery}`
+        : "business finance economy markets stocks";
       payload = eventRegistryArticlePayload(apiKey, currentPage, size, {
-        keyword: ["business", "finance", "economy", "markets", "stocks"],
-        keywordOper: "or",
+        keyword,
         sourceLocationUri: locUri,
         lang: "eng",
       });
     } else if (type === "genz") {
-      const baseKw = ["Gen Z", "TikTok", "viral", "youth culture", "sustainability"];
-      const kw = countryName ? [...baseKw, countryName] : baseKw;
+      const base = "Gen Z TikTok viral youth culture sustainability";
+      const keyword = topicQuery ? `${base} ${topicQuery}` : base;
       payload = eventRegistryArticlePayload(apiKey, currentPage, size, {
-        keyword: kw,
-        keywordOper: "or",
+        keyword,
+        sourceLocationUri: locUri,
         lang: "eng",
       });
     } else if (type === "domain") {
@@ -318,10 +374,13 @@ export async function invokeNewsFeed(body: NewsFeedRequestBody): Promise<{ data:
         return { data: { articles: [], error: "Missing topicQuery" }, error: null };
       }
       const keywordStr = countryName ? `${topicQuery} ${countryName}` : topicQuery;
-      payload = eventRegistryArticlePayload(apiKey, currentPage, size, {
+      const sentimentQuery: Record<string, unknown> = {
         keyword: keywordStr,
         lang: "eng",
-      });
+      };
+      // Country panel sentiment should reflect that country's media perspective.
+      if (locUri) sentimentQuery.sourceLocationUri = locUri;
+      payload = eventRegistryArticlePayload(apiKey, currentPage, size, sentimentQuery);
     } else {
       return { data: { articles: [], error: "Invalid type" }, error: null };
     }

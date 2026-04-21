@@ -7,6 +7,7 @@ import { useLang } from "@/i18n/LanguageContext";
 interface Props {
   countryName: string;
   type: "business" | "genz";
+  topicQuery?: string;
 }
 
 function formatDate(dateStr: string, locale: string): string {
@@ -65,10 +66,17 @@ function LoadingSkeleton() {
   );
 }
 
-const NewsFeedSection = ({ countryName, type }: Props) => {
+const NewsFeedSection = ({ countryName, type, topicQuery }: Props) => {
   const { t } = useLang();
-  const { articles, loading, isFallback, fetchError } = useNewsFeed(countryName, type);
+  const { articles, loading, isFallback, fetchError } = useNewsFeed(countryName, type, topicQuery);
   const locale = t("clock.locale");
+  const normalizedError = fetchError
+    ? /token|quota|unsubscribed|429|rate limit|throttl/i.test(fetchError)
+      ? (t("clock.locale") === "ja-JP"
+          ? "この国向けの追加フィードは現在利用できません。上部の追跡シグナルをご確認ください。"
+          : "Country-specific feed is temporarily unavailable. Use the tracked signals shown above.")
+      : fetchError
+    : null;
 
   const isBusiness = type === "business";
   const title = isBusiness ? t("news.businessFeed") : t("news.genzFeed");
@@ -97,9 +105,9 @@ const NewsFeedSection = ({ countryName, type }: Props) => {
             <ArticleRow key={`${type}-${i}`} article={article} locale={locale} />
           ))}
         </div>
-      ) : fetchError ? (
-        <p className="text-[9px] font-mono text-destructive/80 text-center py-2 leading-snug px-1" title={fetchError}>
-          {fetchError.length > 120 ? `${fetchError.slice(0, 120)}…` : fetchError}
+      ) : normalizedError ? (
+        <p className="text-[9px] font-mono text-destructive/80 text-center py-2 leading-snug px-1" title={fetchError || normalizedError}>
+          {normalizedError.length > 120 ? `${normalizedError.slice(0, 120)}…` : normalizedError}
         </p>
       ) : (
         <p className="text-[10px] font-mono text-muted-foreground text-center py-2">{t("news.noArticles")}</p>

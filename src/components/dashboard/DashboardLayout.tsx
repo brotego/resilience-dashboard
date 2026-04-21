@@ -46,7 +46,13 @@ const DashboardLayout = () => {
   const [mode, setMode] = useState<DashboardMode>("resilience");
   const [activeDomains, setActiveDomains] = useState<DomainId[]>(["work", "selfhood", "community", "aging", "environment"]);
   const [activeMindset] = useState<MindsetId>("cracks");
-  const [activeCategories, setActiveCategories] = useState<GenZCategoryId[]>(["authenticity"]);
+  const [activeCategories, setActiveCategories] = useState<GenZCategoryId[]>([
+    "authenticity",
+    "worklife",
+    "climate",
+    "digital",
+    "belonging",
+  ]);
   const [selectedCompany, setSelectedCompany] = useState<CompanyId | null>("mori_building");
   const [selectedSignal, setSelectedSignal] = useState<UnifiedSignal | null>(null);
   const [selectedCountry, setSelectedCountry] = useState<string | null>(null);
@@ -62,11 +68,17 @@ const DashboardLayout = () => {
     }
   });
 
-  const { signals, isLive } = useUnifiedSignals(mode, activeDomains, activeCategories, selectedCompany);
+  const { signals, isLive, loading } = useUnifiedSignals(mode, activeDomains, activeCategories, selectedCompany);
 
   const visibleSignals = signals.filter(s => {
-    if (mode === "resilience") return s.layer === "resilience" || s.layer === "live-news";
-    return s.layer === "genz" || s.layer === "live-news";
+    if (mode === "resilience") {
+      if (s.layer === "resilience") return !!s.domain && activeDomains.includes(s.domain);
+      if (s.layer === "live-news") return !!s.domain && activeDomains.includes(s.domain);
+      return false;
+    }
+    if (s.layer === "genz") return !!s.category && activeCategories.includes(s.category);
+    if (s.layer === "live-news") return !!s.category && activeCategories.includes(s.category);
+    return false;
   });
 
   const signalCount = visibleSignals.length;
@@ -194,6 +206,11 @@ const DashboardLayout = () => {
           <span className="text-[10px] font-mono font-semibold text-primary tabular-nums">
             {signalCount} {lang === "jp" ? "件" : "signals"}
           </span>
+          {loading && (
+            <span className="text-[9px] font-mono font-semibold text-amber-300 uppercase tracking-wider animate-pulse">
+              {lang === "jp" ? "記事を検索中..." : "Searching articles..."}
+            </span>
+          )}
           {isLive && (
             <>
               <span className="text-[9px] font-mono font-bold text-emerald-400 uppercase tracking-wider flex items-center gap-1">
@@ -281,6 +298,7 @@ const DashboardLayout = () => {
               />
             ) : (
               <GlobeMap
+                mode={mode}
                 signals={visibleSignals}
                 selectedCompany={selectedCompany}
                 selectedSignalId={selectedSignal?.id || null}
@@ -326,6 +344,7 @@ const DashboardLayout = () => {
                 countryName={selectedCountry}
                 mode={mode}
                 selectedCompany={selectedCompany}
+                signals={visibleSignals}
                 onClose={handleClosePanel}
                 onSignalClick={(signal: any) => handleSignalClick(signal)}
               />

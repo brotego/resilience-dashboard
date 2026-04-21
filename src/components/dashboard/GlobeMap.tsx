@@ -3,6 +3,7 @@ import Globe from "react-globe.gl";
 import { DOMAINS } from "@/data/domains";
 import { COMPANIES, CompanyId } from "@/data/companies";
 import { UnifiedSignal } from "@/data/unifiedSignalTypes";
+import { DashboardMode } from "./DashboardLayout";
 import { geoBounds, geoCentroid } from "d3-geo";
 import {
   LABEL_OVERRIDES,
@@ -24,6 +25,7 @@ import {
 type CountryFeature = { properties?: { name?: string; NAME?: string }; geometry: any; type?: string };
 
 interface Props {
+  mode: DashboardMode;
   signals: UnifiedSignal[];
   selectedCompany: CompanyId | null;
   selectedSignalId: string | null;
@@ -134,9 +136,16 @@ function countryLabelFromFeature(f: CountryFeature): string | undefined {
   return p.name || p.NAME || p.ADMIN;
 }
 
-function getSignalColor(signal: UnifiedSignal): string {
+function getSignalColor(signal: UnifiedSignal, mode: DashboardMode): string {
   if (signal.layer === "genz") return GENZ_COLOR;
-  if (signal.layer === "live-news") return signal.category ? "#ff6701" : "#3b82f6";
+  if (signal.layer === "live-news") {
+    if (mode === "genz") return GENZ_COLOR;
+    if (signal.domain) {
+      const domain = DOMAINS.find((d) => d.id === signal.domain);
+      if (domain?.color) return domain.color;
+    }
+    return "#3b82f6";
+  }
   if (signal.domain) {
     const domain = DOMAINS.find((d) => d.id === signal.domain);
     return domain?.color || "hsl(38, 90%, 55%)";
@@ -153,6 +162,7 @@ function isRelevantToCompany(text: string, companyId: CompanyId): boolean {
 
 const GlobeMap = memo(
   ({
+    mode,
     signals,
     selectedCompany,
     selectedSignalId,
@@ -537,7 +547,7 @@ const GlobeMap = memo(
 
   const points = useMemo<GlobePoint[]>(() => {
     return signals.map((signal) => {
-      const baseColor = getSignalColor(signal);
+      const baseColor = getSignalColor(signal, mode);
       const score = signal.resilienceScore;
       const relevant = selectedCompany
         ? isRelevantToCompany(`${signal.title} ${signal.description}`, selectedCompany)

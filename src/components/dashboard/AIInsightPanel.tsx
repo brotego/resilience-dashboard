@@ -13,6 +13,7 @@ import { useLang } from "@/i18n/LanguageContext";
 
 interface AIInsight {
   urgency: string;
+  articleSummary?: string;
   headline: string;
   actions: string[];
   risks: string[];
@@ -164,7 +165,7 @@ const AIInsightPanel = ({
       return;
     }
 
-    const key = `${selectedSignal.id}:${selectedCompany || "general"}:${lang}`;
+    const key = `${selectedSignal.id}:${selectedCompany || "general"}:${lang}:${mode}`;
     if (key === lastSignalRef.current) return;
     lastSignalRef.current = key;
 
@@ -176,14 +177,14 @@ const AIInsightPanel = ({
 
     setLoading(true);
     setError(null);
-    setInsight(null);
 
     invokeAiInsight({
         signalTitle: selectedSignal.title,
         signalDescription: selectedSignal.description,
         signalLocation: selectedSignal.location,
         signalDomain: domainOrCategory?.label || "",
-        company: selectedCompany || null,
+        company: company?.name || selectedCompany || null,
+        mode,
         language: lang,
       })
       .then(({ data, error: fnError }) => {
@@ -196,7 +197,7 @@ const AIInsightPanel = ({
         setError(lang === "jp" ? "インサイトの生成に失敗しました" : "Failed to generate insight");
         setLoading(false);
       });
-  }, [selectedSignal?.id, selectedCompany, lang]);
+  }, [selectedSignal?.id, selectedCompany, lang, mode]);
 
   if (!selectedSignal) {
     return (
@@ -288,9 +289,35 @@ const AIInsightPanel = ({
 
         {insight && (
           <>
-            {insight.headline && (
-              <p className="text-[11px] text-foreground/80 leading-snug italic border-l-2 border-primary pl-2.5">{insight.headline}</p>
+            {mode === "genz" && (insight.genzSignal || insight.whyItMatters) && (
+              <div className="rounded-sm bg-genz/10 border border-genz/30 p-2.5">
+                <h4 className="text-[10px] font-mono font-bold uppercase tracking-widest text-genz mb-1">
+                  {t("panel.genzSignal")}
+                </h4>
+                <p className="text-[12px] text-foreground leading-snug font-semibold whitespace-pre-wrap">
+                  {(insight.genzSignal && insight.genzSignal.trim()) || insight.whyItMatters}
+                </p>
+              </div>
             )}
+
+            {(insight.articleSummary || insight.headline) && (
+              <div className="rounded-sm bg-muted/40 border border-border p-2.5">
+                <h4 className="text-[10px] font-mono font-bold uppercase tracking-widest text-muted-foreground mb-1">
+                  {lang === "jp" ? "ARTICLE SUMMARY" : "ARTICLE SUMMARY"}
+                </h4>
+                <p className="text-[11px] text-foreground/85 leading-snug">
+                  {insight.articleSummary || insight.headline}
+                </p>
+              </div>
+            )}
+
+            {/* WHY IT MATTERS */}
+            <div className="rounded-sm bg-primary/10 border border-primary/20 p-2.5">
+              <h4 className="text-[10px] font-mono font-bold uppercase tracking-widest text-primary mb-1">
+                {t("panel.whyMatters")}{companyLabel ? ` — ${companyLabel}` : ""}
+              </h4>
+              <p className="text-[11px] text-foreground leading-snug">{insight.whyItMatters}</p>
+            </div>
 
             {/* WHAT TO DO */}
             <div className="rounded-sm bg-accent/10 border border-accent/20 p-2.5">
@@ -329,14 +356,6 @@ const AIInsightPanel = ({
               </div>
             </div>
 
-            {/* WHY IT MATTERS */}
-            <div className="rounded-sm bg-primary/10 border border-primary/20 p-2.5">
-              <h4 className="text-[10px] font-mono font-bold uppercase tracking-widest text-primary mb-1">
-                {t("panel.whyMatters")}{companyLabel ? ` — ${companyLabel}` : ""}
-              </h4>
-              <p className="text-[11px] text-foreground leading-snug">{insight.whyItMatters}</p>
-            </div>
-
             {/* DEEPER CONTEXT */}
             <div className="border-t border-border pt-2">
               <button
@@ -348,7 +367,7 @@ const AIInsightPanel = ({
               </button>
               {contextOpen && (
                 <div className="mt-2 space-y-2">
-                  {insight.genzSignal && (
+                  {insight.genzSignal && mode !== "genz" && (
                     <div>
                       <SectionHeader color="text-genz">{t("panel.genzSignal")}</SectionHeader>
                       <p className="text-[11px] text-foreground/80 leading-snug">{insight.genzSignal}</p>

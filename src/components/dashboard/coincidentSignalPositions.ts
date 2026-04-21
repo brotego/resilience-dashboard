@@ -1,4 +1,4 @@
-import { geoContains } from "d3-geo";
+import { geoContains, geoCentroid } from "d3-geo";
 
 export type SignalDisplayPosition = {
   lng: number;
@@ -8,6 +8,18 @@ export type SignalDisplayPosition = {
 };
 
 const EARTH_RADIUS_M = 6_371_000;
+const COUNTRY_NAME_ALIASES: Record<string, string> = {
+  "united states of america": "united states",
+  "usa": "united states",
+  "u.s.a.": "united states",
+  "u.s.": "united states",
+  "uk": "united kingdom",
+};
+
+function normalizeCountryName(name: string): string {
+  const n = name.trim().toLowerCase();
+  return COUNTRY_NAME_ALIASES[n] || n;
+}
 
 function haversineMeters(a: [number, number], b: [number, number]): number {
   const [lng1, lat1] = a;
@@ -37,6 +49,10 @@ function clusterByProximity<T extends { id: string; coordinates: [number, number
   }
   for (let i = 0; i < n; i++) {
     for (let j = i + 1; j < n; j++) {
+      // Keep clustering country-local so nearby countries don't get merged into one spread ring.
+      const li = (items[i] as any).location as string | undefined;
+      const lj = (items[j] as any).location as string | undefined;
+      if (li && lj && normalizeCountryName(li) !== normalizeCountryName(lj)) continue;
       if (haversineMeters(items[i].coordinates, items[j].coordinates) <= maxMeters) {
         union(i, j);
       }
@@ -67,24 +83,74 @@ function findContainingFeature(
   return null;
 }
 
+function featureCountryName(feature: { geometry: unknown; properties?: Record<string, unknown> }): string | null {
+  const p = feature.properties || {};
+  const raw = (p.name || p.NAME || p.ADMIN) as string | undefined;
+  if (!raw || typeof raw !== "string") return null;
+  return normalizeCountryName(raw);
+}
+
+function nearestFeatureByCentroid(
+  lng: number,
+  lat: number,
+  countryFeatures: { geometry: unknown }[],
+): { geometry: unknown } | null {
+  if (!countryFeatures.length) return null;
+  let best: { geometry: unknown } | null = null;
+  let bestDist = Number.POSITIVE_INFINITY;
+  for (const f of countryFeatures) {
+    try {
+      const c = geoCentroid(f as GeoJSON.GeoJSON) as [number, number];
+      if (!Number.isFinite(c[0]) || !Number.isFinite(c[1])) continue;
+      const d = haversineMeters([lng, lat], c);
+      if (d < bestDist) {
+        bestDist = d;
+        best = f;
+      }
+    } catch {
+      /* invalid geometry */
+    }
+  }
+  return best;
+}
+
 /**
  * If a spread position left the country polygon that contains the original signal, pull it back toward home.
  */
 export function clampPositionsToContainingCountry<
-  T extends { id: string; coordinates: [number, number] },
+  T extends { id: string; coordinates: [number, number]; location?: string },
 >(
   signals: T[],
   spread: Map<string, SignalDisplayPosition>,
-  countryFeatures: { geometry: unknown }[],
+  countryFeatures: { geometry: unknown; properties?: Record<string, unknown> }[],
 ): Map<string, SignalDisplayPosition> {
   if (!countryFeatures.length) return spread;
   const out = new Map(spread);
+  const featuresByCountry = new Map<string, { geometry: unknown; properties?: Record<string, unknown> }[]>();
+  for (const f of countryFeatures) {
+    const name = featureCountryName(f);
+    if (!name) continue;
+    if (!featuresByCountry.has(name)) featuresByCountry.set(name, []);
+    featuresByCountry.get(name)!.push(f);
+  }
 
   for (const signal of signals) {
     const cur = out.get(signal.id);
     if (!cur) continue;
     const [homeLng, homeLat] = signal.coordinates;
-    const feat = findContainingFeature(homeLng, homeLat, countryFeatures);
+    const targetCountry = signal.location ? normalizeCountryName(signal.location) : "";
+    let feat: { geometry: unknown; properties?: Record<string, unknown> } | null = null;
+    if (targetCountry && featuresByCountry.has(targetCountry)) {
+      const candidates = featuresByCountry.get(targetCountry)!;
+      feat =
+        findContainingFeature(homeLng, homeLat, candidates) ||
+        nearestFeatureByCentroid(homeLng, homeLat, candidates);
+    }
+    if (!feat) {
+      feat =
+        findContainingFeature(homeLng, homeLat, countryFeatures) ||
+        nearestFeatureByCentroid(homeLng, homeLat, countryFeatures);
+    }
     if (!feat) continue;
 
     const { lng, lat } = cur;
@@ -97,13 +163,25 @@ export function clampPositionsToContainingCountry<
     if (candidateInside) continue;
 
     let best = { lng: homeLng, lat: homeLat };
+    let found = false;
     for (let t = 0.45; t >= 0.05; t -= 0.1) {
       const nl = homeLng + (lng - homeLng) * t;
       const na = homeLat + (lat - homeLat) * t;
       try {
         if (geoContains(feat as GeoJSON.GeoJSON, [nl, na])) {
           best = { lng: nl, lat: na };
+          found = true;
           break;
+        }
+      } catch {
+        /* ignore */
+      }
+    }
+    if (!found) {
+      try {
+        const c = geoCentroid(feat as GeoJSON.GeoJSON) as [number, number];
+        if (Number.isFinite(c[0]) && Number.isFinite(c[1])) {
+          best = { lng: c[0], lat: c[1] };
         }
       } catch {
         /* ignore */
