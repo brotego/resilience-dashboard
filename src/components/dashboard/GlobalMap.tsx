@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef, useEffect, memo } from "react";
+import { useState, useCallback, useRef, useEffect, useMemo, memo } from "react";
 import {
   ComposableMap,
   ZoomableGroup,
@@ -15,6 +15,15 @@ import { GenZCategoryId } from "@/data/genzTypes";
 import { UnifiedSignal } from "@/data/unifiedSignalTypes";
 import { DashboardMode } from "./DashboardLayout";
 import { Plus, Minus } from "lucide-react";
+import {
+  DISPLAY_NAMES,
+  LABEL_OVERRIDES,
+  WATERMARK_COUNTRIES,
+  getCountryTier,
+  getMinZoomForTier,
+} from "@/data/countryMapLabels";
+import { getSignalBaseR, getUrgencyMultiplier } from "./signalMarkerStyle";
+import { spreadCoincidentSignalPositions } from "./coincidentSignalPositions";
 
 const GEO_URL = "https://cdn.jsdelivr.net/npm/world-atlas@2/countries-50m.json";
 
@@ -95,69 +104,6 @@ const COUNTRY_ALIASES: Record<string, string[]> = {
   "Peru": ["Lima"],
 };
 
-const LABEL_OVERRIDES: Record<string, [number, number]> = {
-  "United States of America": [-98, 39],
-  "Russia": [100, 60],
-  "Canada": [-106, 56],
-  "France": [2, 47],
-  "Norway": [9, 62],
-  "Indonesia": [118, -2],
-  "Malaysia": [109, 4],
-  "Chile": [-71, -33],
-  "New Zealand": [174, -41],
-};
-
-const DISPLAY_NAMES: Record<string, string> = {
-  "United States of America": "United States",
-  "United Kingdom": "UK",
-  "United Arab Emirates": "UAE",
-  "Dem. Rep. Congo": "DR Congo",
-  "Dominican Rep.": "Dom. Rep.",
-  "Central African Rep.": "C.A.R.",
-  "Bosnia and Herz.": "Bosnia",
-  "Czech Republic": "Czech Rep.",
-  "Republic of the Congo": "Congo",
-  "Democratic Republic of the Congo": "DR Congo",
-};
-
-const COUNTRY_TIERS: Record<string, number> = {
-  "Russia": 1, "China": 1, "United States of America": 1, "Canada": 1,
-  "Brazil": 1, "Australia": 1, "India": 1, "Japan": 1,
-  "Argentina": 2, "Mexico": 2, "Indonesia": 2, "Saudi Arabia": 2,
-  "Germany": 2, "France": 2, "United Kingdom": 2, "Turkey": 2,
-  "Iran": 2, "Egypt": 2, "South Africa": 2, "Nigeria": 2,
-  "Kazakhstan": 2, "Algeria": 2, "Libya": 2, "Sudan": 2,
-  "Colombia": 2, "Peru": 2, "Mongolia": 2, "Pakistan": 2,
-  "Congo": 2, "Dem. Rep. Congo": 2, "Democratic Republic of the Congo": 2,
-  "Ethiopia": 2, "Angola": 2, "Mali": 2, "Niger": 2,
-  "Chad": 2, "Tanzania": 2, "Mozambique": 2, "Zambia": 2,
-  "Myanmar": 2, "Afghanistan": 2, "Somalia": 2, "Madagascar": 2,
-  "Kenya": 2, "Morocco": 2,
-  "Spain": 3, "Italy": 3, "Poland": 3, "Ukraine": 3, "Romania": 3,
-  "Sweden": 3, "Norway": 3, "Finland": 3, "Thailand": 3, "Vietnam": 3,
-  "Philippines": 3, "Malaysia": 3, "South Korea": 3, "Iraq": 3,
-  "Chile": 3, "Venezuela": 3, "Ecuador": 3, "Bolivia": 3,
-  "Paraguay": 3, "Uruguay": 3, "Cuba": 3, "New Zealand": 3,
-  "Ghana": 3, "Ivory Coast": 3, "Côte d'Ivoire": 3, "Cameroon": 3,
-  "Zimbabwe": 3, "Botswana": 3, "Namibia": 3, "Senegal": 3,
-  "Guinea": 3, "Uganda": 3, "Uzbekistan": 3, "Turkmenistan": 3,
-  "Bangladesh": 3, "Nepal": 3, "Sri Lanka": 3, "Laos": 3, "Cambodia": 3,
-  "Papua New Guinea": 3, "Gabon": 3,
-};
-
-const WATERMARK_COUNTRIES = new Set([
-  "Russia", "Canada", "United States of America", "China", "Brazil",
-  "Australia", "India", "Argentina", "Kazakhstan", "Algeria",
-  "Saudi Arabia", "Mexico", "Indonesia", "Sudan", "Libya",
-  "Iran", "Mongolia", "Peru", "Chad", "Niger",
-  "Angola", "Mali", "South Africa", "Colombia", "Ethiopia",
-  "Bolivia", "Egypt", "Nigeria", "Tanzania", "Turkey",
-]);
-
-function getCountryTier(name: string): number { return COUNTRY_TIERS[name] || 4; }
-function getMinZoomForTier(tier: number): number {
-  switch (tier) { case 1: return 1.3; case 2: return 2; case 3: return 3.5; default: return 6; }
-}
 function getCityMinZoom(tier: 1 | 2 | 3 | 4): number {
   switch (tier) { case 1: return 3; case 2: return 4; case 3: return 5; case 4: return 6.5; }
 }
@@ -321,6 +267,8 @@ const GlobalMap = memo(({
   const capitalDotR = Math.max(0.4, 1.2 * dotScale);
   const currentZoom = liveZoom;
 
+  const spreadPositions = useMemo(() => spreadCoincidentSignalPositions(signals), [signals]);
+
   const handleCountryClickCb = useCallback((geo: any) => {
     const name = geo.properties?.name || geo.properties?.NAME;
     if (name) {
@@ -473,19 +421,20 @@ const GlobalMap = memo(({
             const isRead = readSignalIds.includes(signal.id);
             const dimmed = !!(selectedCompany && !relevant && signal.layer !== "live-news");
             const renderColor = (isSelected || isRead) ? "hsl(220, 8%, 48%)" : color;
+            const pos = spreadPositions.get(signal.id)!;
 
-            const urgencyMultiplier = score >= 9 ? 2.0 : score >= 7 ? 1.5 : score >= 4 ? 1.0 : 0.7;
+            const urgencyMultiplier = getUrgencyMultiplier(score);
             const isCritical = score >= 9;
             const isHigh = score >= 7;
             const urgencyLabel = signal.urgency.charAt(0).toUpperCase() + signal.urgency.slice(1);
 
-            const baseR = (relevant ? 5 : 3.5) * urgencyMultiplier;
+            const baseR = getSignalBaseR(relevant) * urgencyMultiplier;
             const r = baseR * dotScale;
 
             return (
               <Marker
                 key={signal.id}
-                coordinates={signal.coordinates}
+                coordinates={[pos.lng, pos.lat]}
                 onClick={() => { onSignalClick(signal); panToSignal(signal.coordinates); }}
                 style={{ cursor: "pointer" }}
               >

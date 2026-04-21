@@ -67,7 +67,7 @@ function LoadingSkeleton() {
 
 const NewsFeedSection = ({ countryName, type }: Props) => {
   const { t } = useLang();
-  const { articles, loading, isFallback } = useNewsFeed(countryName, type);
+  const { articles, loading, isFallback, fetchError } = useNewsFeed(countryName, type);
   const locale = t("clock.locale");
 
   const isBusiness = type === "business";
@@ -97,6 +97,10 @@ const NewsFeedSection = ({ countryName, type }: Props) => {
             <ArticleRow key={`${type}-${i}`} article={article} locale={locale} />
           ))}
         </div>
+      ) : fetchError ? (
+        <p className="text-[9px] font-mono text-destructive/80 text-center py-2 leading-snug px-1" title={fetchError}>
+          {fetchError.length > 120 ? `${fetchError.slice(0, 120)}…` : fetchError}
+        </p>
       ) : (
         <p className="text-[10px] font-mono text-muted-foreground text-center py-2">{t("news.noArticles")}</p>
       )}

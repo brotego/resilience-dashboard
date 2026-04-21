@@ -1,5 +1,7 @@
 import { useState, useEffect, useRef } from "react";
-import { supabase } from "@/integrations/supabase/client";
+import { invokeNewsFeed } from "@/api/newsFeed";
+import { isNewsApiAiConfigured } from "@/lib/newsApiConfigured";
+import { readSessionCache, writeSessionCache } from "@/lib/newsSessionCache";
 
 export interface NewsDot {
   id: string;
@@ -15,6 +17,8 @@ export interface NewsDot {
 interface CacheEntry {
   dots: NewsDot[];
   timestamp: number;
+  /** Invalidate when switching between demo mode and API mode */
+  apiConfigured: boolean;
 }
 
 const CACHE_DURATION = 60 * 60 * 1000; // 1 hour
@@ -62,10 +66,27 @@ export function useGlobalNewsDots() {
     if (fetchedRef.current) return;
     fetchedRef.current = true;
 
-    if (globalCache && Date.now() - globalCache.timestamp < CACHE_DURATION) {
+    const configured = isNewsApiAiConfigured();
+    const sessionKey = `global-dots-${configured ? "api" : "seed"}`;
+    if (
+      globalCache &&
+      globalCache.apiConfigured === configured &&
+      Date.now() - globalCache.timestamp < CACHE_DURATION
+    ) {
       setDots(globalCache.dots);
       setLoading(false);
       return;
+    }
+
+    const sessionEntry = readSessionCache<NewsDot[]>(sessionKey);
+    if (sessionEntry?.data?.length) {
+      globalCache = {
+        dots: sessionEntry.data,
+        timestamp: sessionEntry.savedAt,
+        apiConfigured: configured,
+      };
+      setDots(sessionEntry.data);
+      setLoading(false);
     }
 
     const fetchAll = async () => {
@@ -74,8 +95,10 @@ export function useGlobalNewsDots() {
       // Fetch business headlines from key countries in parallel (batched)
       const businessPromises = FETCH_COUNTRIES.map(async (cc) => {
         try {
-          const { data } = await supabase.functions.invoke("news-feed", {
-            body: { type: "business", countryCode: cc, countryName: COUNTRY_NAMES[cc] },
+          const { data } = await invokeNewsFeed({
+            type: "business",
+            countryCode: cc,
+            countryName: COUNTRY_NAMES[cc],
           });
           if (data?.articles && !data?.fallback) {
             return data.articles.map((a: any, i: number) => ({
@@ -97,8 +120,10 @@ export function useGlobalNewsDots() {
       const genzCountries = ["us", "gb", "jp", "in", "br", "kr"];
       const genzPromises = genzCountries.map(async (cc) => {
         try {
-          const { data } = await supabase.functions.invoke("news-feed", {
-            body: { type: "genz", countryCode: cc, countryName: COUNTRY_NAMES[cc] },
+          const { data } = await invokeNewsFeed({
+            type: "genz",
+            countryCode: cc,
+            countryName: COUNTRY_NAMES[cc],
           });
           if (data?.articles && !data?.fallback) {
             return data.articles.map((a: any, i: number) => ({
@@ -119,8 +144,17 @@ export function useGlobalNewsDots() {
       const results = await Promise.all([...businessPromises, ...genzPromises]);
       results.forEach((r) => allDots.push(...r));
 
-      globalCache = { dots: allDots, timestamp: Date.now() };
-      setDots(allDots);
+      if (allDots.length > 0) {
+        const now = Date.now();
+        globalCache = { dots: allDots, timestamp: now, apiConfigured: configured };
+        writeSessionCache(sessionKey, allDots);
+        setDots(allDots);
+      } else if (configured && globalCache?.dots?.length) {
+        setDots(globalCache.dots);
+      } else if (configured) {
+        const s = readSessionCache<NewsDot[]>(sessionKey);
+        if (s?.data?.length) setDots(s.data);
+      }
       setLoading(false);
     };
 

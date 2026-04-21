@@ -27,6 +27,8 @@ export interface UnifiedSignal {
 
   /** News source name */
   source?: string;
+  /** Article author(s) when known (e.g. from NewsAPI.ai) */
+  author?: string;
   /** Original article URL when available */
   articleUrl?: string;
   /** Full/partial article text from feed when available */

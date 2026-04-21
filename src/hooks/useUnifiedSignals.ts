@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useMemo } from "react";
-import { supabase } from "@/integrations/supabase/client";
+import { invokeNewsFeed, type NewsFeedRequestBody } from "@/api/newsFeed";
 import { DomainId } from "@/data/types";
 import { GenZCategoryId } from "@/data/genzTypes";
 import { CompanyId } from "@/data/companies";
@@ -8,6 +8,9 @@ import { GENZ_SIGNALS } from "@/data/genzSignals";
 import { WORLD_CITIES } from "@/data/capitals";
 import { UnifiedSignal } from "@/data/unifiedSignalTypes";
 import { calculateResilienceScore, scoreToUrgency } from "@/lib/resilienceScore";
+import { isNewsApiAiConfigured } from "@/lib/newsApiConfigured";
+import { readSessionCache, writeSessionCache } from "@/lib/newsSessionCache";
+import { readPersistentCache, writePersistentCache } from "@/lib/newsPersistentCache";
 import { DashboardMode } from "@/components/dashboard/DashboardLayout";
 
 interface CacheEntry {
@@ -17,10 +20,13 @@ interface CacheEntry {
 
 const CACHE_DURATION = 60 * 60 * 1000;
 const cache = new Map<string, CacheEntry>();
-const BUSINESS_ARTICLES_PER_PAGE = 15;
-const BUSINESS_PAGES = 2;
-const GENZ_ARTICLES_PER_PAGE = 10;
-const GENZ_PAGES = 2;
+/** Process this many countries at a time to avoid rate limits and flaky partial responses. */
+const COUNTRY_FETCH_CHUNK = 3;
+const BUSINESS_ARTICLES_PER_PAGE = 6;
+const BUSINESS_PAGES = 1;
+const GENZ_ARTICLES_PER_PAGE = 4;
+const GENZ_PAGES = 1;
+const MAX_COUNTRIES_PER_REFRESH = 10;
 const COUNTRY_CODES: Record<string, string> = {
   "United States of America": "us",
   "United Kingdom": "gb",
@@ -78,6 +84,28 @@ const NEWS_COUNTRIES = WORLD_CITIES
   }))
   .filter((country, index, arr) => arr.findIndex((item) => item.name === country.name) === index);
 
+function stableCountryOrder(list: typeof NEWS_COUNTRIES): typeof NEWS_COUNTRIES {
+  return [...list].sort((a, b) => a.name.localeCompare(b.name));
+}
+
+function getFetchCountries(): typeof NEWS_COUNTRIES {
+  const ordered = stableCountryOrder(NEWS_COUNTRIES);
+  const dayBucket = Math.floor(Date.now() / (24 * 60 * 60 * 1000));
+  const offset = ordered.length > 0 ? dayBucket % ordered.length : 0;
+  const rotated = ordered.slice(offset).concat(ordered.slice(0, offset));
+  return rotated.slice(0, Math.min(MAX_COUNTRIES_PER_REFRESH, rotated.length));
+}
+
+function newsApiKeyFingerprint(): string {
+  const key = (import.meta.env.VITE_NEWSAPI_AI_KEY as string | undefined)?.trim() || "";
+  if (!key) return "nokey";
+  let hash = 5381;
+  for (let i = 0; i < key.length; i++) {
+    hash = ((hash << 5) + hash) ^ key.charCodeAt(i);
+  }
+  return Math.abs(hash >>> 0).toString(36);
+}
+
 function jitter(coords: [number, number], index: number, offset = 0): [number, number] {
   const seed = index + offset * 7;
   const angle = (seed * 137.5) * (Math.PI / 180);
@@ -85,22 +113,32 @@ function jitter(coords: [number, number], index: number, offset = 0): [number, n
   return [coords[0] + r * Math.cos(angle), coords[1] + r * Math.sin(angle)];
 }
 
+/** One retry after a short wait when the API looks rate-limited. */
+async function invokeNewsFeedResilient(body: NewsFeedRequestBody) {
+  let res = await invokeNewsFeed(body);
+  const err = String(res.data?.error ?? "");
+  const looksRateLimited = /429|rate|too many|quota|limit exceeded|throttl/i.test(err);
+  if (looksRateLimited && (!res.data?.articles?.length)) {
+    await new Promise((r) => setTimeout(r, 750));
+    res = await invokeNewsFeed(body);
+  }
+  return res;
+}
+
 async function fetchPagedArticles(
   type: "business" | "genz",
   country: { code: string; name: string },
   pageSize: number,
   pages: number,
-) {
+): Promise<any[]> {
   const responses = await Promise.all(
     Array.from({ length: pages }, (_, pageIndex) =>
-      supabase.functions.invoke("news-feed", {
-        body: {
-          type,
-          countryCode: country.code,
-          countryName: country.name,
-          pageSize,
-          page: pageIndex + 1,
-        },
+      invokeNewsFeedResilient({
+        type,
+        countryCode: country.code,
+        countryName: country.name,
+        pageSize,
+        page: pageIndex + 1,
       }),
     ),
   );
@@ -119,6 +157,18 @@ async function fetchPagedArticles(
   });
 
   return articles;
+}
+
+function dedupeSignalsByArticleUrl(signals: UnifiedSignal[]): UnifiedSignal[] {
+  const seen = new Set<string>();
+  const out: UnifiedSignal[] = [];
+  for (const s of signals) {
+    const key = (s.articleUrl && s.articleUrl !== "#" ? s.articleUrl : s.id) || s.id;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(s);
+  }
+  return out;
 }
 
 /**
@@ -183,8 +233,9 @@ export function useUnifiedSignals(
   // Seed signals with dynamic scores, re-scored when company changes
   const seedSignals = useMemo(() => seedToUnified(selectedCompany), [selectedCompany]);
 
-  // Filter seeds by active domains/categories
+  // Static demo seeds — omitted when NewsAPI.ai is configured (live news only)
   const filteredSeeds = useMemo(() => {
+    if (isNewsApiAiConfigured()) return [];
     return seedSignals.filter(s => {
       if (s.layer === "resilience" && s.domain) return activeDomains.includes(s.domain);
       if (s.layer === "genz" && s.category) return activeCategories.includes(s.category);
@@ -197,10 +248,29 @@ export function useUnifiedSignals(
     if (fetchedRef.current) return;
     fetchedRef.current = true;
 
-    const cacheKey = `unified-live`;
+    const apiKeySuffix = isNewsApiAiConfigured() ? newsApiKeyFingerprint() : "seed";
+    const cacheKey = `unified-live-${isNewsApiAiConfigured() ? "api-v4-article-meta" : "seed"}-${apiKeySuffix}`;
+    const sharedApiCacheKey = "unified-live-api-v4-article-meta-shared";
     const cached = cache.get(cacheKey);
     if (cached && Date.now() - cached.timestamp < CACHE_DURATION) {
       setLiveSignals(cached.signals);
+      setIsLive(true);
+      setLoading(false);
+      return;
+    }
+
+    const persistentEntry = readPersistentCache<UnifiedSignal[]>(cacheKey);
+    if (persistentEntry?.data?.length) {
+      cache.set(cacheKey, { signals: persistentEntry.data, timestamp: persistentEntry.savedAt });
+      setLiveSignals(persistentEntry.data);
+      setIsLive(true);
+      setLoading(false);
+      return;
+    }
+    const sharedPersistentEntry = readPersistentCache<UnifiedSignal[]>(sharedApiCacheKey);
+    if (sharedPersistentEntry?.data?.length) {
+      cache.set(cacheKey, { signals: sharedPersistentEntry.data, timestamp: sharedPersistentEntry.savedAt });
+      setLiveSignals(sharedPersistentEntry.data);
       setIsLive(true);
       setLoading(false);
       return;
@@ -210,13 +280,15 @@ export function useUnifiedSignals(
       const results: UnifiedSignal[] = [];
       let gotLive = false;
 
-      // Fetch substantially larger business + Gen Z batches so the map can render well over 100 live signals.
-      const promises = NEWS_COUNTRIES.flatMap((country, ci) => {
-        const biz = fetchPagedArticles("business", country, BUSINESS_ARTICLES_PER_PAGE, BUSINESS_PAGES)
-        .then((articles) => {
-          if (articles.length > 0) {
-            gotLive = true;
-            return articles.map((a: any, i: number) => {
+      const fetchCountries = getFetchCountries();
+      for (let ci = 0; ci < fetchCountries.length; ci++) {
+        const country = fetchCountries[ci];
+        const bizArticles = await fetchPagedArticles("business", country, BUSINESS_ARTICLES_PER_PAGE, BUSINESS_PAGES)
+          .catch(() => [] as any[]);
+        if (bizArticles.length > 0) {
+          gotLive = true;
+          results.push(
+            ...bizArticles.map((a: any, i: number) => {
               const score = calculateResilienceScore({
                 title: a.title || "", description: a.description || "",
                 source: a.source, date: a.date, companyId: selectedCompany,
@@ -231,21 +303,24 @@ export function useUnifiedSignals(
                 resilienceScore: score.total,
                 urgency: scoreToUrgency(score.total),
                 source: a.source,
+                author: a.author,
                 articleUrl: a.url,
                 articleContent: a.content,
                 date: a.date,
                 isJapan: country.code === "jp",
               } as UnifiedSignal;
-            });
-          }
-          return [];
-        }).catch(() => [] as UnifiedSignal[]);
+            }),
+          );
+        }
 
-        const gz = fetchPagedArticles("genz", country, GENZ_ARTICLES_PER_PAGE, GENZ_PAGES)
-        .then((articles) => {
-          if (articles.length > 0) {
-            gotLive = true;
-            return articles.map((a: any, i: number) => {
+        await new Promise((r) => setTimeout(r, 120));
+
+        const gzArticles = await fetchPagedArticles("genz", country, GENZ_ARTICLES_PER_PAGE, GENZ_PAGES)
+          .catch(() => [] as any[]);
+        if (gzArticles.length > 0) {
+          gotLive = true;
+          results.push(
+            ...gzArticles.map((a: any, i: number) => {
               const score = calculateResilienceScore({
                 title: a.title || "", description: a.description || "",
                 source: a.source, date: a.date, companyId: selectedCompany,
@@ -261,26 +336,57 @@ export function useUnifiedSignals(
                 resilienceScore: score.total,
                 urgency: scoreToUrgency(score.total),
                 source: a.source,
+                author: a.author,
                 articleUrl: a.url,
                 articleContent: a.content,
                 date: a.date,
                 isJapan: country.code === "jp",
               } as UnifiedSignal;
-            });
-          }
-          return [];
-        }).catch(() => [] as UnifiedSignal[]);
+            }),
+          );
+        }
 
-        return [biz, gz];
+        await new Promise((r) => setTimeout(r, 120));
+      }
+
+      const merged = dedupeSignalsByArticleUrl(results);
+      merged.sort((a, b) => {
+        if (b.resilienceScore !== a.resilienceScore) return b.resilienceScore - a.resilienceScore;
+        return a.id.localeCompare(b.id);
       });
 
-      const allResults = await Promise.all(promises);
-      allResults.forEach(r => results.push(...r));
-
-      if (gotLive && results.length > 0) {
-        cache.set(cacheKey, { signals: results, timestamp: Date.now() });
-        setLiveSignals(results);
+      if (gotLive && merged.length > 0) {
+        const now = Date.now();
+        cache.set(cacheKey, { signals: merged, timestamp: now });
+        writeSessionCache(cacheKey, merged);
+        writePersistentCache(cacheKey, merged);
+        writePersistentCache(sharedApiCacheKey, merged);
+        setLiveSignals(merged);
         setIsLive(true);
+      } else if (isNewsApiAiConfigured()) {
+        const persistentFallback = readPersistentCache<UnifiedSignal[]>(cacheKey);
+        if (persistentFallback?.data?.length) {
+          setLiveSignals(persistentFallback.data);
+          setIsLive(true);
+        } else {
+          const sharedPersistentFallback = readPersistentCache<UnifiedSignal[]>(sharedApiCacheKey);
+          if (sharedPersistentFallback?.data?.length) {
+            setLiveSignals(sharedPersistentFallback.data);
+            setIsLive(true);
+          } else {
+          const sessionFallback = readSessionCache<UnifiedSignal[]>(cacheKey);
+          if (sessionFallback?.data?.length) {
+            setLiveSignals(sessionFallback.data);
+            setIsLive(true);
+          } else {
+            const snap = cache.get(cacheKey);
+            if (snap?.signals?.length) {
+              setLiveSignals(snap.signals);
+              setIsLive(true);
+            }
+          }
+        }
+        }
       }
       setLoading(false);
     };
@@ -288,12 +394,37 @@ export function useUnifiedSignals(
     fetchAll();
   }, []);
 
+  /**
+   * Live articles are fetched with generic NewsAPI.ai queries (not company-filtered).
+   * Company “curation” is scoring via {@link calculateResilienceScore} (keywords, etc.).
+   * Re-score whenever the selected company changes — fetch only ran once with initial company.
+   */
+  const liveSignalsForCompany = useMemo(() => {
+    return liveSignals.map((s) => {
+      if (s.layer !== "live-news") return s;
+      const score = calculateResilienceScore({
+        title: s.title,
+        description: s.description,
+        source: s.source,
+        date: s.date,
+        domain: s.domain,
+        category: s.category,
+        companyId: selectedCompany,
+      });
+      return {
+        ...s,
+        resilienceScore: score.total,
+        urgency: scoreToUrgency(score.total),
+      };
+    });
+  }, [liveSignals, selectedCompany]);
+
   // Merge seeds + live, sorted by score descending
   const allSignals = useMemo(() => {
-    const merged = [...filteredSeeds, ...liveSignals];
+    const merged = [...filteredSeeds, ...liveSignalsForCompany];
     merged.sort((a, b) => b.resilienceScore - a.resilienceScore);
     return merged;
-  }, [filteredSeeds, liveSignals]);
+  }, [filteredSeeds, liveSignalsForCompany]);
 
   return { signals: allSignals, loading, isLive, seedSignals };
 }

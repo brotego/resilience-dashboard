@@ -1,6 +1,6 @@
 import AIInsightPanel from "@/components/dashboard/AIInsightPanel";
 import { Button } from "@/components/ui/button";
-import { CompanyId } from "@/data/companies";
+import { COMPANIES, CompanyId } from "@/data/companies";
 import { DomainId, MindsetId } from "@/data/types";
 import { UnifiedSignal } from "@/data/unifiedSignalTypes";
 import { GenZCategoryId } from "@/data/genzTypes";
@@ -9,7 +9,10 @@ import { useLang } from "@/i18n/LanguageContext";
 import { ExternalLink } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
-import { supabase } from "@/integrations/supabase/client";
+import { ArticleStoryMeta } from "@/components/dashboard/ArticleStoryMeta";
+import { invokeArticleContent } from "@/api/articleContent";
+import { splitArticleIntoParagraphs } from "@/lib/formatArticleBody";
+import { looksLikeHtmlChromeDump, sanitizeNewsArticleText } from "@/lib/articleTextCleanup";
 
 type SignalDetailState = {
   signal?: UnifiedSignal;
@@ -29,7 +32,8 @@ function normalizeArticleContent(content?: string): string {
 const SignalDetail = () => {
   const { t, lang, setLang } = useLang();
   const navigate = useNavigate();
-  const { id } = useParams();
+  const { id: idParam } = useParams();
+  const id = idParam ? decodeURIComponent(idParam) : undefined;
   const { state } = useLocation() as { state: SignalDetailState | null };
 
   const signal = state?.signal ?? null;
@@ -54,22 +58,39 @@ const SignalDetail = () => {
     );
   }
 
-  const articleContent = normalizeArticleContent(signal.articleContent);
-  const effectiveContent = articleContent || fetchedContent;
-  const hasArticleContent = effectiveContent.length > 0;
+  const articleSanitizeOpts = { author: signal.author };
+  const snippetContent = sanitizeNewsArticleText(
+    normalizeArticleContent(signal.articleContent),
+    articleSanitizeOpts,
+  );
+  const fetchedClean = sanitizeNewsArticleText(fetchedContent, articleSanitizeOpts);
+  const fetchedUseful = fetchedClean.length > 0 && !looksLikeHtmlChromeDump(fetchedClean);
+  const effectiveContent = fetchedUseful
+    ? fetchedClean.length >= snippetContent.length
+      ? fetchedClean
+      : snippetContent || fetchedClean
+    : snippetContent || fetchedClean;
+  const articleParagraphs = splitArticleIntoParagraphs(effectiveContent);
+  const hasArticleContent = articleParagraphs.length > 0;
   const hasExternalUrl = Boolean(signal.articleUrl && signal.articleUrl !== "#");
   const originTab = state?.originTab ?? "dashboard";
   const originMode = state?.originMode ?? "resilience";
+  const curationCompanyName = state?.selectedCompany
+    ? COMPANIES.find((c) => c.id === state.selectedCompany)?.name
+    : undefined;
+
+  useEffect(() => {
+    setFetchedContent("");
+  }, [signal?.id]);
 
   useEffect(() => {
     const url = signal?.articleUrl;
-    if (!signal || articleContent || !url || url === "#") return;
+    if (!signal || !url || url === "#") return;
 
     let cancelled = false;
     setLoadingContent(true);
 
-    supabase.functions
-      .invoke("article-content", { body: { url } })
+    invokeArticleContent({ url })
       .then(({ data, error }) => {
         if (cancelled) return;
         if (!error && data?.content) {
@@ -83,7 +104,7 @@ const SignalDetail = () => {
     return () => {
       cancelled = true;
     };
-  }, [signal?.articleUrl, articleContent, signal?.id]);
+  }, [signal?.articleUrl, signal?.id]);
 
   useEffect(() => {
     const timer = setInterval(() => setNow(new Date()), 1000);
@@ -162,9 +183,28 @@ const SignalDetail = () => {
             <p className="text-sm font-semibold mt-1">{signal.title}</p>
           </div>
 
+          <ArticleStoryMeta
+            curationCompanyName={curationCompanyName}
+            publishedAt={signal.date}
+            author={signal.author}
+            source={signal.source}
+            location={signal.location}
+            locale={t("clock.locale")}
+            lang={lang}
+          />
+
           {hasArticleContent ? (
             <div className="space-y-4">
-              <p className="text-sm leading-6 text-foreground/90 whitespace-pre-wrap">{effectiveContent}</p>
+              {loadingContent && !fetchedContent && hasExternalUrl && (
+                <p className="text-xs text-muted-foreground">
+                  {lang === "jp" ? "全文を読み込み中…" : "Loading full article text…"}
+                </p>
+              )}
+              <div className="prose prose-sm dark:prose-invert max-w-none text-foreground/90 prose-p:leading-relaxed">
+                {articleParagraphs.map((para, i) => (
+                  <p key={i}>{para}</p>
+                ))}
+              </div>
               {hasExternalUrl && (
                 <a href={signal.articleUrl} target="_blank" rel="noreferrer">
                   <Button variant="outline" className="gap-2">

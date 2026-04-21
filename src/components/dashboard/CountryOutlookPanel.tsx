@@ -12,7 +12,8 @@ import { DashboardMode } from "./DashboardLayout";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import NewsFeedSection from "./NewsFeedSection";
 import { useLang } from "@/i18n/LanguageContext";
-import { supabase } from "@/integrations/supabase/client";
+import { invokeNewsFeed } from "@/api/newsFeed";
+import { isNewsApiAiConfigured } from "@/lib/newsApiConfigured";
 
 interface Props {
   countryName: string;
@@ -233,8 +234,9 @@ const CountryOutlookPanel = ({ countryName, mode, selectedCompany, onClose, onSi
   const matchNames = findAllMatchingCountryNames(countryName);
   const matchSignal = (location: string) => matchNames.some((name) => matchesCountry(location, name));
 
-  const resilienceSignals = SIGNALS.filter((s) => matchSignal(s.location));
-  const genzSignals = GENZ_SIGNALS.filter((s) => matchSignal(s.location));
+  const useStaticDemoSignals = !isNewsApiAiConfigured();
+  const resilienceSignals = useStaticDemoSignals ? SIGNALS.filter((s) => matchSignal(s.location)) : [];
+  const genzSignals = useStaticDemoSignals ? GENZ_SIGNALS.filter((s) => matchSignal(s.location)) : [];
   const allSignals = [...resilienceSignals, ...genzSignals];
 
   const score = RESILIENCE_SCORES[countryName] ?? Math.floor(Math.random() * 40 + 30);
@@ -279,24 +281,20 @@ const CountryOutlookPanel = ({ countryName, mode, selectedCompany, onClose, onSi
 
     Promise.all([
       companyQuery
-        ? supabase.functions.invoke("news-feed", {
-            body: {
-              type: "sentiment",
-              countryCode,
-              countryName,
-              topicQuery: companyQuery,
-              pageSize: 6,
-            },
+        ? invokeNewsFeed({
+            type: "sentiment",
+            countryCode,
+            countryName,
+            topicQuery: companyQuery,
+            pageSize: 6,
           })
-        : Promise.resolve({ data: { articles: [] } }),
-      supabase.functions.invoke("news-feed", {
-        body: {
-          type: "sentiment",
-          countryCode,
-          countryName,
-          topicQuery: japanQuery,
-          pageSize: 6,
-        },
+        : Promise.resolve({ data: { articles: [] }, error: null }),
+      invokeNewsFeed({
+        type: "sentiment",
+        countryCode,
+        countryName,
+        topicQuery: japanQuery,
+        pageSize: 6,
       }),
     ]).then(([companyData, japanData]) => {
       if (cancelled) return;

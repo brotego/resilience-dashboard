@@ -7,7 +7,7 @@ import { GENZ_CATEGORIES } from "@/data/genzCategories";
 import { COMPANIES, CompanyId } from "@/data/companies";
 import { UnifiedSignal } from "@/data/unifiedSignalTypes";
 import { DashboardMode } from "./DashboardLayout";
-import { supabase } from "@/integrations/supabase/client";
+import { invokeAiInsight } from "@/api/aiInsight";
 import { calculateResilienceScore } from "@/lib/resilienceScore";
 import { useLang } from "@/i18n/LanguageContext";
 
@@ -178,21 +178,22 @@ const AIInsightPanel = ({
     setError(null);
     setInsight(null);
 
-    supabase.functions
-      .invoke("ai-insight", {
-        body: {
-          signalTitle: selectedSignal.title,
-          signalDescription: selectedSignal.description,
-          signalLocation: selectedSignal.location,
-          signalDomain: domainOrCategory?.label || "",
-          company: selectedCompany || null,
-          language: lang,
-        },
+    invokeAiInsight({
+        signalTitle: selectedSignal.title,
+        signalDescription: selectedSignal.description,
+        signalLocation: selectedSignal.location,
+        signalDomain: domainOrCategory?.label || "",
+        company: selectedCompany || null,
+        language: lang,
       })
       .then(({ data, error: fnError }) => {
         if (fnError) { setError(lang === "jp" ? "インサイトの生成に失敗しました" : "Failed to generate insight"); }
         else if (data?.error) { setError(data.error); }
-        else { setInsight(data as AIInsight); }
+        else if (data) { setInsight(data as AIInsight); }
+        setLoading(false);
+      })
+      .catch(() => {
+        setError(lang === "jp" ? "インサイトの生成に失敗しました" : "Failed to generate insight");
         setLoading(false);
       });
   }, [selectedSignal?.id, selectedCompany, lang]);

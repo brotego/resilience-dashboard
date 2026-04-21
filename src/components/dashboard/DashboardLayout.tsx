@@ -9,6 +9,7 @@ import CompanySelector from "./CompanySelector";
 import AIInsightPanel from "./AIInsightPanel";
 import CountryOutlookPanel from "./CountryOutlookPanel";
 import GlobalMap from "./GlobalMap";
+import GlobeMap from "./GlobeMap";
 import CompanyDashboard from "./CompanyDashboard";
 import { useUnifiedSignals } from "@/hooks/useUnifiedSignals";
 import { useLang } from "@/i18n/LanguageContext";
@@ -17,6 +18,7 @@ import { useLocation, useNavigate } from "react-router-dom";
 
 export type DashboardMode = "resilience" | "genz";
 export type ViewTab = "dashboard" | "map";
+type MapView = "map2d" | "globe3d";
 const READ_SIGNALS_STORAGE_KEY = "read-signal-ids";
 
 const LiveClock = () => {
@@ -48,6 +50,7 @@ const DashboardLayout = () => {
   const [selectedCompany, setSelectedCompany] = useState<CompanyId | null>("mori_building");
   const [selectedSignal, setSelectedSignal] = useState<UnifiedSignal | null>(null);
   const [selectedCountry, setSelectedCountry] = useState<string | null>(null);
+  const [mapView, setMapView] = useState<MapView>("map2d");
   const [readSignalIds, setReadSignalIds] = useState<string[]>(() => {
     try {
       const raw = localStorage.getItem(READ_SIGNALS_STORAGE_KEY);
@@ -124,7 +127,8 @@ const DashboardLayout = () => {
   }, [readSignalIds]);
 
   const handleMoreInfo = useCallback((signal: UnifiedSignal) => {
-    navigate(`/signal/${signal.id}`, {
+    // IDs can contain URLs (slashes); must be one path segment or the route becomes /signal/* / * → 404
+    navigate(`/signal/${encodeURIComponent(signal.id)}`, {
       state: {
         signal,
         mode,
@@ -261,19 +265,31 @@ const DashboardLayout = () => {
       ) : (
         <div className="flex-1 flex overflow-hidden relative">
           <div className="flex-1 relative">
-            <GlobalMap
-              mode={mode}
-              activeDomains={activeDomains}
-              activeMindset={activeMindset}
-              activeCategories={activeCategories}
-              selectedCompany={selectedCompany}
-              onSignalClick={handleSignalClick}
-              onCountryClick={handleCountryClick}
-              selectedSignalId={selectedSignal?.id || null}
-              readSignalIds={readSignalIds}
-              selectedCountry={selectedCountry}
-              signals={visibleSignals}
-            />
+            {mapView === "map2d" ? (
+              <GlobalMap
+                mode={mode}
+                activeDomains={activeDomains}
+                activeMindset={activeMindset}
+                activeCategories={activeCategories}
+                selectedCompany={selectedCompany}
+                onSignalClick={handleSignalClick}
+                onCountryClick={handleCountryClick}
+                selectedSignalId={selectedSignal?.id || null}
+                readSignalIds={readSignalIds}
+                selectedCountry={selectedCountry}
+                signals={visibleSignals}
+              />
+            ) : (
+              <GlobeMap
+                signals={visibleSignals}
+                selectedCompany={selectedCompany}
+                selectedSignalId={selectedSignal?.id || null}
+                readSignalIds={readSignalIds}
+                onSignalClick={handleSignalClick}
+                onCountryClick={handleCountryClick}
+                selectedCountry={selectedCountry}
+              />
+            )}
 
             {/* Bottom-left floating domain/category selector */}
             <div className="absolute bottom-3 left-3 z-10 bg-[rgba(6,10,12,0.85)] backdrop-blur-lg border border-border rounded-sm p-2">
@@ -282,6 +298,24 @@ const DashboardLayout = () => {
               ) : (
                 <GenZCategorySelector activeCategories={activeCategories} onToggle={toggleCategory} />
               )}
+            </div>
+            <div className="absolute top-3 right-3 z-10 bg-[rgba(6,10,12,0.85)] backdrop-blur-lg border border-border rounded-sm p-1 flex gap-1">
+              <button
+                onClick={() => setMapView("map2d")}
+                className={`px-2 py-1 text-[9px] font-mono font-semibold uppercase tracking-wider rounded-sm transition-colors ${
+                  mapView === "map2d" ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground"
+                }`}
+              >
+                2D
+              </button>
+              <button
+                onClick={() => setMapView("globe3d")}
+                className={`px-2 py-1 text-[9px] font-mono font-semibold uppercase tracking-wider rounded-sm transition-colors ${
+                  mapView === "globe3d" ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground"
+                }`}
+              >
+                3D
+              </button>
             </div>
           </div>
 

@@ -5,7 +5,7 @@ import { UnifiedSignal } from "@/data/unifiedSignalTypes";
 import { calculateResilienceScore } from "@/lib/resilienceScore";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { useLang } from "@/i18n/LanguageContext";
-import { supabase } from "@/integrations/supabase/client";
+import { invokeNewsFeed } from "@/api/newsFeed";
 import { ChevronDown, ChevronUp, ArrowRight } from "lucide-react";
 
 type TimeFilter = "24h" | "7d" | "30d";
@@ -196,12 +196,8 @@ const CompanyDashboard = ({ selectedCompany, signals, onSignalClick }: Props) =>
     setSentimentLoading(true);
 
     Promise.all([
-      supabase.functions.invoke("news-feed", {
-        body: { type: "sentiment", topicQuery: companyQuery, pageSize: 8 },
-      }),
-      supabase.functions.invoke("news-feed", {
-        body: { type: "sentiment", topicQuery: japanQuery, pageSize: 8 },
-      }),
+      invokeNewsFeed({ type: "sentiment", topicQuery: companyQuery, pageSize: 8 }),
+      invokeNewsFeed({ type: "sentiment", topicQuery: japanQuery, pageSize: 8 }),
     ])
       .then(([companyData, japanData]) => {
         if (cancelled) return;

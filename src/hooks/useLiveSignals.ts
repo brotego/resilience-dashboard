@@ -1,5 +1,7 @@
 import { useState, useEffect, useRef } from "react";
-import { supabase } from "@/integrations/supabase/client";
+import { invokeNewsFeed } from "@/api/newsFeed";
+import { isNewsApiAiConfigured } from "@/lib/newsApiConfigured";
+import { readSessionCache, writeSessionCache } from "@/lib/newsSessionCache";
 import { DomainId, ResilienceSignal } from "@/data/types";
 import { SIGNALS } from "@/data/signals";
 
@@ -11,7 +13,7 @@ interface CacheEntry {
 const CACHE_DURATION = 60 * 60 * 1000; // 1 hour
 const cache = new Map<string, CacheEntry>();
 
-// Countries to fetch TheNewsAPI domain coverage from, with map coordinates.
+// Countries to fetch live domain news from, with map coordinates.
 const NEWS_COUNTRIES: { code: string; name: string; coords: [number, number] }[] = [
   { code: "us", name: "United States of America", coords: [-98, 39] },
   { code: "gb", name: "United Kingdom", coords: [-0.12, 51.51] },
@@ -35,14 +37,11 @@ function jitter(coords: [number, number], index: number, domainIndex: number): [
 }
 
 /**
- * Fetches live news from TheNewsAPI for each active domain across multiple countries.
- * Returns ResilienceSignal[] that can be rendered as map dots.
- * Falls back to hardcoded SIGNALS if API is unavailable.
+ * Fetches live news (NewsAPI.ai) for each active domain across multiple countries.
+ * With VITE_NEWSAPI_AI_KEY set, does not fall back to hardcoded SIGNALS.
  */
 export function useLiveSignals(activeDomains: DomainId[]) {
-  const [signals, setSignals] = useState<ResilienceSignal[]>(
-    SIGNALS.filter((s) => activeDomains.includes(s.domain))
-  );
+  const [signals, setSignals] = useState<ResilienceSignal[]>([]);
   const [loading, setLoading] = useState(true);
   const [isLive, setIsLive] = useState(false);
   const prevDomainsRef = useRef<string>("");
@@ -55,8 +54,8 @@ export function useLiveSignals(activeDomains: DomainId[]) {
       return;
     }
 
-    // Check cache
-    const cached = cache.get(domainKey);
+    const cacheMapKey = `${isNewsApiAiConfigured() ? "api" : "seed"}:${domainKey}`;
+    const cached = cache.get(cacheMapKey);
     if (cached && Date.now() - cached.timestamp < CACHE_DURATION) {
       setSignals(cached.signals);
       setIsLive(true);
@@ -64,12 +63,23 @@ export function useLiveSignals(activeDomains: DomainId[]) {
       return;
     }
 
+    const sessionEntry = readSessionCache<ResilienceSignal[]>(cacheMapKey);
+    if (sessionEntry?.data?.length) {
+      cache.set(cacheMapKey, { signals: sessionEntry.data, timestamp: sessionEntry.savedAt });
+      setSignals(sessionEntry.data);
+      setIsLive(true);
+      setLoading(false);
+    }
+
     // If domains haven't changed and we already have live data, skip
     if (domainKey === prevDomainsRef.current && isLive) return;
     prevDomainsRef.current = domainKey;
 
-    // Show hardcoded signals immediately while loading
-    setSignals(SIGNALS.filter((s) => activeDomains.includes(s.domain)));
+    if (isNewsApiAiConfigured()) {
+      setSignals([]);
+    } else {
+      setSignals(SIGNALS.filter((s) => activeDomains.includes(s.domain)));
+    }
     setLoading(true);
 
     const fetchDomainNews = async () => {
@@ -82,8 +92,12 @@ export function useLiveSignals(activeDomains: DomainId[]) {
         const countries = NEWS_COUNTRIES;
         return countries.map(async (country) => {
           try {
-            const { data } = await supabase.functions.invoke("news-feed", {
-              body: { type: "domain", domain, countryCode: country.code, countryName: country.name, pageSize: 3 },
+            const { data } = await invokeNewsFeed({
+              type: "domain",
+              domain,
+              countryCode: country.code,
+              countryName: country.name,
+              pageSize: 3,
             });
 
             if (data?.articles && !data?.fallback && data.articles.length > 0) {
@@ -118,11 +132,21 @@ export function useLiveSignals(activeDomains: DomainId[]) {
       results.forEach((r) => allSignals.push(...r));
 
       if (gotLiveData && allSignals.length > 0) {
-        cache.set(domainKey, { signals: allSignals, timestamp: Date.now() });
+        const now = Date.now();
+        cache.set(cacheMapKey, { signals: allSignals, timestamp: now });
+        writeSessionCache(cacheMapKey, allSignals);
         setSignals(allSignals);
         setIsLive(true);
+      } else if (isNewsApiAiConfigured()) {
+        const snap = cache.get(cacheMapKey);
+        if (snap?.signals?.length) {
+          setSignals(snap.signals);
+          setIsLive(true);
+        } else {
+          setSignals([]);
+          setIsLive(false);
+        }
       } else {
-        // Keep hardcoded fallback
         setSignals(SIGNALS.filter((s) => activeDomains.includes(s.domain)));
         setIsLive(false);
       }
