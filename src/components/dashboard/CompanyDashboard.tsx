@@ -3,7 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { translateJapaneseArticleRows } from "@/api/translateJapaneseUi";
 import { useJpUi } from "@/i18n/jpUiContext";
 import { getCompanyDisplayName, getCompanyDisplaySector } from "@/i18n/companyLocale";
-import { COMPANIES, CompanyId } from "@/data/companies";
+import { COMPANIES, CompanyId, formatCompanyContextForAi } from "@/data/companies";
 import { COMPANY_DASHBOARD_DATA } from "@/data/companyDashboardData";
 import { UnifiedSignal } from "@/data/unifiedSignalTypes";
 import { calculateResilienceScore } from "@/lib/resilienceScore";
@@ -125,6 +125,7 @@ const CompanyDashboard = ({ selectedCompany, signals, onSignalClick }: Props) =>
 
   const companyId = selectedCompany || "mori_building";
   const company = COMPANIES.find(c => c.id === companyId)!;
+  const companyAiContext = useMemo(() => formatCompanyContextForAi(company.intel), [company.id]);
   const dashData = COMPANY_DASHBOARD_DATA[companyId];
 
   // Filter and sort signals
@@ -395,6 +396,7 @@ const CompanyDashboard = ({ selectedCompany, signals, onSignalClick }: Props) =>
               lens: "company",
               company: company.name,
               industry: company.sector,
+              companyContext: companyAiContext,
               language: lang,
               articles: companyArticles.map((a) => ({
                 id: a.id,
@@ -490,6 +492,7 @@ const CompanyDashboard = ({ selectedCompany, signals, onSignalClick }: Props) =>
                   lens: "company",
                   company: company.name,
                   industry: company.sector,
+                  companyContext: companyAiContext,
                   language: lang,
                   articles: coInputs,
                 }),
@@ -535,7 +538,7 @@ const CompanyDashboard = ({ selectedCompany, signals, onSignalClick }: Props) =>
     return () => {
       cancelled = true;
     };
-  }, [company.id, lang]);
+  }, [company.id, companyAiContext, lang]);
 
   const newsletterCandidates = useMemo(
     () =>
@@ -566,6 +569,7 @@ const CompanyDashboard = ({ selectedCompany, signals, onSignalClick }: Props) =>
     invokeCompanyNewsletter({
       company: company.name,
       industry: company.sector,
+      companyContext: companyAiContext,
       language: lang,
       signals: newsletterCandidates,
     })
@@ -641,7 +645,7 @@ const CompanyDashboard = ({ selectedCompany, signals, onSignalClick }: Props) =>
     return () => {
       cancelled = true;
     };
-  }, [company.id, company.name, company.sector, lang, newsletterCandidatesKey]);
+  }, [company.id, company.name, company.sector, companyAiContext, lang, newsletterCandidatesKey]);
 
   return (
     <ScrollArea className="h-full">

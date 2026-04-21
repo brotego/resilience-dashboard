@@ -67,6 +67,26 @@ function clusterByProximity<T extends { id: string; coordinates: [number, number
   return [...groups.values()];
 }
 
+/**
+ * Signals that share the same map stack as the selected one (same proximity cluster as spreadCoincidentSignalPositions).
+ * Sorted by id to match the order used when spreading dots on the ring.
+ */
+export function getCoincidentSignalsForSelection<T extends { id: string; coordinates: [number, number] }>(
+  items: T[],
+  selectedId: string,
+  options?: { proximityMeters?: number },
+): { cluster: T[]; index: number } | null {
+  if (!items.length) return null;
+  const proximityMeters = options?.proximityMeters ?? 1_600;
+  const clusters = clusterByProximity(items, proximityMeters);
+  for (const group of clusters) {
+    const sorted = [...group].sort((a, b) => a.id.localeCompare(b.id));
+    const index = sorted.findIndex((s) => s.id === selectedId);
+    if (index >= 0) return { cluster: sorted, index };
+  }
+  return null;
+}
+
 function findContainingFeature(
   lng: number,
   lat: number,

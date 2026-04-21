@@ -360,6 +360,7 @@ const DashboardLayout = () => {
                 selectedSignal={selectedSignal}
                 onClose={handleClosePanel}
                 onMoreInfo={handleMoreInfo}
+                onSelectSignal={handleSignalClick}
                 showMoreInfoButton
                 signals={visibleSignals}
               />

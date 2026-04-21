@@ -3,7 +3,7 @@ import { useEffect, useMemo, useState } from "react";
 import { DOMAINS } from "@/data/domains";
 import { GENZ_CATEGORIES } from "@/data/genzCategories";
 import { COUNTRY_ALIASES } from "./GlobalMap";
-import { COMPANIES, CompanyId } from "@/data/companies";
+import { COMPANIES, CompanyId, formatCompanyContextForAi } from "@/data/companies";
 import { UnifiedSignal } from "@/data/unifiedSignalTypes";
 import { DashboardMode } from "./DashboardLayout";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -377,6 +377,7 @@ const CountryOutlookPanel = ({ countryName, mode, selectedCompany, signals, onCl
             company: company?.name || null,
             industry: company?.sector || null,
             countryName,
+            companyContext: company ? formatCompanyContextForAi(company.intel) : undefined,
             language: lang,
             articles: companyArticles.map((a) => ({
               id: a.id,

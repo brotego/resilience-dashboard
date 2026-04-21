@@ -1,10 +1,10 @@
-import { X, ChevronDown, ChevronUp, Loader2 } from "lucide-react";
+import { X, ChevronDown, ChevronUp, ChevronLeft, ChevronRight, Loader2 } from "lucide-react";
 import { useState, useEffect, useRef } from "react";
 import { DomainId, MindsetId } from "@/data/types";
 import { GenZCategoryId } from "@/data/genzTypes";
 import { DOMAINS } from "@/data/domains";
 import { GENZ_CATEGORIES } from "@/data/genzCategories";
-import { COMPANIES, CompanyId } from "@/data/companies";
+import { COMPANIES, CompanyId, formatCompanyContextForAi } from "@/data/companies";
 import { UnifiedSignal } from "@/data/unifiedSignalTypes";
 import { DashboardMode } from "./DashboardLayout";
 import { invokeAiInsight } from "@/api/aiInsight";
@@ -13,6 +13,7 @@ import { useLang } from "@/i18n/LanguageContext";
 import { useJpUi } from "@/i18n/jpUiContext";
 import { getCompanyDisplayName } from "@/i18n/companyLocale";
 import type { TranslationKey } from "@/i18n/translations";
+import { getCoincidentSignalsForSelection } from "./coincidentSignalPositions";
 
 interface AIInsight {
   urgency: string;
@@ -35,6 +36,8 @@ interface Props {
   selectedSignal: UnifiedSignal | null;
   onClose: () => void;
   onMoreInfo?: (signal: UnifiedSignal) => void;
+  /** When set with `signals`, prev/next step through the same map stack (coincident cluster). */
+  onSelectSignal?: (signal: UnifiedSignal) => void;
   showMoreInfoButton?: boolean;
   signals?: UnifiedSignal[];
 }
@@ -149,6 +152,7 @@ const AIInsightPanel = ({
   selectedSignal,
   onClose,
   onMoreInfo,
+  onSelectSignal,
   showMoreInfoButton = false,
   signals = [],
 }: Props) => {
@@ -163,6 +167,11 @@ const AIInsightPanel = ({
   const company = selectedCompany ? COMPANIES.find((c) => c.id === selectedCompany) : null;
   const isResilience = mode === "resilience";
   const modeLabel = isResilience ? t("panel.resilienceBrief") : t("panel.genzBrief");
+
+  const stackNav = selectedSignal
+    ? getCoincidentSignalsForSelection(signals, selectedSignal.id)
+    : null;
+  const canStackNavigate = Boolean(onSelectSignal && stackNav && stackNav.cluster.length > 1);
 
   useEffect(() => {
     if (!selectedSignal) {
@@ -203,6 +212,7 @@ const AIInsightPanel = ({
         signalLocation: sUi.location,
         signalDomain: domainOrCategoryLabel,
         company: companyForModel,
+        companyContext: company ? formatCompanyContextForAi(company.intel) : undefined,
         mode,
         language: lang,
       })
@@ -273,9 +283,41 @@ const AIInsightPanel = ({
             )}
             {insight?.patternTag && <Tag label={insight.patternTag} color="hsl(220, 14%, 30%)" />}
           </div>
-          <button onClick={onClose} className="text-muted-foreground hover:text-foreground transition-colors p-0.5 shrink-0">
-            <X className="h-3.5 w-3.5" />
-          </button>
+          <div className="flex items-center gap-0.5 shrink-0">
+            {canStackNavigate && stackNav && (
+              <>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const n = stackNav.cluster.length;
+                    const prev = stackNav.cluster[(stackNav.index - 1 + n) % n];
+                    onSelectSignal?.(prev);
+                  }}
+                  className="p-1 rounded-sm text-muted-foreground hover:text-foreground hover:bg-secondary transition-colors"
+                  aria-label={t("panel.prevStackedSignal")}
+                >
+                  <ChevronLeft className="h-4 w-4" />
+                </button>
+                <span className="text-[9px] font-mono tabular-nums text-muted-foreground px-0.5 min-w-[2.5rem] text-center">
+                  {stackNav.index + 1}/{stackNav.cluster.length}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const n = stackNav.cluster.length;
+                    onSelectSignal?.(stackNav.cluster[(stackNav.index + 1) % n]);
+                  }}
+                  className="p-1 rounded-sm text-muted-foreground hover:text-foreground hover:bg-secondary transition-colors"
+                  aria-label={t("panel.nextStackedSignal")}
+                >
+                  <ChevronRight className="h-4 w-4" />
+                </button>
+              </>
+            )}
+            <button onClick={onClose} className="text-muted-foreground hover:text-foreground transition-colors p-0.5">
+              <X className="h-3.5 w-3.5" />
+            </button>
+          </div>
         </div>
       </div>
 

@@ -122,6 +122,8 @@ const t = {
   "panel.insightFailed": { en: "Failed to generate insight", jp: "インサイトの生成に失敗しました" },
   "panel.articleSummary": { en: "Article summary", jp: "記事要約" },
   "panel.moreInfo": { en: "More info", jp: "詳細を見る" },
+  "panel.prevStackedSignal": { en: "Previous overlapping signal", jp: "重なる前のシグナル" },
+  "panel.nextStackedSignal": { en: "Next overlapping signal", jp: "重なる次のシグナル" },
   "panel.marginalSignal": { en: "Marginal signal", jp: "限定的シグナル" },
   "panel.companyFitSlider": { en: "Company fit", jp: "企業適合" },
   "panel.signalFallback": { en: "Signal", jp: "シグナル" },

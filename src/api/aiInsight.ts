@@ -2,12 +2,16 @@
  * AI insight panel. Uses Anthropic when `VITE_ANTHROPIC_API_KEY` is provided.
  */
 
+import { hashCompanyContextSnippet } from "@/data/companyIntel";
+
 export type AiInsightRequestBody = {
   signalTitle?: string;
   signalDescription?: string;
   signalLocation?: string;
   signalDomain?: string;
   company?: string | null;
+  /** Rich dossier text from formatCompanyContextForAi — improves tailoring vs name alone. */
+  companyContext?: string;
   mode?: "resilience" | "genz";
   language?: string;
 };
@@ -76,9 +80,9 @@ const AI_SENTIMENT_OPINION_CACHE_PREFIX = "rr.ai.sentiment.opinion.v1.";
 const AI_SENTIMENT_OPINION_MAX_AGE_MS = 6 * 60 * 60 * 1000;
 const AI_COUNTRY_INSIGHT_CACHE_PREFIX = "rr.ai.country.insight.v1.";
 const AI_COUNTRY_INSIGHT_MAX_AGE_MS = 6 * 60 * 60 * 1000;
-const AI_NEWSLETTER_CACHE_PREFIX = "rr.ai.newsletter.v3.";
+const AI_NEWSLETTER_CACHE_PREFIX = "rr.ai.newsletter.v4.";
 const AI_NEWSLETTER_CACHE_MAX_AGE_MS = 6 * 60 * 60 * 1000;
-const AI_SENTIMENT_SUMMARY_CACHE_PREFIX = "rr.ai.sentiment.summary.v1.";
+const AI_SENTIMENT_SUMMARY_CACHE_PREFIX = "rr.ai.sentiment.summary.v2.";
 const AI_SENTIMENT_SUMMARY_MAX_AGE_MS = 6 * 60 * 60 * 1000;
 
 function insightCacheKey(body: AiInsightRequestBody): string {
@@ -88,6 +92,7 @@ function insightCacheKey(body: AiInsightRequestBody): string {
     l: body.signalLocation || "",
     g: body.signalDomain || "",
     c: body.company || "",
+    cc: hashCompanyContextSnippet(body.companyContext ?? ""),
     lang: body.language || "en",
   });
 }
@@ -130,6 +135,7 @@ function sentimentCacheKey(params: {
   company?: string | null;
   industry?: string | null;
   countryName?: string | null;
+  companyContext?: string;
   language?: string;
   articles: SentimentArticleInput[];
 }): string {
@@ -138,6 +144,7 @@ function sentimentCacheKey(params: {
     company: params.company || "",
     industry: params.industry || "",
     country: params.countryName || "",
+    cc: hashCompanyContextSnippet(params.companyContext ?? ""),
     lang: params.language || "en",
     articles: params.articles.map((a) => ({
       id: a.id,
@@ -281,6 +288,8 @@ export async function invokeArticleSentimentBatch(params: {
   company?: string | null;
   industry?: string | null;
   countryName?: string | null;
+  /** Company lens only: helps judge relevance of headlines to the firm. */
+  companyContext?: string;
   language?: string;
   articles: SentimentArticleInput[];
 }): Promise<{ data: Record<string, ArticleSentiment> | null; error: Error | null }> {
@@ -299,13 +308,19 @@ export async function invokeArticleSentimentBatch(params: {
     : (jp
       ? `企業/業界関連の文脈だけで評価すること。企業: ${params.company || "N/A"} / 業界: ${params.industry || "N/A"}`
       : `Evaluate sentiment only through company/industry relevance. Company: ${params.company || "N/A"} / Industry: ${params.industry || "N/A"}`);
+  const dossierBlock =
+    params.lens === "company" && params.companyContext?.trim()
+      ? jp
+        ? `\n【参照ドシエ（この企業の事業・文脈）】\n${params.companyContext.trim()}\n`
+        : `\n[Company dossier for context]\n${params.companyContext.trim()}\n`
+      : "";
   const prompt = jp
     ? `以下の記事ごとに sentiment を判定してください。出力はJSONのみ。
 - 値は positive / mixed / negative のいずれか
 - 日本語や英語の見出しどちらでも判定
 - 推測しすぎず、内容が中立なら mixed
 - ${lensText}
-
+${dossierBlock}
 JSON形式:
 {"id1":"positive","id2":"mixed"}
 
@@ -315,7 +330,7 @@ ${articles.map((a) => `- id=${a.id}\n  title=${a.title}\n  description=${a.descr
 - Allowed values: positive, mixed, negative
 - If the article is neutral or ambiguous, use mixed
 - ${lensText}
-
+${dossierBlock}
 Output format:
 {"id1":"positive","id2":"mixed"}
 
@@ -514,6 +529,7 @@ function sentimentSectionSummaryCacheKey(params: {
   company?: string | null;
   industry?: string | null;
   countryName?: string | null;
+  companyContext?: string;
   language?: string;
   articles: SentimentSectionSummaryInput[];
 }): string {
@@ -522,6 +538,7 @@ function sentimentSectionSummaryCacheKey(params: {
     company: params.company || "",
     industry: params.industry || "",
     country: params.countryName || "",
+    cc: hashCompanyContextSnippet(params.companyContext ?? ""),
     lang: params.language || "en",
     articles: params.articles.map((a) => ({
       id: a.id,
@@ -577,6 +594,7 @@ export async function invokeSentimentSectionSummary(params: {
   company?: string | null;
   industry?: string | null;
   countryName?: string | null;
+  companyContext?: string;
   language?: string;
   articles: SentimentSectionSummaryInput[];
 }): Promise<{ data: { summary: string } | null; error: Error | null }> {
@@ -601,11 +619,18 @@ export async function invokeSentimentSectionSummary(params: {
     : (jp
       ? `レンズ: グローバル報道における企業「${params.company || "N/A"}」（業界: ${params.industry || "N/A"}）への論調`
       : `Lens: global media sentiment toward company ${params.company || "N/A"} (industry: ${params.industry || "N/A"})`);
+  const companyDossierJp =
+    params.lens === "company" && params.companyContext?.trim()
+      ? `\n【企業ドシエ（要約の文脈に使用）】\n${params.companyContext.trim()}\n`
+      : "";
+  const companyDossierEn =
+    params.lens === "company" && params.companyContext?.trim()
+      ? `\n[Company dossier — use for nuance]\n${params.companyContext.trim()}\n`
+      : "";
 
   const prompt = jp
     ? `あなたは経営向けダッシュボードの編集者です。以下は同一レンズで取得した記事一覧（各件にAIが付けたtone: positive|mixed|negative）です。
-${lensLine}
-
+${lensLine}${companyDossierJp}
 記事:
 ${lines.join("\n")}
 
@@ -615,8 +640,7 @@ ${lines.join("\n")}
 - 出力は次の形式のみ（見出しや箇条書き禁止）:
 SUMMARY: <段落>`
     : `You are an editor for an executive dashboard. Below is a set of articles for one lens, each with an AI-assigned tone (positive|mixed|negative).
-${lensLine}
-
+${lensLine}${companyDossierEn}
 Articles:
 ${lines.join("\n")}
 
@@ -845,12 +869,14 @@ type NewsletterCacheEntry = {
 function newsletterCacheKey(params: {
   company: string;
   industry?: string;
+  companyContext?: string;
   language?: string;
   signals: NewsletterSignalInput[];
 }): string {
   return JSON.stringify({
     company: params.company,
     industry: params.industry || "",
+    cc: hashCompanyContextSnippet(params.companyContext ?? ""),
     lang: params.language || "en",
     signals: params.signals.map((s) => ({
       id: s.id,
@@ -944,6 +970,7 @@ function parseNewsletter(raw: string): CompanyNewsletterResult | null {
 export async function invokeCompanyNewsletter(params: {
   company: string;
   industry?: string;
+  companyContext?: string;
   language?: string;
   signals: NewsletterSignalInput[];
 }): Promise<{ data: CompanyNewsletterResult | null; error: Error | null }> {
@@ -953,6 +980,7 @@ export async function invokeCompanyNewsletter(params: {
   const cacheKey = newsletterCacheKey({
     company: params.company,
     industry: params.industry,
+    companyContext: params.companyContext,
     language: params.language,
     signals: boundedSignals,
   });
@@ -967,9 +995,16 @@ export async function invokeCompanyNewsletter(params: {
       `- id=${s.id} | title=${s.title} | desc=${s.description || ""} | source=${s.source || ""} | location=${s.location || ""} | urgency=${s.urgency || ""} | domain=${s.domain || ""} | url=${s.articleUrl || ""}`,
   );
 
+  const dossierJp = params.companyContext?.trim()
+    ? `【企業ドシエ（関連性判断・リスク/機会の文脈に必ず活用）】\n${params.companyContext.trim()}\n\n`
+    : "";
+  const dossierEn = params.companyContext?.trim()
+    ? `[Company dossier — use for relevance, risks, and opportunities]\n${params.companyContext.trim()}\n\n`
+    : "";
+
   const prompt = jp
     ? `あなたは企業向け編集責任者です。以下の候補シグナルから、${params.company}（業界: ${params.industry || "N/A"}）に最も関連性が高いものを5件選び、週次ニュースレターを作成してください。
-要件:
+${dossierJp}要件:
 - 関連性の高い順に5件選定
 - JSONのみを返す
 - paragraphsは3本、各2-3文
@@ -995,7 +1030,7 @@ JSON schema:
 候補:
 ${candidateLines.join("\n")}`
     : `You are an editorial strategist. From the candidate signals below, pick the 5 most relevant items for ${params.company} (industry: ${params.industry || "N/A"}) and write a weekly newsletter.
-Requirements:
+${dossierEn}Requirements:
 - Pick 5 most relevant items in ranked order
 - Return JSON only
 - Do not use markdown fences
@@ -1103,6 +1138,13 @@ export async function invokeAiInsight(body: AiInsightRequestBody): Promise<{ dat
     ? `IMPORTANT: This is Gen Z Signal mode. Center analysis on Gen Z values, behavior, and consumption/work trends, and explain impact specifically as what ${body.company || "the company"} should do for Gen Z relevance. Do NOT default to generic ESG or macro commentary; explicitly describe Gen Z behavior shifts (where they choose to live/work/spend and why).`
     : `IMPORTANT: This is Resilience mode. Focus on practical strategic implications and execution risks.`;
 
+  const dossierForInsightJp = body.companyContext?.trim()
+    ? `\n参照企業ドシエ（この企業の事業・優先課題に沿って分析すること）:\n${body.companyContext.trim()}\n`
+    : "";
+  const dossierForInsightEn = body.companyContext?.trim()
+    ? `\nCompany dossier (tailor analysis to this business context):\n${body.companyContext.trim()}\n`
+    : "";
+
   const prompt = jp
     ? `あなたは企業向け戦略アナリストです。以下のシグナルをもとに、厳密に次の形式で出力してください。
 【言語】ラベル名（URGENCY 等）はそのまま。各フィールドの本文はすべて自然な日本語のみ。英語文は禁止。
@@ -1125,7 +1167,7 @@ GENZ_SIGNAL: ...
 PATTERN_TAG: ...
 
 ${modeDirectiveJp}
-
+${dossierForInsightJp}
 シグナル:
 タイトル: ${body.signalTitle || ""}
 説明: ${body.signalDescription || ""}
@@ -1151,7 +1193,7 @@ GENZ_SIGNAL: ...
 PATTERN_TAG: ...
 
 ${modeDirectiveEn}
-
+${dossierForInsightEn}
 Signal:
 Title: ${body.signalTitle || ""}
 Description: ${body.signalDescription || ""}
