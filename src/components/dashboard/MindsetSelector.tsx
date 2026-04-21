@@ -1,5 +1,7 @@
 import { MINDSETS } from "@/data/domains";
 import { MindsetId } from "@/data/types";
+import { useLang } from "@/i18n/LanguageContext";
+import type { TranslationKey } from "@/i18n/translations";
 
 interface Props {
   activeMindset: MindsetId;
@@ -7,9 +9,10 @@ interface Props {
 }
 
 const MindsetSelector = ({ activeMindset, onSelect }: Props) => {
+  const { t } = useLang();
   return (
     <div className="space-y-1">
-      <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-2">Mindset Lens</h3>
+      <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-2">{t("mindset.lensTitle")}</h3>
       <div className="grid grid-cols-2 gap-1.5">
         {MINDSETS.map((m) => {
           const active = activeMindset === m.id;
@@ -23,7 +26,7 @@ const MindsetSelector = ({ activeMindset, onSelect }: Props) => {
                   : "bg-secondary/40 border-transparent text-muted-foreground hover:bg-secondary/70"
               }`}
             >
-              <span className="font-medium block leading-tight">{m.shortLabel}</span>
+              <span className="font-medium block leading-tight">{t(`mindset.${m.id}` as TranslationKey)}</span>
             </button>
           );
         })}

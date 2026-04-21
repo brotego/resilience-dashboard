@@ -1,4 +1,5 @@
 import { DashboardMode } from "./DashboardLayout";
+import { useLang } from "@/i18n/LanguageContext";
 
 interface Props {
   mode: DashboardMode;
@@ -6,14 +7,15 @@ interface Props {
 }
 
 const ModeToggle = ({ mode, onModeChange }: Props) => {
+  const { t } = useLang();
   return (
     <header className="flex items-center justify-between px-6 py-3 border-b border-border bg-card">
       <div className="flex flex-col">
         <h1 className="text-lg font-bold tracking-tight text-foreground">
-          Flourishing Through Resilience
+          {t("app.title")}
         </h1>
         <span className="text-[11px] text-muted-foreground">
-          Anchorstar × Mori Building
+          {t("app.subtitle")}
         </span>
       </div>
       <div className="flex items-center gap-2">
@@ -25,7 +27,7 @@ const ModeToggle = ({ mode, onModeChange }: Props) => {
               : "bg-secondary text-muted-foreground hover:text-foreground"
           }`}
         >
-          Global Resilience
+          {t("mode.resilience")}
         </button>
         <button
           onClick={() => onModeChange("genz")}
@@ -35,7 +37,7 @@ const ModeToggle = ({ mode, onModeChange }: Props) => {
               : "bg-secondary text-muted-foreground hover:text-foreground"
           }`}
         >
-          Gen Z Signal
+          {t("mode.genz")}
         </button>
       </div>
     </header>

@@ -1,4 +1,5 @@
-import { useState } from "react";
+import { useState, useEffect, useMemo } from "react";
+import { translateJapaneseArticleRows } from "@/api/translateJapaneseUi";
 import { ChevronDown, ChevronRight } from "lucide-react";
 import { useNewsFeed, NewsArticle } from "@/hooks/useNewsFeed";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -16,6 +17,10 @@ function formatDate(dateStr: string, locale: string): string {
   } catch {
     return dateStr;
   }
+}
+
+function articleStableId(article: { url: string; title: string }, index: number): string {
+  return article.url && article.url !== "#" ? article.url : `idx-${index}-${article.title.slice(0, 48)}`;
 }
 
 function ArticleRow({ article, locale }: { article: NewsArticle; locale: string }) {
@@ -67,14 +72,51 @@ function LoadingSkeleton() {
 }
 
 const NewsFeedSection = ({ countryName, type, topicQuery }: Props) => {
-  const { t } = useLang();
+  const { t, lang } = useLang();
   const { articles, loading, isFallback, fetchError } = useNewsFeed(countryName, type, topicQuery);
   const locale = t("clock.locale");
+  const [jpArticleMap, setJpArticleMap] = useState<Record<string, { title: string; description: string }>>({});
+  const [jpArticlesLoading, setJpArticlesLoading] = useState(false);
+
+  const displayArticles = useMemo(() => {
+    if (lang !== "jp") return articles;
+    return articles.map((a, i) => {
+      const id = articleStableId(a, i);
+      const trRow = jpArticleMap[id];
+      if (!trRow) return a;
+      return { ...a, title: trRow.title, description: trRow.description };
+    });
+  }, [articles, lang, jpArticleMap]);
+
+  const articlesSig = useMemo(() => articles.map((a, i) => articleStableId(a, i)).join("|"), [articles]);
+
+  useEffect(() => {
+    if (lang !== "jp" || articles.length === 0) {
+      setJpArticleMap({});
+      setJpArticlesLoading(false);
+      return;
+    }
+    let cancelled = false;
+    setJpArticlesLoading(true);
+    const payload = articles.slice(0, 18).map((a, i) => ({
+      id: articleStableId(a, i),
+      title: a.title,
+      description: a.description || "",
+    }));
+    translateJapaneseArticleRows(payload)
+      .then((map) => {
+        if (!cancelled) setJpArticleMap(map);
+      })
+      .finally(() => {
+        if (!cancelled) setJpArticlesLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [lang, articlesSig]);
   const normalizedError = fetchError
     ? /token|quota|unsubscribed|429|rate limit|throttl/i.test(fetchError)
-      ? (t("clock.locale") === "ja-JP"
-          ? "この国向けの追加フィードは現在利用できません。上部の追跡シグナルをご確認ください。"
-          : "Country-specific feed is temporarily unavailable. Use the tracked signals shown above.")
+      ? t("news.feedUnavailable")
       : fetchError
     : null;
 
@@ -95,14 +137,17 @@ const NewsFeedSection = ({ countryName, type, topicQuery }: Props) => {
         {isFallback && (
           <span className="text-[7px] font-mono text-muted-foreground/40 uppercase tracking-widest">{t("news.seedData")}</span>
         )}
+        {lang === "jp" && jpArticlesLoading && articles.length > 0 && (
+          <span className="text-[7px] font-mono text-muted-foreground/60">{t("news.translatingTitles")}</span>
+        )}
       </div>
 
       {loading ? (
         <LoadingSkeleton />
-      ) : articles.length > 0 ? (
+      ) : displayArticles.length > 0 ? (
         <div>
-          {articles.map((article, i) => (
-            <ArticleRow key={`${type}-${i}`} article={article} locale={locale} />
+          {displayArticles.map((article, i) => (
+            <ArticleRow key={`${type}-${articleStableId(article, i)}`} article={article} locale={locale} />
           ))}
         </div>
       ) : normalizedError ? (

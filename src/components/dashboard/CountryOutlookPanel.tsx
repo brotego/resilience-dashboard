@@ -1,5 +1,5 @@
 import { ArrowLeft } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { DOMAINS } from "@/data/domains";
 import { GENZ_CATEGORIES } from "@/data/genzCategories";
 import { COUNTRY_ALIASES } from "./GlobalMap";
@@ -9,6 +9,10 @@ import { DashboardMode } from "./DashboardLayout";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import NewsFeedSection from "./NewsFeedSection";
 import { useLang } from "@/i18n/LanguageContext";
+import { useJpUi } from "@/i18n/jpUiContext";
+import { getCompanyDisplayName } from "@/i18n/companyLocale";
+import { translateJapaneseArticleRows } from "@/api/translateJapaneseUi";
+import { tr, type Lang, type TranslationKey } from "@/i18n/translations";
 import { invokeNewsFeed } from "@/api/newsFeed";
 import { invokeArticleSentimentBatch, invokeSentimentFallbackOpinion, invokeCountryCompanyInsight, ArticleSentiment } from "@/api/aiInsight";
 
@@ -140,8 +144,8 @@ const JAPAN_PERCEPTION_JP: Record<string, string> = {
   "Singapore": "日本はプレミアムなライフスタイルとイノベーションのベンチマーク。金融とテクノロジーでの強いビジネス関係。日本の飲食・小売が非常に人気。",
 };
 
-function getCompanyCountryInsight(companyId: CompanyId | null, countryName: string, lang: string): string {
-  if (!companyId) return lang === "jp" ? "この市場向けのカスタマイズされた戦略的インサイトを表示するには、企業を選択してください。" : "Select a company to see tailored strategic insights for this market.";
+function getCompanyCountryInsight(companyId: CompanyId | null, countryName: string, lang: Lang): string {
+  if (!companyId) return tr("country.selectCompany", lang);
   const company = COMPANIES.find(c => c.id === companyId);
   if (!company) return "";
   
@@ -164,7 +168,7 @@ function getCompanyCountryInsight(companyId: CompanyId | null, countryName: stri
   return insights[companyId]?.[countryName] || fallback;
 }
 
-function getRecommendedActions(companyId: CompanyId | null, countryName: string, lang: string): string[] {
+function getRecommendedActions(companyId: CompanyId | null, countryName: string, lang: Lang): string[] {
   const company = companyId ? COMPANIES.find(c => c.id === companyId) : null;
   const companyName = company?.name || (lang === "jp" ? "御社" : "your organization");
   const cn = lang === "jp" ? (COUNTRY_NAMES_JP[countryName] || countryName) : countryName;
@@ -231,14 +235,22 @@ const URGENCY_COLORS: Record<string, string> = {
   low: "bg-emerald-500/20 text-emerald-400 border-emerald-500/30",
 };
 
-function getUrgency(intensity: number, lang: string): { label: string; style: string } {
-  if (intensity >= 8) return { label: lang === "jp" ? "高" : "High", style: URGENCY_COLORS.high };
-  if (intensity >= 5) return { label: lang === "jp" ? "中" : "Medium", style: URGENCY_COLORS.medium };
-  return { label: lang === "jp" ? "低" : "Low", style: URGENCY_COLORS.low };
+function getUrgency(intensity: number, t: (key: TranslationKey) => string): { label: string; style: string } {
+  if (intensity >= 8) return { label: t("urgency.labelHigh"), style: URGENCY_COLORS.high };
+  if (intensity >= 5) return { label: t("urgency.labelMedium"), style: URGENCY_COLORS.medium };
+  return { label: t("urgency.labelLow"), style: URGENCY_COLORS.low };
+}
+
+function sentimentToneLabel(tone: ArticleSentiment, t: (key: TranslationKey) => string): string {
+  return t(`sentiment.${tone}` as TranslationKey);
 }
 
 const CountryOutlookPanel = ({ countryName, mode, selectedCompany, signals, onClose, onSignalClick }: Props) => {
   const { lang, t } = useLang();
+  const { getSignalDisplay } = useJpUi();
+  const [jpSentimentArticleMap, setJpSentimentArticleMap] = useState<
+    Record<string, { title: string; description: string }>
+  >({});
   const [sentimentView, setSentimentView] = useState<SentimentView>("japan");
   const [sentimentArticles, setSentimentArticles] = useState<Record<SentimentView, SentimentArticle[]>>({ company: [], japan: [] });
   const [sentimentLabels, setSentimentLabels] = useState<Record<SentimentView, Record<string, ArticleSentiment>>>({ company: {}, japan: {} });
@@ -277,11 +289,35 @@ const CountryOutlookPanel = ({ countryName, mode, selectedCompany, signals, onCl
       : `This view summarizes how media in ${countryName} is framing Japan across recent coverage, including tone, risk perception, and narrative direction. Use it to gauge whether the current sentiment climate is supportive, cautious, or adverse when shaping local partnerships and communications.`)
     : (company
       ? (lang === "jp"
-        ? `${displayName}の報道文脈における${company.name}への評価を、期待・懸念・実行リスクの3点で可視化します。好意的な論調だけでなく、慎重論や逆風シグナルも含めて把握することで、現地での優先アクションと打ち手の順序を明確にできます。`
+        ? `${displayName}の報道文脈における${getCompanyDisplayName(company, lang)}への評価を、期待・懸念・実行リスクの3点で可視化します。好意的な論調だけでなく、慎重論や逆風シグナルも含めて把握することで、現地での優先アクションと打ち手の順序を明確にできます。`
         : `This view shows how coverage in ${countryName} perceives ${company.name}, including positive momentum, caution signals, and execution risk themes. The goal is to help prioritize local actions based on the current narrative, not just headline-level sentiment.`)
-      : (lang === "jp"
-        ? "企業を選択すると企業センチメントを表示します。"
-        : "Select a company to view company sentiment."));
+      : t("dashboard.sentimentCompanyHint"));
+
+  const sentimentArticlesSig = useMemo(
+    () => activeSentimentArticles.map((a) => a.id).join("|"),
+    [activeSentimentArticles],
+  );
+
+  useEffect(() => {
+    if (lang !== "jp" || activeSentimentArticles.length === 0) {
+      setJpSentimentArticleMap({});
+      return;
+    }
+    let cancelled = false;
+    translateJapaneseArticleRows(
+      activeSentimentArticles.slice(0, 14).map((a) => ({
+        id: a.id,
+        title: a.title,
+        description: a.description || "",
+      })),
+    ).then((map) => {
+      if (!cancelled) setJpSentimentArticleMap(map);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [lang, sentimentArticlesSig]);
+
   const perceptionToneClasses: Record<"positive" | "mixed" | "negative", string> = {
     positive: "text-emerald-300 border-emerald-500/40 bg-emerald-500/10",
     mixed: "text-sky-300 border-sky-500/40 bg-sky-500/10",
@@ -520,18 +556,18 @@ const CountryOutlookPanel = ({ countryName, mode, selectedCompany, signals, onCl
               />
             </div>
             <div className="mt-1.5 flex items-center justify-between text-[9px] font-mono text-muted-foreground">
-              <span>Marginal signal</span>
-              <span>Company fit</span>
+              <span>{t("panel.marginalSignal")}</span>
+              <span>{t("panel.companyFitSlider")}</span>
             </div>
           </div>
 
           {/* Company insight */}
           <div>
             <h4 className="text-[10px] font-mono font-bold uppercase tracking-widest text-primary mb-1.5">
-              {company ? `${t("country.whatThisMeans")} ${company.name}` : t("country.strategicContext")}
+              {company ? `${t("country.whatThisMeans")} ${getCompanyDisplayName(company, lang)}` : t("country.strategicContext")}
             </h4>
             <p className="text-[11px] text-foreground/80 leading-snug">
-              {companyInsightLoading ? (lang === "jp" ? "分析中..." : "Analyzing signals...") : companyInsight}
+              {companyInsightLoading ? t("dashboard.analyzingSignals") : companyInsight}
             </p>
           </div>
 
@@ -543,7 +579,8 @@ const CountryOutlookPanel = ({ countryName, mode, selectedCompany, signals, onCl
               </h4>
               <div className="space-y-1">
                 {allSignals.map((signal) => {
-                  const urgency = getUrgency(Math.round(signal.resilienceScore), lang);
+                  const urgency = getUrgency(Math.round(signal.resilienceScore), t);
+                  const disp = getSignalDisplay(signal);
                   return (
                     <button
                       key={signal.id}
@@ -552,7 +589,7 @@ const CountryOutlookPanel = ({ countryName, mode, selectedCompany, signals, onCl
                     >
                       <div className="flex items-center justify-between gap-2">
                         <h5 className="text-[10px] font-semibold text-foreground group-hover:text-primary transition-colors leading-snug flex-1">
-                          {signal.title}
+                          {disp.title}
                         </h5>
                         <span className={`shrink-0 inline-block px-1.5 py-0.5 text-[8px] font-mono font-bold rounded-sm border ${urgency.style}`}>
                           {urgency.label}
@@ -578,7 +615,7 @@ const CountryOutlookPanel = ({ countryName, mode, selectedCompany, signals, onCl
           <div>
             <div className="flex items-center justify-between mb-1.5">
               <h4 className="text-[10px] font-mono font-bold uppercase tracking-widest text-muted-foreground">
-                {lang === "jp" ? "センチメント分析" : "SENTIMENT ANALYSIS"}
+                {t("dashboard.sentimentAnalysis")}
               </h4>
               <div className="flex gap-1">
                 <button
@@ -588,7 +625,7 @@ const CountryOutlookPanel = ({ countryName, mode, selectedCompany, signals, onCl
                     sentimentView === "company" ? "bg-accent text-accent-foreground" : "bg-secondary text-muted-foreground hover:text-foreground"
                   } ${!company ? "opacity-50 cursor-not-allowed" : ""}`}
                 >
-                  {lang === "jp" ? "COMPANY" : "COMPANY"}
+                  {t("dashboard.colCompany")}
                 </button>
                 <button
                   onClick={() => setSentimentView("japan")}
@@ -596,7 +633,7 @@ const CountryOutlookPanel = ({ countryName, mode, selectedCompany, signals, onCl
                     sentimentView === "japan" ? "bg-accent text-accent-foreground" : "bg-secondary text-muted-foreground hover:text-foreground"
                   }`}
                 >
-                  {lang === "jp" ? "JAPAN" : "JAPAN"}
+                  {t("dashboard.colJapan")}
                 </button>
               </div>
             </div>
@@ -607,21 +644,23 @@ const CountryOutlookPanel = ({ countryName, mode, selectedCompany, signals, onCl
               <div className="divide-y divide-border">
                 {sentimentLoading ? (
                   <div className="px-2 py-2 text-[10px] text-muted-foreground">
-                    {lang === "jp" ? "関連報道を読み込み中..." : "Loading relevant coverage..."}
+                    {t("dashboard.loadingCoverage")}
                   </div>
                 ) : activeSentimentArticles.length > 0 ? (
                   activeSentimentArticles.map((article, idx) => {
                     const tone = sentimentLabels[sentimentView][article.id] || "mixed";
+                    const trArt = jpSentimentArticleMap[article.id];
+                    const titleUi = lang === "jp" && trArt?.title ? trArt.title : article.title;
                     return (
                       <div key={`perception-${idx}`} className="px-2 py-2 flex items-start justify-between gap-2">
                         <div>
-                          <p className="text-[10px] text-foreground/85 leading-snug">{article.title}</p>
+                          <p className="text-[10px] text-foreground/85 leading-snug">{titleUi}</p>
                           <p className="text-[9px] text-muted-foreground mt-0.5 uppercase tracking-wider">{article.source}</p>
                         </div>
                         <span
                           className={`shrink-0 px-1.5 py-0.5 rounded-sm border text-[8px] font-mono font-semibold uppercase tracking-wider ${perceptionToneClasses[tone]}`}
                         >
-                          {tone}
+                          {sentimentToneLabel(tone, t)}
                         </span>
                       </div>
                     );
@@ -633,17 +672,17 @@ const CountryOutlookPanel = ({ countryName, mode, selectedCompany, signals, onCl
                         <span
                           className={`inline-flex px-1.5 py-0.5 rounded-sm border text-[8px] font-mono font-semibold uppercase tracking-wider ${perceptionToneClasses[sentimentFallbackOpinion[sentimentView]!.tone]}`}
                         >
-                          {sentimentFallbackOpinion[sentimentView]!.tone}
+                          {sentimentToneLabel(sentimentFallbackOpinion[sentimentView]!.tone, t)}
                         </span>
                         <p className="text-[10px] text-foreground/85 leading-snug">
                           {sentimentFallbackOpinion[sentimentView]!.opinion}
                         </p>
                         <p className="text-[9px] text-muted-foreground">
-                          {lang === "jp" ? "関連記事が不足しているため、Claudeの推定意見を表示しています。" : "Showing Claude fallback opinion because no matching articles were found."}
+                          {t("dashboard.fallbackClaude")}
                         </p>
                       </div>
                     ) : (
-                      lang === "jp" ? "この条件の関連報道はまだありません。" : "No relevant coverage found for this filter yet."
+                      t("dashboard.noCoverageYet")
                     )}
                   </div>
                 )}

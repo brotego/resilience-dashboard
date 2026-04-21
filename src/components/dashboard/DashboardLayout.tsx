@@ -184,7 +184,7 @@ const DashboardLayout = () => {
                   : "text-muted-foreground hover:text-foreground"
               }`}
             >
-              {lang === "jp" ? "ダッシュボード" : "Dashboard"}
+              {t("tab.dashboard")}
             </button>
             <button
               onClick={() => setActiveTab("map")}
@@ -194,7 +194,7 @@ const DashboardLayout = () => {
                   : "text-muted-foreground hover:text-foreground"
               }`}
             >
-              {lang === "jp" ? "グローバルマップ" : "Global Map"}
+              {t("tab.map")}
             </button>
           </div>
         </div>
@@ -204,11 +204,13 @@ const DashboardLayout = () => {
           <LiveClock />
           <div className="h-3 w-px bg-border" />
           <span className="text-[10px] font-mono font-semibold text-primary tabular-nums">
-            {signalCount} {lang === "jp" ? "件" : "signals"}
+            {signalCount}
+            {lang === "jp" ? "" : " "}
+            {t("header.signalsUnit")}
           </span>
           {loading && (
             <span className="text-[9px] font-mono font-semibold text-amber-300 uppercase tracking-wider animate-pulse">
-              {lang === "jp" ? "記事を検索中..." : "Searching articles..."}
+              {t("header.searchingArticles")}
             </span>
           )}
           {isLive && (
@@ -324,7 +326,7 @@ const DashboardLayout = () => {
                   mapView === "map2d" ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground"
                 }`}
               >
-                2D
+                {t("map.view2d")}
               </button>
               <button
                 onClick={() => setMapView("globe3d")}
@@ -332,7 +334,7 @@ const DashboardLayout = () => {
                   mapView === "globe3d" ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground"
                 }`}
               >
-                3D
+                {t("map.view3d")}
               </button>
             </div>
           </div>

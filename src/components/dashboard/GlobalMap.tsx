@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef, useEffect, useMemo, memo } from "react";
+import { useState, useCallback, useRef, useEffect, useMemo, memo, type MouseEvent } from "react";
 import {
   ComposableMap,
   ZoomableGroup,
@@ -23,7 +23,11 @@ import {
   getMinZoomForTier,
 } from "@/data/countryMapLabels";
 import { getSignalBaseR, getUrgencyMultiplier } from "./signalMarkerStyle";
+import SignalMapDot from "./SignalMapDot";
 import { clampPositionsToContainingCountry, spreadCoincidentSignalPositions } from "./coincidentSignalPositions";
+import { useLang } from "@/i18n/LanguageContext";
+import { useJpUi } from "@/i18n/jpUiContext";
+import type { TranslationKey } from "@/i18n/translations";
 
 const GEO_URL = "https://cdn.jsdelivr.net/npm/world-atlas@2/countries-50m.json";
 const COUNTRY_GEOJSON_URL = "https://raw.githubusercontent.com/holtzy/D3-graph-gallery/master/DATA/world.geojson";
@@ -147,6 +151,8 @@ const GlobalMap = memo(({
   selectedCountry,
   signals,
 }: Props) => {
+  const { t } = useLang();
+  const { getSignalDisplay } = useJpUi();
   const [countries, setCountries] = useState<any[]>([]);
   const [position, setPosition] = useState<{ coordinates: [number, number]; zoom: number }>({
     coordinates: [30, 20], zoom: 1.5,
@@ -175,7 +181,7 @@ const GlobalMap = memo(({
   const animFrameRef = useRef<number | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
 
-  const showTooltip = useCallback((e: React.MouseEvent, title: string, location: string, urgency: string, score: number) => {
+  const showTooltip = useCallback((e: MouseEvent, title: string, location: string, urgency: string, score: number) => {
     const rect = containerRef.current?.getBoundingClientRect();
     if (!rect) return;
     setTooltip({ x: e.clientX - rect.left + 12, y: e.clientY - rect.top - 10, title, location, urgency, score });
@@ -310,8 +316,8 @@ const GlobalMap = memo(({
     <div ref={containerRef} className="w-full h-full bg-background relative">
       {/* Zoom controls */}
       <div className="absolute bottom-3 right-3 z-10 flex flex-col gap-0.5">
-        <button onClick={zoomIn} className="w-7 h-7 flex items-center justify-center bg-[rgba(6,10,12,0.85)] backdrop-blur-sm border border-border rounded-sm text-foreground hover:text-primary transition-colors" aria-label="Zoom in"><Plus size={14} /></button>
-        <button onClick={zoomOut} className="w-7 h-7 flex items-center justify-center bg-[rgba(6,10,12,0.85)] backdrop-blur-sm border border-border rounded-sm text-foreground hover:text-primary transition-colors" aria-label="Zoom out"><Minus size={14} /></button>
+        <button onClick={zoomIn} className="w-7 h-7 flex items-center justify-center bg-[rgba(6,10,12,0.85)] backdrop-blur-sm border border-border rounded-sm text-foreground hover:text-primary transition-colors" aria-label={t("map.zoomIn")}><Plus size={14} /></button>
+        <button onClick={zoomOut} className="w-7 h-7 flex items-center justify-center bg-[rgba(6,10,12,0.85)] backdrop-blur-sm border border-border rounded-sm text-foreground hover:text-primary transition-colors" aria-label={t("map.zoomOut")}><Minus size={14} /></button>
       </div>
 
       <ComposableMap projection="geoMercator" projectionConfig={{ scale: 140, center: [0, 20] }} style={{ width: "100%", height: "100%" }}>
@@ -453,9 +459,9 @@ const GlobalMap = memo(({
             const pos = spreadPositions.get(signal.id)!;
 
             const urgencyMultiplier = getUrgencyMultiplier(score);
-            const isCritical = score >= 9;
-            const isHigh = score >= 7;
-            const urgencyLabel = signal.urgency.charAt(0).toUpperCase() + signal.urgency.slice(1);
+            const urgencyKey = `urgency.${signal.urgency}` as TranslationKey;
+            const urgencyLabel = t(urgencyKey);
+            const disp = getSignalDisplay(signal);
 
             const baseR = getSignalBaseR(relevant) * urgencyMultiplier;
             const r = baseR * dotScale;
@@ -467,46 +473,21 @@ const GlobalMap = memo(({
                 onClick={() => { onSignalClick(signal); panToSignal(signal.coordinates); }}
                 style={{ cursor: "pointer" }}
               >
-                {isCritical && !dimmed && (
-                  <circle r={r * 3} fill={renderColor} opacity={0}>
-                    <animate attributeName="r" from={String(r * 1.5)} to={String(r * 4)} dur="2s" repeatCount="indefinite" />
-                    <animate attributeName="opacity" from="0.25" to="0" dur="2s" repeatCount="indefinite" />
-                  </circle>
-                )}
-                {isHigh && !isCritical && !dimmed && (
-                  <circle r={r * 2.2} fill={renderColor} opacity={0.12} />
-                )}
-                <circle r={r * 2} fill={renderColor} opacity={dimmed ? 0.04 : 0.15} />
-                <circle
+                <SignalMapDot
                   r={r}
-                  fill={renderColor}
-                  stroke={renderColor}
-                  strokeWidth={1 * dotScale}
-                  opacity={dimmed ? 0.45 : score < 4 ? 0.55 : 1}
-                  style={{ transition: "r 150ms ease, opacity 150ms ease" }}
-                  onMouseEnter={(e) => {
-                    e.currentTarget.setAttribute("r", String(r * 1.3));
-                    const glow = e.currentTarget.previousElementSibling as SVGCircleElement | null;
-                    if (glow) glow.setAttribute("opacity", "0.3");
-                    showTooltip(e as any, signal.title, signal.location, urgencyLabel, score);
-                  }}
-                  onMouseMove={(e) => showTooltip(e as any, signal.title, signal.location, urgencyLabel, score)}
-                  onMouseLeave={(e) => {
-                    e.currentTarget.setAttribute("r", String(r));
-                    const glow = e.currentTarget.previousElementSibling as SVGCircleElement | null;
-                    if (glow) glow.setAttribute("opacity", "0.15");
-                    hideTooltip();
-                  }}
+                  dotScale={dotScale}
+                  renderColor={renderColor}
+                  dimmed={dimmed}
+                  score={score}
+                  isSelected={isSelected}
+                  onMainMouseEnter={(e) =>
+                    showTooltip(e as unknown as MouseEvent, disp.title, disp.location, urgencyLabel, score)
+                  }
+                  onMainMouseMove={(e) =>
+                    showTooltip(e as unknown as MouseEvent, disp.title, disp.location, urgencyLabel, score)
+                  }
+                  onMainMouseLeave={hideTooltip}
                 />
-                {isSelected && (
-                  <>
-                    <circle r={r * 2.5} fill="none" stroke="#1241ea" strokeWidth={1.5 * dotScale} opacity={0.7}>
-                      <animate attributeName="r" from={String(r * 2.2)} to={String(r * 3)} dur="1.5s" repeatCount="indefinite" />
-                      <animate attributeName="opacity" from="0.7" to="0.2" dur="1.5s" repeatCount="indefinite" />
-                    </circle>
-                    <circle r={r * 2} fill="none" stroke="#1241ea" strokeWidth={1 * dotScale} opacity={0.9} />
-                  </>
-                )}
               </Marker>
             );
           })}
@@ -523,7 +504,7 @@ const GlobalMap = memo(({
               <span className="text-[8px] font-mono font-bold uppercase tracking-wider text-primary">{tooltip.urgency}</span>
             </div>
             <div className="flex items-center gap-1 mt-0.5">
-              <span className="text-[8px] font-mono text-muted-foreground">RE:</span>
+              <span className="text-[8px] font-mono text-muted-foreground">{t("map.reScore")}</span>
               <span className="text-[9px] font-mono font-bold text-primary">{tooltip.score}/10</span>
             </div>
           </div>

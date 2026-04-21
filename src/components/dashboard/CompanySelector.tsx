@@ -6,6 +6,7 @@ import { Check, ChevronsUpDown } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { useLang } from "@/i18n/LanguageContext";
+import { getCompanyDisplayName, getCompanyDisplaySector } from "@/i18n/companyLocale";
 
 interface Props {
   selectedCompany: CompanyId | null;
@@ -14,7 +15,7 @@ interface Props {
 
 const CompanySelector = ({ selectedCompany, onSelect }: Props) => {
   const [open, setOpen] = useState(false);
-  const { t } = useLang();
+  const { t, lang } = useLang();
   const selected = COMPANIES.find((c) => c.id === selectedCompany);
 
   return (
@@ -26,7 +27,7 @@ const CompanySelector = ({ selectedCompany, onSelect }: Props) => {
           aria-expanded={open}
           className="w-full justify-between bg-secondary/50 border-border text-[11px] font-mono h-7 rounded-sm font-normal"
         >
-          {selected ? selected.name : t("company.all")}
+          {selected ? getCompanyDisplayName(selected, lang) : t("company.all")}
           <ChevronsUpDown className="ml-2 h-3 w-3 shrink-0 opacity-50" />
         </Button>
       </PopoverTrigger>
@@ -47,13 +48,13 @@ const CompanySelector = ({ selectedCompany, onSelect }: Props) => {
               {COMPANIES.map((c) => (
                 <CommandItem
                   key={c.id}
-                  value={c.name}
+                  value={`${c.id}-${c.name}`}
                   onSelect={() => { onSelect(c.id); setOpen(false); }}
                   className="text-[11px]"
                 >
                   <div className="flex flex-col">
-                    <span className="font-semibold">{c.name}</span>
-                    <span className="text-[9px] font-mono text-muted-foreground">{c.sector}</span>
+                    <span className="font-semibold">{getCompanyDisplayName(c, lang)}</span>
+                    <span className="text-[9px] font-mono text-muted-foreground">{getCompanyDisplaySector(c, lang)}</span>
                   </div>
                   <Check className={cn("ml-auto h-3 w-3", selectedCompany === c.id ? "opacity-100" : "opacity-0")} />
                 </CommandItem>

@@ -1,4 +1,5 @@
 import { Briefcase, Calendar, MapPin, Newspaper, User } from "lucide-react";
+import { useLang } from "@/i18n/LanguageContext";
 
 export type ArticleStoryMetaProps = {
   /** Company lens used for resilience scoring / keyword curation (dashboard selection). */
@@ -10,7 +11,6 @@ export type ArticleStoryMetaProps = {
   /** Region / dateline (e.g. country from map) */
   location?: string;
   locale: string;
-  lang: "en" | "jp";
 };
 
 function parsePublished(d?: string): Date | null {
@@ -26,15 +26,15 @@ export function ArticleStoryMeta({
   source,
   location,
   locale,
-  lang,
 }: ArticleStoryMetaProps) {
+  const { t } = useLang();
   const d = parsePublished(publishedAt);
   const labels = {
-    curation: lang === "jp" ? "選定の視点（企業）" : "Curation lens (company)",
-    published: lang === "jp" ? "掲載日時" : "Published",
-    author: lang === "jp" ? "著者" : "Author",
-    source: lang === "jp" ? "ソース" : "Source",
-    region: lang === "jp" ? "地域" : "Region",
+    curation: t("article.meta.curation"),
+    published: t("article.meta.published"),
+    author: t("article.meta.author"),
+    source: t("article.meta.source"),
+    region: t("article.meta.region"),
   };
 
   const hasAny =
@@ -44,7 +44,7 @@ export function ArticleStoryMeta({
   return (
     <div className="rounded-sm border border-border bg-muted/25 px-3 py-2.5 mb-4">
       <p className="text-[10px] font-mono font-semibold uppercase tracking-wider text-muted-foreground mb-2.5">
-        {lang === "jp" ? "記事情報" : "Article info"}
+        {t("article.meta.title")}
       </p>
       <div className="flex flex-col gap-3 text-sm">
         {curationCompanyName?.trim() && (
@@ -54,9 +54,7 @@ export function ArticleStoryMeta({
               <div className="text-[10px] font-mono uppercase tracking-wide text-muted-foreground">{labels.curation}</div>
               <div className="text-foreground font-medium leading-snug">{curationCompanyName.trim()}</div>
               <p className="text-[11px] text-muted-foreground leading-snug">
-                {lang === "jp"
-                  ? "記事の取得は共通フィードです。関連度は企業キーワード・ドメインでスコア化しています。"
-                  : "Articles come from shared news feeds; relevance is scored with this company’s keywords and focus domains."}
+                {t("article.meta.curationHint")}
               </p>
             </div>
           </div>

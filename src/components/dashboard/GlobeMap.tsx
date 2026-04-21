@@ -1,4 +1,5 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState, startTransition } from "react";
+import { createRoot, type Root } from "react-dom/client";
 import Globe from "react-globe.gl";
 import { DOMAINS } from "@/data/domains";
 import { COMPANIES, CompanyId } from "@/data/companies";
@@ -13,14 +14,17 @@ import {
   getMinZoomForTier,
 } from "@/data/countryMapLabels";
 import {
+  getSignalBaseR,
+  getUrgencyMultiplier,
+  globeDotScaleFromCameraAltitude,
   globeSignalRadiusDeg,
-  signalMarkerOpacity,
-  withOpacity,
 } from "./signalMarkerStyle";
 import {
   clampPositionsToContainingCountry,
   spreadCoincidentSignalPositions,
 } from "./coincidentSignalPositions";
+import SignalMapDot from "./SignalMapDot";
+import { useJpUi } from "@/i18n/jpUiContext";
 
 type CountryFeature = { properties?: { name?: string; NAME?: string }; geometry: any; type?: string };
 
@@ -35,12 +39,26 @@ interface Props {
   selectedCountry: string | null;
 }
 
-type GlobePoint = UnifiedSignal & {
+type GlobeSignalMarker = {
+  id: string;
   lat: number;
   lng: number;
-  radius: number;
-  color: string;
   altitudeExtra: number;
+  signal: UnifiedSignal;
+  r: number;
+  dotScale: number;
+  renderColor: string;
+  dimmed: boolean;
+  score: number;
+  isSelected: boolean;
+};
+
+/** WebGL point used only for raycast picking; globe.gl resolves clicks before DOM (HTML) markers receive them. */
+type GlobeSignalPickPoint = UnifiedSignal & {
+  lat: number;
+  lng: number;
+  altitudeExtra: number;
+  pickRadius: number;
 };
 type CountryLabel = { lat: number; lng: number; text: string; color: string; size: number };
 
@@ -171,10 +189,12 @@ const GlobeMap = memo(
     onCountryClick,
     selectedCountry,
   }: Props) => {
+  const { getSignalDisplay } = useJpUi();
   const globeRef = useRef<any>(null);
   /** Prevents duplicate pointOfView runs (polygon click + useEffect, or React Strict Mode double-effect). */
   const lastFlyTargetCountryRef = useRef<string | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+  const signalMarkerRootsRef = useRef(new Map<string, { container: HTMLDivElement; root: Root }>());
   const labelsSuppressedRef = useRef(false);
   const wheelIdleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const zoomRafRef = useRef<number | null>(null);
@@ -203,6 +223,27 @@ const GlobeMap = memo(
   }, []);
   const [labelsSuppressed, setLabelsSuppressed] = useState(false);
   const [countries, setCountries] = useState<CountryFeature[]>([]);
+  const [viewport, setViewport] = useState({ width: 0, height: 0 });
+
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+
+    const updateViewport = () => {
+      const nextWidth = Math.max(1, Math.round(el.clientWidth));
+      const nextHeight = Math.max(1, Math.round(el.clientHeight));
+      setViewport((prev) =>
+        prev.width === nextWidth && prev.height === nextHeight
+          ? prev
+          : { width: nextWidth, height: nextHeight }
+      );
+    };
+
+    updateViewport();
+    const ro = new ResizeObserver(updateViewport);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
 
   const syncLabelStateFromAltitude = useCallback((alt: number) => {
     bumpGlobeAltitudeIfNeeded(alt);
@@ -490,11 +531,13 @@ const GlobeMap = memo(
 
   const prevSelectedCountryRef = useRef<string | null>(null);
   useEffect(() => {
-    if (prevSelectedCountryRef.current && !selectedCountry) {
+    // Clearing country alone (e.g. closing the country panel) should return to world view.
+    // Clearing country because a signal was selected must not reset the camera — that felt like a random zoom-out.
+    if (prevSelectedCountryRef.current && !selectedCountry && !selectedSignalId) {
       flyToGlobalView();
     }
     prevSelectedCountryRef.current = selectedCountry;
-  }, [selectedCountry, flyToGlobalView]);
+  }, [selectedCountry, selectedSignalId, flyToGlobalView]);
 
   const onPolygonClick = useCallback(
     (polygon: object) => {
@@ -513,10 +556,14 @@ const GlobeMap = memo(
     [onSignalClick],
   );
 
-  const pointLabel = useCallback((d: object) => {
-    const point = d as GlobePoint;
-    return `<div style="padding:4px 6px"><strong>${point.title}</strong><br/>${point.location}</div>`;
-  }, []);
+  const pickPointLabel = useCallback(
+    (d: object) => {
+      const s = d as UnifiedSignal;
+      const disp = getSignalDisplay(s);
+      return `<div style="padding:4px 6px"><strong>${disp.title}</strong><br/>${disp.location}</div>`;
+    },
+    [getSignalDisplay],
+  );
 
   /**
    * Let clicks reach country polygons: skip label meshes and the atmosphere shell (it can sit in front of land).
@@ -545,7 +592,8 @@ const GlobeMap = memo(
     return clampPositionsToContainingCountry(signals, raw, countries);
   }, [signals, countries]);
 
-  const points = useMemo<GlobePoint[]>(() => {
+  const signalMarkers = useMemo<GlobeSignalMarker[]>(() => {
+    const dotScale = globeDotScaleFromCameraAltitude(globeCameraAltitude);
     return signals.map((signal) => {
       const baseColor = getSignalColor(signal, mode);
       const score = signal.resilienceScore;
@@ -555,37 +603,129 @@ const GlobeMap = memo(
       const dimmed = !!(selectedCompany && !relevant && signal.layer !== "live-news");
       const isSelected = signal.id === selectedSignalId;
       const isRead = readSignalIds.includes(signal.id);
+      const renderColor = isSelected || isRead ? "hsl(220, 8%, 48%)" : baseColor;
 
-      const radius = globeSignalRadiusDeg({
+      const urgency = getUrgencyMultiplier(score);
+      const baseR = getSignalBaseR(relevant) * urgency;
+      const r = baseR * dotScale;
+
+      const pos = spreadPositions.get(signal.id)!;
+      return {
+        id: signal.id,
+        lat: pos.lat,
+        lng: pos.lng,
+        altitudeExtra: pos.altitudeExtra,
+        signal,
+        r,
+        dotScale,
+        renderColor,
+        dimmed,
+        score,
+        isSelected,
+      };
+    });
+  }, [signals, spreadPositions, selectedCompany, selectedSignalId, readSignalIds, mode, globeCameraAltitude]);
+
+  const ensureSignalMarkerHost = useCallback((id: string) => {
+    let row = signalMarkerRootsRef.current.get(id);
+    if (!row) {
+      const container = document.createElement("div");
+      container.style.cssText =
+        "transform:translate(-50%,-50%);pointer-events:auto;cursor:pointer;line-height:0;";
+      const root = createRoot(container);
+      row = { container, root };
+      signalMarkerRootsRef.current.set(id, row);
+    }
+    return row;
+  }, []);
+
+  const htmlElement = useCallback(
+    (obj: object) => {
+      const d = obj as GlobeSignalMarker;
+      const { container, root } = ensureSignalMarkerHost(d.id);
+      root.render(
+        <SignalMapDot
+          r={d.r}
+          dotScale={d.dotScale}
+          renderColor={d.renderColor}
+          dimmed={d.dimmed}
+          score={d.score}
+          isSelected={d.isSelected}
+        />,
+      );
+      return container;
+    },
+    [ensureSignalMarkerHost],
+  );
+
+  const htmlElementVisibilityModifier = useCallback((el: HTMLElement, isVisible: boolean) => {
+    el.style.opacity = isVisible ? "1" : "0";
+  }, []);
+
+  useEffect(() => {
+    const keep = new Set(signalMarkers.map((m) => m.id));
+    for (const [id, host] of [...signalMarkerRootsRef.current.entries()]) {
+      if (!keep.has(id)) {
+        host.root.unmount();
+        signalMarkerRootsRef.current.delete(id);
+      }
+    }
+    for (const d of signalMarkers) {
+      const host = signalMarkerRootsRef.current.get(d.id);
+      if (!host) continue;
+      host.root.render(
+        <SignalMapDot
+          r={d.r}
+          dotScale={d.dotScale}
+          renderColor={d.renderColor}
+          dimmed={d.dimmed}
+          score={d.score}
+          isSelected={d.isSelected}
+        />,
+      );
+    }
+  }, [signalMarkers]);
+
+  const pickPoints = useMemo<GlobeSignalPickPoint[]>(() => {
+    return signals.map((signal) => {
+      const score = signal.resilienceScore;
+      const relevant = selectedCompany
+        ? isRelevantToCompany(`${signal.title} ${signal.description}`, selectedCompany)
+        : false;
+      const isSelected = signal.id === selectedSignalId;
+      const baseR = globeSignalRadiusDeg({
         score,
         relevant,
         cameraAltitude: globeCameraAltitude,
         isSelected,
       });
-
-      const renderColor = isSelected || isRead ? "hsl(220, 8%, 48%)" : baseColor;
-      const color = dimmed
-        ? "rgba(120,130,145,0.45)"
-        : withOpacity(renderColor, signalMarkerOpacity(score, false));
-
+      const pickRadius = Math.min(0.55, Math.max(0.12, baseR * 2.2));
       const pos = spreadPositions.get(signal.id)!;
       return {
         ...signal,
         lat: pos.lat,
         lng: pos.lng,
-        radius,
-        color,
         altitudeExtra: pos.altitudeExtra,
+        pickRadius,
       };
     });
-  }, [signals, spreadPositions, selectedCompany, selectedSignalId, readSignalIds, globeCameraAltitude]);
+  }, [signals, spreadPositions, selectedCompany, selectedSignalId, globeCameraAltitude]);
+
+  useEffect(() => {
+    return () => {
+      for (const [, host] of signalMarkerRootsRef.current) {
+        host.root.unmount();
+      }
+      signalMarkerRootsRef.current.clear();
+    };
+  }, []);
 
   return (
-    <div ref={containerRef} className="w-full h-full bg-background relative">
+    <div ref={containerRef} className="w-full h-full bg-background relative overflow-hidden">
       <Globe
         ref={globeRef}
-        width={undefined}
-        height={undefined}
+        width={viewport.width}
+        height={viewport.height}
         backgroundColor="rgba(0,0,0,0)"
         showGlobe
         showAtmosphere
@@ -614,15 +754,23 @@ const GlobeMap = memo(
         labelIncludeDot={false}
         labelResolution={labelResolution}
         labelsTransitionDuration={0}
-        pointsData={points}
+        htmlElementsData={signalMarkers}
+        htmlLat="lat"
+        htmlLng="lng"
+        htmlAltitude={(d) => SIGNAL_DOT_ALTITUDE + (d as GlobeSignalMarker).altitudeExtra}
+        htmlElement={htmlElement}
+        htmlElementVisibilityModifier={htmlElementVisibilityModifier}
+        htmlTransitionDuration={0}
+        pointsData={pickPoints}
         pointLat="lat"
         pointLng="lng"
-        pointColor="color"
-        pointAltitude={(d) => SIGNAL_DOT_ALTITUDE + (d as GlobePoint).altitudeExtra}
-        pointRadius="radius"
-        pointResolution={16}
-        pointLabel={pointLabel}
+        pointColor="rgba(0,0,0,0.02)"
+        pointAltitude={(d) => SIGNAL_DOT_ALTITUDE + (d as GlobeSignalPickPoint).altitudeExtra}
+        pointRadius="pickRadius"
+        pointResolution={12}
+        pointLabel={pickPointLabel}
         onPointClick={onPointClick}
+        pointsTransitionDuration={0}
       />
     </div>
   );

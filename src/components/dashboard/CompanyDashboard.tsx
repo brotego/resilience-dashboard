@@ -1,17 +1,50 @@
-import { useState, useMemo, useEffect } from "react";
+import { useState, useMemo, useEffect, useCallback } from "react";
+import { useNavigate } from "react-router-dom";
+import { translateJapaneseArticleRows } from "@/api/translateJapaneseUi";
+import { useJpUi } from "@/i18n/jpUiContext";
+import { getCompanyDisplayName, getCompanyDisplaySector } from "@/i18n/companyLocale";
 import { COMPANIES, CompanyId } from "@/data/companies";
 import { COMPANY_DASHBOARD_DATA } from "@/data/companyDashboardData";
 import { UnifiedSignal } from "@/data/unifiedSignalTypes";
 import { calculateResilienceScore } from "@/lib/resilienceScore";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { useLang } from "@/i18n/LanguageContext";
+import type { TranslationKey } from "@/i18n/translations";
 import { invokeNewsFeed } from "@/api/newsFeed";
-import { invokeArticleSentimentBatch, invokeSentimentFallbackOpinion, invokeCompanyNewsletter, ArticleSentiment } from "@/api/aiInsight";
+import {
+  invokeArticleSentimentBatch,
+  invokeSentimentFallbackOpinion,
+  invokeCompanyNewsletter,
+  invokeSentimentSectionSummary,
+  ArticleSentiment,
+} from "@/api/aiInsight";
+import { buildArticlePageSignal } from "@/lib/articlePageSignal";
 import { ChevronDown, ChevronUp, ArrowRight } from "lucide-react";
 
 type TimeFilter = "24h" | "7d" | "30d";
 type SentimentView = "company" | "japan";
 type SentimentArticle = { id: string; title: string; source: string; description: string; date: string; url: string };
+
+type NewsletterArticleRoundup = {
+  index: number;
+  title: string;
+  source: string;
+  location: string;
+  sentiment: "positive" | "mixed" | "negative";
+  summary: string;
+  url?: string;
+  signalId: string;
+};
+
+type NewsletterBlock = {
+  title: string;
+  dek: string;
+  paragraphs: string[];
+  roundupTitle: string;
+  articleRoundup: NewsletterArticleRoundup[];
+  risingRisks: string[];
+  risingOpportunities: string[];
+};
 
 interface Props {
   selectedCompany: CompanyId | null;
@@ -51,13 +84,9 @@ const URGENCY_BAR_COLORS: Record<string, string> = {
   low: "bg-muted-foreground/40",
 };
 
-const DOMAIN_LABELS: Record<string, { en: string; jp: string }> = {
-  work: { en: "Work", jp: "仕事" },
-  selfhood: { en: "Selfhood", jp: "自己" },
-  community: { en: "Community", jp: "コミュニティ" },
-  aging: { en: "Aging", jp: "高齢化" },
-  environment: { en: "Environment", jp: "環境" },
-};
+function sentimentToneLabel(tone: ArticleSentiment, t: (key: TranslationKey) => string): string {
+  return t(`sentiment.${tone}` as TranslationKey);
+}
 
 function normalizeText(v: string): string {
   return v.toLowerCase();
@@ -88,7 +117,12 @@ function isJapanArticle(article: SentimentArticle): boolean {
 }
 
 const CompanyDashboard = ({ selectedCompany, signals, onSignalClick }: Props) => {
+  const navigate = useNavigate();
   const { lang, t } = useLang();
+  const { getSignalDisplay } = useJpUi();
+  const [jpSentimentArticleMap, setJpSentimentArticleMap] = useState<
+    Record<string, { title: string; description: string }>
+  >({});
   const [timeFilter, setTimeFilter] = useState<TimeFilter>("7d");
   const [briefOpen, setBriefOpen] = useState(false);
   const [sentimentView, setSentimentView] = useState<SentimentView>("company");
@@ -105,13 +139,12 @@ const CompanyDashboard = ({ selectedCompany, signals, onSignalClick }: Props) =>
     company: null,
     japan: null,
   });
-  const [aiNewsletter, setAiNewsletter] = useState<{
-    title: string;
-    dek: string;
-    paragraphs: string[];
-    roundupTitle: string;
-    articleRoundup: Array<{ index: number; title: string; source: string; location: string; sentiment: "positive" | "mixed" | "negative"; summary: string }>;
-  } | null>(null);
+  const [sentimentAiSummary, setSentimentAiSummary] = useState<Record<SentimentView, string | null>>({
+    company: null,
+    japan: null,
+  });
+  const [sentimentSummaryLoading, setSentimentSummaryLoading] = useState(false);
+  const [aiNewsletter, setAiNewsletter] = useState<NewsletterBlock | null>(null);
   const [aiNewsletterActive, setAiNewsletterActive] = useState(false);
 
   const companyId = selectedCompany || "mori_building";
@@ -151,7 +184,7 @@ const CompanyDashboard = ({ selectedCompany, signals, onSignalClick }: Props) =>
       .slice(0, 3)
       .map((s) => ({
         title: s.title,
-        source: s.source || (lang === "jp" ? "Signal Feed" : "Signal Feed"),
+        source: s.source || t("dashboard.signalFeed"),
       }));
 
     const refLineEn = refs.length
@@ -161,17 +194,45 @@ const CompanyDashboard = ({ selectedCompany, signals, onSignalClick }: Props) =>
       ? refs.map((r) => `「${r.title}」（${r.source}）`).join("、")
       : "直近の関連報道";
 
-    const articleRoundup = top.map((s, i) => ({
+    const articleRoundup: NewsletterArticleRoundup[] = top.map((s, i) => ({
       index: i + 1,
       title: s.title,
-      source: s.source || (lang === "jp" ? "Signal Feed" : "Signal Feed"),
+      source: s.source || t("dashboard.signalFeed"),
       location: s.location,
       sentiment: s.urgency === "critical" || s.urgency === "high" ? "negative" : s.urgency === "medium" ? "mixed" : "positive",
       summary:
         lang === "jp"
           ? `${company.name}にとって${s.location}発のこの動向は、短期の実行判断と中期の戦略設計の両面に影響します。${s.description.slice(0, 90)}...`
           : `For ${company.name}, this development from ${s.location} impacts both near-term operating choices and medium-term strategic positioning. ${s.description.slice(0, 100)}...`,
+      url: s.articleUrl && s.articleUrl !== "#" ? s.articleUrl : undefined,
+      signalId: s.id,
     }));
+
+    const risingRisks =
+      negatives.length > 0
+        ? negatives.slice(0, 4).map((s) =>
+            lang === "jp"
+              ? `「${s.title}」— 緊急度が高く、実行・評判リスクの監視が必要です。`
+              : `"${s.title}" — elevated urgency; monitor execution and reputational exposure.`,
+          )
+        : [
+            lang === "jp"
+              ? "この週の上位セットに顕著なリスク集中はありません。"
+              : "No acute risk concentration in this week's top signal set.",
+          ];
+
+    const risingOpportunities =
+      positives.length > 0
+        ? positives.slice(0, 4).map((s) =>
+            lang === "jp"
+              ? `「${s.title}」— 機会ウィンドウの検討に値する動きです。`
+              : `"${s.title}" — worth evaluating as a potential opportunity window.`,
+          )
+        : [
+            lang === "jp"
+              ? "明確な機会シグナルは限定的です。継続監視を推奨します。"
+              : "Limited clear opportunity signals in this slice; keep monitoring.",
+          ];
 
     if (lang === "jp") {
       return {
@@ -184,6 +245,8 @@ const CompanyDashboard = ({ selectedCompany, signals, onSignalClick }: Props) =>
         ],
         roundupTitle: "記事ラウンドアップ",
         articleRoundup,
+        risingRisks,
+        risingOpportunities,
       };
     }
 
@@ -197,18 +260,98 @@ const CompanyDashboard = ({ selectedCompany, signals, onSignalClick }: Props) =>
       ],
       roundupTitle: "Article Roundup",
       articleRoundup,
+      risingRisks,
+      risingOpportunities,
     };
-  }, [filteredSignals, company.name, lang]);
-  const newsletter = aiNewsletter || fallbackNewsletter;
+  }, [filteredSignals, company.name, lang, t]);
+  const newsletter: NewsletterBlock = aiNewsletter || fallbackNewsletter;
+
+  const openRoundupEntry = useCallback(
+    (article: NewsletterArticleRoundup) => {
+      const url = article.url?.trim();
+      const mergedUrl = url && url !== "#" ? url : undefined;
+      const sig = filteredSignals.find((s) => s.id === article.signalId);
+      const signal =
+        sig ||
+        buildArticlePageSignal({
+          id: article.signalId,
+          title: article.title,
+          description: article.summary || article.title,
+          source: article.source,
+          location: article.location,
+          articleUrl: mergedUrl,
+        });
+      navigate(`/signal/${encodeURIComponent(signal.id)}`, {
+        state: {
+          signal,
+          mode: "resilience",
+          selectedCompany: companyId,
+          originTab: "dashboard",
+          originMode: "resilience",
+        },
+      });
+    },
+    [filteredSignals, navigate, companyId],
+  );
+
+  const openSentimentArticle = useCallback(
+    (article: SentimentArticle) => {
+      const signal = buildArticlePageSignal({
+        id: article.id,
+        title: article.title,
+        description: article.description || article.title,
+        source: article.source,
+        location: sentimentView === "japan" ? "Japan" : "Global",
+        date: article.date,
+        articleUrl: article.url,
+      });
+      navigate(`/signal/${encodeURIComponent(signal.id)}`, {
+        state: {
+          signal,
+          mode: "resilience",
+          selectedCompany: companyId,
+          originTab: "dashboard",
+          originMode: "resilience",
+        },
+      });
+    },
+    [navigate, companyId, sentimentView],
+  );
 
   const activeSentimentArticles = sentimentArticles[sentimentView];
+  const companyNameUi = getCompanyDisplayName(company, lang);
   const activeSentimentSummary = sentimentView === "japan"
     ? (lang === "jp"
       ? "グローバル主要報道における日本関連の論調を、好意・慎重・懸念のバランスで要約しています。単発ニュースではなく、複数記事の共通トーンを捉えることで、対外コミュニケーションや市場対応の優先度を判断しやすくします。"
       : "This section summarizes global media sentiment toward Japan by balancing positive, cautious, and risk-heavy narratives. It is designed to capture cross-article tone direction rather than isolated headlines, helping with better market messaging and timing decisions.")
     : (lang === "jp"
-      ? `${company.name}に関するグローバル報道の温度感を、期待要因と懸念要因の両面から整理しています。短期的なノイズではなく、継続的に繰り返される評価軸を把握することで、事業優先順位と実行リスク対応の精度を高めます。`
+      ? `${companyNameUi}に関するグローバル報道の温度感を、期待要因と懸念要因の両面から整理しています。短期的なノイズではなく、継続的に繰り返される評価軸を把握することで、事業優先順位と実行リスク対応の精度を高めます。`
       : `This section shows global sentiment around ${company.name} by organizing both upside narratives and concern signals. It focuses on recurring sentiment patterns across coverage, so strategic priorities and execution risk responses can be set with more confidence.`);
+
+  const sentimentArticlesSig = useMemo(
+    () => activeSentimentArticles.map((a) => a.id).join("|"),
+    [activeSentimentArticles],
+  );
+
+  useEffect(() => {
+    if (lang !== "jp" || activeSentimentArticles.length === 0) {
+      setJpSentimentArticleMap({});
+      return;
+    }
+    let cancelled = false;
+    translateJapaneseArticleRows(
+      activeSentimentArticles.slice(0, 14).map((a) => ({
+        id: a.id,
+        title: a.title,
+        description: a.description || "",
+      })),
+    ).then((map) => {
+      if (!cancelled) setJpSentimentArticleMap(map);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [lang, sentimentArticlesSig]);
 
   const sentimentBadgeClasses: Record<"positive" | "mixed" | "negative", string> = {
     positive: "text-emerald-300 border-emerald-500/40 bg-emerald-500/10",
@@ -239,6 +382,8 @@ const CompanyDashboard = ({ selectedCompany, signals, onSignalClick }: Props) =>
 
     let cancelled = false;
     setSentimentLoading(true);
+    setSentimentAiSummary({ company: null, japan: null });
+    setSentimentSummaryLoading(false);
 
     Promise.all([
       withTimeout(
@@ -341,12 +486,71 @@ const CompanyDashboard = ({ selectedCompany, signals, onSignalClick }: Props) =>
           japan: japanOpinion.data || null,
         });
         setSentimentLoading(false);
+
+        const coLabels = companySentiment.data || {};
+        const jaLabels = japanSentiment.data || {};
+        const coInputs = companyArticles.map((a) => ({
+          id: a.id,
+          title: a.title,
+          description: a.description,
+          source: a.source,
+          tone: (coLabels[a.id] as ArticleSentiment) || "mixed",
+        }));
+        const jaInputs = japanArticles.map((a) => ({
+          id: a.id,
+          title: a.title,
+          description: a.description,
+          source: a.source,
+          tone: (jaLabels[a.id] as ArticleSentiment) || "mixed",
+        }));
+
+        setSentimentSummaryLoading(true);
+        Promise.all([
+          coInputs.length > 0
+            ? withTimeout(
+                invokeSentimentSectionSummary({
+                  lens: "company",
+                  company: company.name,
+                  industry: company.sector,
+                  language: lang,
+                  articles: coInputs,
+                }),
+                14000,
+                { data: null, error: new Error("timeout") },
+              )
+            : Promise.resolve({ data: null, error: null }),
+          jaInputs.length > 0
+            ? withTimeout(
+                invokeSentimentSectionSummary({
+                  lens: "japan",
+                  countryName: "Japan",
+                  language: lang,
+                  articles: jaInputs,
+                }),
+                14000,
+                { data: null, error: new Error("timeout") },
+              )
+            : Promise.resolve({ data: null, error: null }),
+        ]).then(([rCo, rJa]) => {
+          if (cancelled) return;
+          setSentimentAiSummary({
+            company: rCo.data?.summary ?? null,
+            japan: rJa.data?.summary ?? null,
+          });
+          setSentimentSummaryLoading(false);
+        }).catch(() => {
+          if (cancelled) return;
+          setSentimentAiSummary({ company: null, japan: null });
+          setSentimentSummaryLoading(false);
+        });
       })
       .catch(() => {
         if (cancelled) return;
         setSentimentArticles({ company: [], japan: [] });
         setSentimentLabels({ company: {}, japan: {} });
         setSentimentFallbackOpinion({ company: null, japan: null });
+        setSentimentAiSummary({ company: null, japan: null });
+        setSentimentSummaryLoading(false);
         setSentimentLoading(false);
       });
 
@@ -365,11 +569,12 @@ const CompanyDashboard = ({ selectedCompany, signals, onSignalClick }: Props) =>
         location: s.location,
         urgency: s.urgency,
         domain: s.domain || s.category,
+        articleUrl: s.articleUrl,
       })),
     [filteredSignals],
   );
   const newsletterCandidatesKey = useMemo(
-    () => newsletterCandidates.map((s) => `${s.id}:${s.title}`).join("|"),
+    () => newsletterCandidates.map((s) => `${s.id}:${s.title}:${s.articleUrl ?? ""}`).join("|"),
     [newsletterCandidates],
   );
 
@@ -393,20 +598,60 @@ const CompanyDashboard = ({ selectedCompany, signals, onSignalClick }: Props) =>
           setAiNewsletterActive(false);
           return;
         }
-        const mapped = result.data.roundup.slice(0, 5).map((a, i) => ({
-          index: i + 1,
-          title: a.title,
-          source: a.source,
-          location: a.location,
-          sentiment: a.sentiment,
-          summary: a.summary,
-        }));
+        const urlById = new Map(newsletterCandidates.map((c) => [c.id, c.articleUrl?.trim() || ""]));
+        const mapped: NewsletterArticleRoundup[] = result.data.roundup.slice(0, 5).map((a, i) => {
+          const fromApi = a.url?.trim() || "";
+          const fromCandidate = urlById.get(a.id) || "";
+          const merged = fromApi || fromCandidate;
+          return {
+            index: i + 1,
+            title: a.title,
+            source: a.source,
+            location: a.location,
+            sentiment: a.sentiment,
+            summary: a.summary,
+            signalId: a.id,
+            ...(merged && merged !== "#" ? { url: merged } : {}),
+          };
+        });
+        const riskFallback = mapped
+          .filter((a) => a.sentiment === "negative")
+          .map((a) =>
+            lang === "jp" ? `「${a.title}」— ネガティブ寄りの論調・リスク要因の監視が必要です。` : `"${a.title}" — watch for adverse narrative or downside risk.`,
+          );
+        const oppFallback = mapped
+          .filter((a) => a.sentiment === "positive")
+          .map((a) =>
+            lang === "jp" ? `「${a.title}」— ポジティブ寄りの論調・追い風の検討に値します。` : `"${a.title}" — favorable narrative worth tracking for upside.`,
+          );
+        const risingRisks =
+          result.data.risingRisks?.length > 0
+            ? result.data.risingRisks
+            : riskFallback.length > 0
+              ? riskFallback.slice(0, 4)
+              : [
+                  lang === "jp"
+                    ? "選定シグナルから顕著なリスクは抽出できませんでした。"
+                    : "No distinct risk themes extracted from the selected set.",
+                ];
+        const risingOpportunities =
+          result.data.risingOpportunities?.length > 0
+            ? result.data.risingOpportunities
+            : oppFallback.length > 0
+              ? oppFallback.slice(0, 4)
+              : [
+                  lang === "jp"
+                    ? "選定シグナルから顕著な機会は抽出できませんでした。"
+                    : "No distinct opportunity themes extracted from the selected set.",
+                ];
         setAiNewsletter({
           title: result.data.title,
           dek: result.data.dek,
           paragraphs: result.data.paragraphs,
           roundupTitle: result.data.roundupTitle,
           articleRoundup: mapped,
+          risingRisks,
+          risingOpportunities,
         });
         setAiNewsletterActive(true);
       })
@@ -428,16 +673,16 @@ const CompanyDashboard = ({ selectedCompany, signals, onSignalClick }: Props) =>
           <div>
             <div className="flex items-center gap-3">
               <h2 className="text-2xl font-bold tracking-tight text-foreground uppercase font-mono">
-                {company.name}
+                {companyNameUi}
               </h2>
               <span className="text-[10px] font-mono uppercase tracking-widest text-muted-foreground bg-secondary px-2 py-0.5 rounded-sm">
-                {company.sector}
+                {getCompanyDisplaySector(company, lang)}
               </span>
             </div>
             {/* Company fit position bar */}
             <div className="mt-3">
               <span className="text-[10px] font-mono uppercase tracking-widest text-muted-foreground block">
-                {lang === "jp" ? "COMPANY FIT" : "COMPANY FIT"}
+                {t("dashboard.companyFitHeader")}
               </span>
               <div className="relative w-56 h-[6px] bg-muted rounded-sm mt-1 overflow-hidden">
                 <div className="absolute inset-y-0 left-0 bg-primary/30 rounded-sm" style={{ width: `${overallScore}%` }} />
@@ -447,15 +692,15 @@ const CompanyDashboard = ({ selectedCompany, signals, onSignalClick }: Props) =>
                 />
               </div>
               <div className="mt-1.5 w-56 flex items-center justify-between text-[9px] font-mono text-muted-foreground">
-                <span>Marginal signal</span>
-                <span>Company fit</span>
+                <span>{t("panel.marginalSignal")}</span>
+                <span>{t("panel.companyFitSlider")}</span>
               </div>
             </div>
           </div>
 
           {/* Time filters */}
           <div className="flex gap-1">
-            {(["24h", "7d", "30d"] as TimeFilter[]).map(tf => (
+            {(["24h", "7d", "30d"] as TimeFilter[]).map((tf) => (
               <button
                 key={tf}
                 onClick={() => setTimeFilter(tf)}
@@ -465,7 +710,7 @@ const CompanyDashboard = ({ selectedCompany, signals, onSignalClick }: Props) =>
                     : "bg-secondary text-muted-foreground hover:text-foreground"
                 }`}
               >
-                {tf}
+                {tf === "24h" ? t("dashboard.time24h") : tf === "7d" ? t("dashboard.time7d") : t("dashboard.time30d")}
               </button>
             ))}
           </div>
@@ -477,16 +722,23 @@ const CompanyDashboard = ({ selectedCompany, signals, onSignalClick }: Props) =>
           <div className="flex-[3] min-w-0">
             <div className="flex items-center gap-2 mb-3">
               <h3 className="text-[10px] font-mono font-semibold uppercase tracking-widest text-muted-foreground">
-                {lang === "jp" ? "アクティブシグナル" : "ACTIVE SIGNALS"}
+                {t("dashboard.activeSignals")}
               </h3>
               <span className="text-[10px] font-mono text-primary tabular-nums">
-                {filteredSignals.length} {lang === "jp" ? "件" : "signals"}
+                {filteredSignals.length}
+                {lang === "jp" ? "" : " "}
+                {t("header.signalsUnit")}
               </span>
             </div>
 
             <div className="divide-y divide-border">
               {filteredSignals.map(signal => {
-                const domainLabel = signal.domain ? (DOMAIN_LABELS[signal.domain]?.[lang] || signal.domain) : null;
+                const disp = getSignalDisplay(signal);
+                const domainLabel = signal.domain
+                  ? t(`domain.${signal.domain}` as TranslationKey)
+                  : signal.category
+                    ? t(`genz.${signal.category}` as TranslationKey)
+                    : null;
                 return (
                   <button
                     key={signal.id}
@@ -498,14 +750,14 @@ const CompanyDashboard = ({ selectedCompany, signals, onSignalClick }: Props) =>
 
                     <div className="flex-1 min-w-0">
                       <p className="text-[13px] font-semibold text-foreground leading-snug truncate group-hover:text-primary transition-colors">
-                        {signal.title}
+                        {disp.title}
                       </p>
                       <p className="text-[11px] text-muted-foreground leading-snug truncate mt-0.5">
-                        {signal.description}
+                        {disp.description}
                       </p>
                       <div className="flex items-center gap-2 mt-1.5">
                         <span className="text-[9px] font-mono text-muted-foreground bg-secondary px-1.5 py-0.5 rounded-sm">
-                          {signal.location}
+                          {disp.location}
                         </span>
                         {domainLabel && (
                           <span className="text-[9px] font-mono text-primary/70 bg-primary/10 px-1.5 py-0.5 rounded-sm">
@@ -524,7 +776,7 @@ const CompanyDashboard = ({ selectedCompany, signals, onSignalClick }: Props) =>
               })}
               {filteredSignals.length === 0 && (
                 <div className="py-8 text-center text-[11px] text-muted-foreground font-mono">
-                  {lang === "jp" ? "この期間のシグナルはありません" : "No signals in this time period"}
+                  {t("dashboard.noSignalsPeriod")}
                 </div>
               )}
             </div>
@@ -534,11 +786,11 @@ const CompanyDashboard = ({ selectedCompany, signals, onSignalClick }: Props) =>
           <div className="flex-[2] min-w-0 space-y-4">
             <div className="border border-border rounded-sm bg-card/60 p-3">
               <h3 className="text-[10px] font-mono font-semibold uppercase tracking-widest text-primary mb-2">
-                {lang === "jp" ? "ニュースレター要約" : "NEWSLETTER SUMMARY"}
+                {t("dashboard.newsletterSummary")}
               </h3>
               {aiNewsletterActive && (
                 <p className="text-[9px] font-mono uppercase tracking-wider text-emerald-300 mb-1">
-                  {lang === "jp" ? "AI CURATED" : "AI CURATED"}
+                  {t("dashboard.aiCurated")}
                 </p>
               )}
               <h4 className="text-[12px] font-semibold text-foreground mb-1">{newsletter.title}</h4>
@@ -556,22 +808,37 @@ const CompanyDashboard = ({ selectedCompany, signals, onSignalClick }: Props) =>
                   {newsletter.roundupTitle}
                 </h5>
                 <div className="space-y-2">
-                  {newsletter.articleRoundup.map((article) => (
-                    <div key={article.index} className="border border-border/70 rounded-sm p-2 bg-background/40">
-                      <div className="flex items-start justify-between gap-2">
-                        <p className="text-[11px] text-foreground leading-snug">
-                          {article.index}. {article.title}
+                  {newsletter.articleRoundup.map((article) => {
+                    const hint = t("dashboard.openArticlePage");
+                    return (
+                      <button
+                        key={article.index}
+                        type="button"
+                        onClick={() => openRoundupEntry(article)}
+                        title={hint}
+                        className="w-full text-left border border-border/70 rounded-sm p-2 bg-background/40 hover:bg-background/70 hover:border-primary/40 transition-colors cursor-pointer group"
+                      >
+                        <div className="flex items-start justify-between gap-2">
+                          <p className="text-[11px] text-foreground leading-snug group-hover:text-primary">
+                            {article.index}. {article.title}
+                          </p>
+                          <span
+                            className={`shrink-0 px-1.5 py-0.5 rounded-sm border text-[8px] font-mono font-semibold uppercase tracking-wider ${newsletterToneClasses[article.sentiment as "positive" | "mixed" | "negative"]}`}
+                          >
+                            {sentimentToneLabel(article.sentiment as ArticleSentiment, t)}
+                          </span>
+                        </div>
+                        <p className="text-[9px] font-mono text-muted-foreground mt-1 uppercase tracking-wider">
+                          {article.source} · {article.location}
                         </p>
-                        <span className={`shrink-0 px-1.5 py-0.5 rounded-sm border text-[8px] font-mono font-semibold uppercase tracking-wider ${newsletterToneClasses[article.sentiment as "positive" | "mixed" | "negative"]}`}>
-                          {article.sentiment}
-                        </span>
-                      </div>
-                      <p className="text-[9px] font-mono text-muted-foreground mt-1 uppercase tracking-wider">
-                        {article.source} · {article.location}
-                      </p>
-                      <p className="text-[10px] text-foreground/70 mt-1 leading-snug">{article.summary}</p>
-                    </div>
-                  ))}
+                        <p className="text-[10px] text-foreground/70 mt-1 leading-snug">{article.summary}</p>
+                        <p className="text-[9px] font-mono text-muted-foreground/80 mt-1.5 uppercase tracking-wider">
+                          {hint}
+                          <ArrowRight className="inline h-3 w-3 ml-1 align-text-bottom opacity-60 group-hover:opacity-100 group-hover:text-primary transition-opacity" />
+                        </p>
+                      </button>
+                    );
+                  })}
                 </div>
               </div>
             </div>
@@ -579,7 +846,7 @@ const CompanyDashboard = ({ selectedCompany, signals, onSignalClick }: Props) =>
             <div className="border border-border rounded-sm bg-card/60 p-3">
               <div className="flex items-center justify-between mb-3">
                 <h3 className="text-[10px] font-mono font-semibold uppercase tracking-widest text-accent">
-                  {lang === "jp" ? "センチメント分析" : "SENTIMENT ANALYSIS"}
+                  {t("dashboard.sentimentAnalysis")}
                 </h3>
                 <div className="flex gap-1">
                   <button
@@ -588,7 +855,7 @@ const CompanyDashboard = ({ selectedCompany, signals, onSignalClick }: Props) =>
                       sentimentView === "company" ? "bg-accent text-accent-foreground" : "bg-secondary text-muted-foreground hover:text-foreground"
                     }`}
                   >
-                    {lang === "jp" ? "COMPANY" : "COMPANY"}
+                    {t("dashboard.colCompany")}
                   </button>
                   <button
                     onClick={() => setSentimentView("japan")}
@@ -596,47 +863,70 @@ const CompanyDashboard = ({ selectedCompany, signals, onSignalClick }: Props) =>
                       sentimentView === "japan" ? "bg-accent text-accent-foreground" : "bg-secondary text-muted-foreground hover:text-foreground"
                     }`}
                   >
-                    {lang === "jp" ? "JAPAN" : "JAPAN"}
+                    {t("dashboard.colJapan")}
                   </button>
                 </div>
               </div>
 
               <div className="border border-border rounded-sm bg-background/40 px-3 py-2 mb-2">
-                <p className="text-[11px] text-foreground/85 leading-snug">
-                  {activeSentimentSummary}
+                <p className="text-[9px] font-mono uppercase tracking-widest text-muted-foreground mb-1">
+                  {t("dashboard.sentimentAiOverviewLabel")}
                 </p>
+                {sentimentSummaryLoading && !sentimentAiSummary[sentimentView] ? (
+                  <p className="text-[11px] text-muted-foreground leading-snug">{t("dashboard.generatingSentimentOverview")}</p>
+                ) : sentimentAiSummary[sentimentView] ? (
+                  <p className="text-[11px] text-foreground/85 leading-snug">{sentimentAiSummary[sentimentView]}</p>
+                ) : (
+                  <p className="text-[11px] text-foreground/85 leading-snug">{activeSentimentSummary}</p>
+                )}
               </div>
 
               <div className="divide-y divide-border border border-border rounded-sm overflow-hidden">
                 {sentimentLoading ? (
                   <div className="px-3 py-2.5 text-[10px] text-muted-foreground">
-                    {lang === "jp" ? "関連報道を読み込み中..." : "Loading relevant coverage..."}
+                    {t("dashboard.loadingCoverage")}
                   </div>
                 ) : activeSentimentArticles.length > 0 ? (
                   activeSentimentArticles.map((article, idx) => {
+                    const trArt = jpSentimentArticleMap[article.id];
+                    const titleUi = lang === "jp" && trArt?.title ? trArt.title : article.title;
+                    const descUi =
+                      lang === "jp" && trArt?.description
+                        ? trArt.description
+                        : article.description || t("dashboard.noSummary");
                     const sentiment = sentimentLabels[sentimentView][article.id] || "mixed";
                     const date = article.date ? new Date(article.date) : new Date();
                     return (
-                      <div key={`${sentimentView}-${idx}`} className="px-3 py-2.5">
+                      <button
+                        key={`${sentimentView}-${idx}`}
+                        type="button"
+                        onClick={() => openSentimentArticle(article)}
+                        title={t("dashboard.openArticlePage")}
+                        className="w-full text-left px-3 py-2.5 hover:bg-muted/40 transition-colors cursor-pointer group"
+                      >
                         <div className="flex items-start justify-between gap-3">
                           <div className="min-w-0">
-                            <p className="text-[11px] text-foreground leading-snug">
-                              {article.title}
+                            <p className="text-[11px] text-foreground leading-snug group-hover:text-primary">
+                              {titleUi}
                             </p>
                             <p className="text-[9px] font-mono text-muted-foreground mt-1 uppercase tracking-wider">
                               {article.source} · {timeAgo(date, lang)}
                             </p>
                             <p className="text-[10px] text-foreground/65 mt-1">
-                              {article.description || (lang === "jp" ? "要約なし" : "No summary available")}
+                              {descUi}
+                            </p>
+                            <p className="text-[9px] font-mono text-muted-foreground/80 mt-1.5 uppercase tracking-wider">
+                              {t("dashboard.openArticlePage")}
+                              <ArrowRight className="inline h-3 w-3 ml-1 align-text-bottom opacity-60 group-hover:opacity-100 group-hover:text-primary transition-opacity" />
                             </p>
                           </div>
                           <span
                             className={`shrink-0 px-1.5 py-0.5 rounded-sm border text-[8px] font-mono font-semibold uppercase tracking-wider ${sentimentBadgeClasses[sentiment]}`}
                           >
-                            {sentiment}
+                            {sentimentToneLabel(sentiment, t)}
                           </span>
                         </div>
-                      </div>
+                      </button>
                     );
                   })
                 ) : (
@@ -646,17 +936,17 @@ const CompanyDashboard = ({ selectedCompany, signals, onSignalClick }: Props) =>
                         <span
                           className={`inline-flex px-1.5 py-0.5 rounded-sm border text-[8px] font-mono font-semibold uppercase tracking-wider ${sentimentBadgeClasses[sentimentFallbackOpinion[sentimentView]!.tone]}`}
                         >
-                          {sentimentFallbackOpinion[sentimentView]!.tone}
+                          {sentimentToneLabel(sentimentFallbackOpinion[sentimentView]!.tone, t)}
                         </span>
                         <p className="text-[11px] text-foreground/85 leading-snug">
                           {sentimentFallbackOpinion[sentimentView]!.opinion}
                         </p>
                         <p className="text-[9px] text-muted-foreground">
-                          {lang === "jp" ? "関連記事が不足しているため、Claudeの推定意見を表示しています。" : "Showing Claude fallback opinion because no matching articles were found."}
+                          {t("dashboard.fallbackClaude")}
                         </p>
                       </div>
                     ) : (
-                      lang === "jp" ? "この条件の関連報道はまだありません。" : "No relevant coverage found for this filter yet."
+                      t("dashboard.noCoverageYet")
                     )}
                   </div>
                 )}
@@ -666,13 +956,13 @@ const CompanyDashboard = ({ selectedCompany, signals, onSignalClick }: Props) =>
             {/* Rising Risks */}
             <div>
               <h3 className="text-[10px] font-mono font-semibold uppercase tracking-widest text-red-400 mb-2">
-                {lang === "jp" ? "高まるリスク" : "RISING RISKS"}
+                {t("dashboard.risingRisks")}
               </h3>
               <div className="space-y-1.5">
-                {dashData.risks.map((r, i) => (
+                {newsletter.risingRisks.map((r, i) => (
                   <div key={i} className="flex items-start gap-2">
                     <span className="mt-1.5 h-1.5 w-1.5 rounded-full bg-red-400 shrink-0" />
-                    <p className="text-[11px] text-foreground/80 leading-snug">{r[lang] || r.en}</p>
+                    <p className="text-[11px] text-foreground/80 leading-snug">{r}</p>
                   </div>
                 ))}
               </div>
@@ -681,13 +971,13 @@ const CompanyDashboard = ({ selectedCompany, signals, onSignalClick }: Props) =>
             {/* Rising Opportunities */}
             <div>
               <h3 className="text-[10px] font-mono font-semibold uppercase tracking-widest text-emerald-400 mb-2">
-                {lang === "jp" ? "高まる機会" : "RISING OPPORTUNITIES"}
+                {t("dashboard.risingOpportunities")}
               </h3>
               <div className="space-y-1.5">
-                {dashData.opportunities.map((o, i) => (
+                {newsletter.risingOpportunities.map((o, i) => (
                   <div key={i} className="flex items-start gap-2">
                     <span className="mt-1.5 h-1.5 w-1.5 rounded-full bg-emerald-400 shrink-0" />
-                    <p className="text-[11px] text-foreground/80 leading-snug">{o[lang] || o.en}</p>
+                    <p className="text-[11px] text-foreground/80 leading-snug">{o}</p>
                   </div>
                 ))}
               </div>
@@ -700,16 +990,16 @@ const CompanyDashboard = ({ selectedCompany, signals, onSignalClick }: Props) =>
                 className="flex items-center gap-1 text-[10px] font-mono font-semibold uppercase tracking-widest text-muted-foreground hover:text-foreground transition-colors w-full"
               >
                 {briefOpen ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
-                {lang === "jp" ? "企業ブリーフ" : "COMPANY BRIEF"}
+                {t("dashboard.companyBrief")}
               </button>
               {briefOpen && (
                 <div className="mt-2 space-y-2">
                   <div>
-                    <span className="text-[9px] font-mono uppercase tracking-widest text-muted-foreground">{lang === "jp" ? "ビジネスモデル" : "BUSINESS MODEL"}</span>
+                    <span className="text-[9px] font-mono uppercase tracking-widest text-muted-foreground">{t("dashboard.businessModel")}</span>
                     <p className="text-[11px] text-foreground/80 mt-0.5">{dashData.brief.businessModel[lang] || dashData.brief.businessModel.en}</p>
                   </div>
                   <div>
-                    <span className="text-[9px] font-mono uppercase tracking-widest text-muted-foreground">{lang === "jp" ? "戦略的優先事項" : "STRATEGIC PRIORITIES"}</span>
+                    <span className="text-[9px] font-mono uppercase tracking-widest text-muted-foreground">{t("dashboard.strategicPriorities")}</span>
                     <ul className="mt-0.5 space-y-0.5">
                       {dashData.brief.priorities.map((p, i) => (
                         <li key={i} className="text-[11px] text-foreground/80 flex items-start gap-1.5">
@@ -720,7 +1010,7 @@ const CompanyDashboard = ({ selectedCompany, signals, onSignalClick }: Props) =>
                     </ul>
                   </div>
                   <div>
-                    <span className="text-[9px] font-mono uppercase tracking-widest text-muted-foreground">{lang === "jp" ? "主要市場" : "KEY MARKETS"}</span>
+                    <span className="text-[9px] font-mono uppercase tracking-widest text-muted-foreground">{t("dashboard.keyMarkets")}</span>
                     <p className="text-[11px] text-foreground/80 mt-0.5">{dashData.brief.keyMarkets[lang] || dashData.brief.keyMarkets.en}</p>
                   </div>
                 </div>

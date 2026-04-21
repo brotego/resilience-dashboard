@@ -6,6 +6,8 @@ import { UnifiedSignal } from "@/data/unifiedSignalTypes";
 import { GenZCategoryId } from "@/data/genzTypes";
 import { DashboardMode } from "@/components/dashboard/DashboardLayout";
 import { useLang } from "@/i18n/LanguageContext";
+import { useJpUi } from "@/i18n/jpUiContext";
+import { getCompanyDisplayName } from "@/i18n/companyLocale";
 import { ExternalLink } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
@@ -31,6 +33,7 @@ function normalizeArticleContent(content?: string): string {
 
 const SignalDetail = () => {
   const { t, lang, setLang } = useLang();
+  const { getSignalDisplay } = useJpUi();
   const navigate = useNavigate();
   const { id: idParam } = useParams();
   const id = idParam ? decodeURIComponent(idParam) : undefined;
@@ -40,44 +43,6 @@ const SignalDetail = () => {
   const [fetchedContent, setFetchedContent] = useState("");
   const [loadingContent, setLoadingContent] = useState(false);
   const [now, setNow] = useState(new Date());
-
-  if (!signal) {
-    return (
-      <div className="h-screen bg-background text-foreground flex items-center justify-center px-6">
-        <div className="max-w-md text-center space-y-3">
-          <h1 className="text-lg font-semibold">{lang === "jp" ? "シグナルが見つかりません" : "Signal not found"}</h1>
-          <p className="text-sm text-muted-foreground">
-            {lang === "jp"
-              ? "このページはアプリ内の「More info」から開いてください。"
-              : "Open this page from the in-app More info button."}
-          </p>
-          <Button onClick={() => navigate("/")}>{lang === "jp" ? "ダッシュボードに戻る" : "Back to dashboard"}</Button>
-          {id && <p className="text-[11px] font-mono text-muted-foreground/70">{id}</p>}
-        </div>
-      </div>
-    );
-  }
-
-  const articleSanitizeOpts = { author: signal.author };
-  const snippetContent = sanitizeNewsArticleText(
-    normalizeArticleContent(signal.articleContent),
-    articleSanitizeOpts,
-  );
-  const fetchedClean = sanitizeNewsArticleText(fetchedContent, articleSanitizeOpts);
-  const fetchedUseful = fetchedClean.length > 0 && !looksLikeHtmlChromeDump(fetchedClean);
-  const effectiveContent = fetchedUseful
-    ? fetchedClean.length >= snippetContent.length
-      ? fetchedClean
-      : snippetContent || fetchedClean
-    : snippetContent || fetchedClean;
-  const articleParagraphs = splitArticleIntoParagraphs(effectiveContent);
-  const hasArticleContent = articleParagraphs.length > 0;
-  const hasExternalUrl = Boolean(signal.articleUrl && signal.articleUrl !== "#");
-  const originTab = state?.originTab ?? "dashboard";
-  const originMode = state?.originMode ?? "resilience";
-  const curationCompanyName = state?.selectedCompany
-    ? COMPANIES.find((c) => c.id === state.selectedCompany)?.name
-    : undefined;
 
   useEffect(() => {
     setFetchedContent("");
@@ -111,6 +76,44 @@ const SignalDetail = () => {
     return () => clearInterval(timer);
   }, []);
 
+  if (!signal) {
+    return (
+      <div className="h-screen bg-background text-foreground flex items-center justify-center px-6">
+        <div className="max-w-md text-center space-y-3">
+          <h1 className="text-lg font-semibold">{t("signal.notFound")}</h1>
+          <p className="text-sm text-muted-foreground">{t("signal.notFoundHintApp")}</p>
+          <Button onClick={() => navigate("/")}>{t("signal.backDashboard")}</Button>
+          {id && <p className="text-[11px] font-mono text-muted-foreground/70">{id}</p>}
+        </div>
+      </div>
+    );
+  }
+
+  const signalUi = getSignalDisplay(signal);
+  const articleSanitizeOpts = { author: signal.author };
+  const snippetContent = sanitizeNewsArticleText(
+    normalizeArticleContent(signal.articleContent),
+    articleSanitizeOpts,
+  );
+  const fetchedClean = sanitizeNewsArticleText(fetchedContent, articleSanitizeOpts);
+  const fetchedUseful = fetchedClean.length > 0 && !looksLikeHtmlChromeDump(fetchedClean);
+  const effectiveContent = fetchedUseful
+    ? fetchedClean.length >= snippetContent.length
+      ? fetchedClean
+      : snippetContent || fetchedClean
+    : snippetContent || fetchedClean;
+  const articleParagraphs = splitArticleIntoParagraphs(effectiveContent);
+  const hasArticleContent = articleParagraphs.length > 0;
+  const hasExternalUrl = Boolean(signal.articleUrl && signal.articleUrl !== "#");
+  const originTab = state?.originTab ?? "dashboard";
+  const originMode = state?.originMode ?? "resilience";
+  const curationCompany = state?.selectedCompany
+    ? COMPANIES.find((c) => c.id === state.selectedCompany)
+    : undefined;
+  const curationCompanyName = curationCompany
+    ? getCompanyDisplayName(curationCompany, lang)
+    : undefined;
+
   return (
     <div className="h-screen bg-background overflow-hidden flex flex-col">
       <header className="flex items-center justify-between px-4 h-[44px] border-b border-border bg-card shrink-0">
@@ -123,12 +126,12 @@ const SignalDetail = () => {
             onClick={() => navigate("/")}
             className="px-3 py-1 text-[10px] font-mono font-semibold uppercase tracking-wider rounded-sm transition-colors text-muted-foreground hover:text-foreground"
           >
-            {lang === "jp" ? "ダッシュボード" : "Dashboard"}
+            {t("tab.dashboard")}
           </button>
           <button
             className="px-3 py-1 text-[10px] font-mono font-semibold uppercase tracking-wider rounded-sm transition-colors bg-primary text-primary-foreground"
           >
-            {lang === "jp" ? "詳細" : "Detail"}
+            {t("signal.detailBreadcrumb")}
           </button>
         </div>
 
@@ -178,9 +181,9 @@ const SignalDetail = () => {
         <div className="h-full border border-border rounded-sm bg-card p-4 overflow-y-auto">
           <div className="mb-3 pb-3 border-b border-border">
             <h2 className="text-[11px] font-mono font-bold uppercase tracking-widest text-primary">
-              {lang === "jp" ? "記事詳細" : "Article details"}
+              {t("signal.articleDetails")}
             </h2>
-            <p className="text-sm font-semibold mt-1">{signal.title}</p>
+            <p className="text-sm font-semibold mt-1">{signalUi.title}</p>
           </div>
 
           <ArticleStoryMeta
@@ -188,16 +191,15 @@ const SignalDetail = () => {
             publishedAt={signal.date}
             author={signal.author}
             source={signal.source}
-            location={signal.location}
+            location={signalUi.location}
             locale={t("clock.locale")}
-            lang={lang}
           />
 
           {hasArticleContent ? (
             <div className="space-y-4">
               {loadingContent && !fetchedContent && hasExternalUrl && (
                 <p className="text-xs text-muted-foreground">
-                  {lang === "jp" ? "全文を読み込み中…" : "Loading full article text…"}
+                  {t("signal.loadingFullArticle")}
                 </p>
               )}
               <div className="prose prose-sm dark:prose-invert max-w-none text-foreground/90 prose-p:leading-relaxed">
@@ -209,7 +211,7 @@ const SignalDetail = () => {
                 <a href={signal.articleUrl} target="_blank" rel="noreferrer">
                   <Button variant="outline" className="gap-2">
                     <ExternalLink className="h-4 w-4" />
-                    {lang === "jp" ? "元記事を開く" : "Open original article"}
+                    {t("signal.openOriginal")}
                   </Button>
                 </a>
               )}
@@ -218,19 +220,17 @@ const SignalDetail = () => {
             <div className="space-y-4">
               {loadingContent && (
                 <p className="text-sm text-muted-foreground">
-                  {lang === "jp" ? "記事本文を取得中..." : "Fetching full article text..."}
+                  {t("signal.fetchingArticle")}
                 </p>
               )}
               <p className="text-sm text-muted-foreground">
-                {lang === "jp"
-                  ? "全文記事は現在利用できません。外部サイトで確認してください。"
-                  : "The full article is not available in-app right now. Open the source site for complete coverage."}
+                {t("signal.articleUnavailableBody")}
               </p>
               {hasExternalUrl ? (
                 <a href={signal.articleUrl} target="_blank" rel="noreferrer">
                   <Button className="gap-2">
                     <ExternalLink className="h-4 w-4" />
-                    {lang === "jp" ? "外部サイトへ移動" : "Go to external site"}
+                    {t("signal.goExternal")}
                   </Button>
                 </a>
               ) : (

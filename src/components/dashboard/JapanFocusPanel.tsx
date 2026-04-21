@@ -2,6 +2,7 @@ import { JAPAN_FOCUS } from "@/data/japanFocus";
 import { COMPANY_JAPAN_FOCUS } from "@/data/companyFocus";
 import { COMPANIES, CompanyId } from "@/data/companies";
 import { DomainId } from "@/data/types";
+import { useLang } from "@/i18n/LanguageContext";
 
 interface Props {
   activeDomains: DomainId[];
@@ -9,6 +10,7 @@ interface Props {
 }
 
 const JapanFocusPanel = ({ activeDomains, selectedCompany }: Props) => {
+  const { t } = useLang();
   const focusDomain = activeDomains.length > 0 ? activeDomains[activeDomains.length - 1] : "work";
   const baseData = JAPAN_FOCUS.find((j) => j.domain === focusDomain);
   if (!baseData) return null;
@@ -24,7 +26,7 @@ const JapanFocusPanel = ({ activeDomains, selectedCompany }: Props) => {
       <div className="flex items-center gap-2">
         <div className="w-2 h-2 rounded-full bg-primary" />
         <h3 className="text-xs font-semibold uppercase tracking-wider text-primary">
-          {company ? `${company.name} × Japan` : "Japan Focus"}
+          {company ? `${company.name}${t("focus.companyJapan")}` : t("focus.japanFocus")}
         </h3>
       </div>
       <p className="text-sm font-semibold text-foreground leading-snug">{headline}</p>
@@ -49,7 +51,7 @@ const JapanFocusPanel = ({ activeDomains, selectedCompany }: Props) => {
 
       <div className="bg-primary/10 border border-primary/20 rounded-md p-3">
         <div className="text-[10px] font-semibold uppercase tracking-wider text-primary mb-1">
-          {company ? `${company.name} CEO Insight` : "CEO Insight"}
+          {company ? `${company.name} ${t("focus.ceoInsight")}` : t("focus.ceoInsight")}
         </div>
         <p className="text-xs text-foreground leading-relaxed">{ceoInsight}</p>
       </div>

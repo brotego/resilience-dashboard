@@ -40,6 +40,9 @@ export type CompanyNewsletterResult = {
   paragraphs: string[];
   roundupTitle: string;
   selectedIds: string[];
+  /** Three to four bullets grounded in the selected roundup / signal set. */
+  risingRisks: string[];
+  risingOpportunities: string[];
   roundup: Array<{
     id: string;
     title: string;
@@ -47,6 +50,8 @@ export type CompanyNewsletterResult = {
     location: string;
     sentiment: ArticleSentiment;
     summary: string;
+    /** Original article URL when the signal came from live news or the model echoed it. */
+    url?: string;
   }>;
 };
 export type SentimentArticleInput = {
@@ -71,8 +76,10 @@ const AI_SENTIMENT_OPINION_CACHE_PREFIX = "rr.ai.sentiment.opinion.v1.";
 const AI_SENTIMENT_OPINION_MAX_AGE_MS = 6 * 60 * 60 * 1000;
 const AI_COUNTRY_INSIGHT_CACHE_PREFIX = "rr.ai.country.insight.v1.";
 const AI_COUNTRY_INSIGHT_MAX_AGE_MS = 6 * 60 * 60 * 1000;
-const AI_NEWSLETTER_CACHE_PREFIX = "rr.ai.newsletter.v1.";
+const AI_NEWSLETTER_CACHE_PREFIX = "rr.ai.newsletter.v3.";
 const AI_NEWSLETTER_CACHE_MAX_AGE_MS = 6 * 60 * 60 * 1000;
+const AI_SENTIMENT_SUMMARY_CACHE_PREFIX = "rr.ai.sentiment.summary.v1.";
+const AI_SENTIMENT_SUMMARY_MAX_AGE_MS = 6 * 60 * 60 * 1000;
 
 function insightCacheKey(body: AiInsightRequestBody): string {
   return JSON.stringify({
@@ -225,6 +232,31 @@ function parseInsight(raw: string): AiInsightResult {
     genzSignal: get("GENZ_SIGNAL") || get("GENZ SIGNAL") || "",
     patternTag: get("PATTERN_TAG") || get("PATTERN TAG") || "Emerging Signal",
   };
+}
+
+const JP_FALLBACK_ACTION = "戦略的影響を評価し、対応プランを策定する。";
+const JP_FALLBACK_RISK = "対応が遅れると競争上不利になる可能性があります。";
+const JP_FALLBACK_OPP = "先行対応により優位を確保できる余地があります。";
+const JP_FALLBACK_WHY = "市場ポジションと実行リスクに関わる戦略的含意です。";
+const JP_FALLBACK_PATTERN = "新興シグナル";
+
+function localizeAiInsightDefaultsForJp(data: AiInsightResult): AiInsightResult {
+  const actions =
+    data.actions.length === 1 && data.actions[0] === "Assess strategic impact and develop response plan."
+      ? [JP_FALLBACK_ACTION]
+      : data.actions;
+  const risks =
+    data.risks.length === 1 && data.risks[0] === "Delayed response risks competitive disadvantage."
+      ? [JP_FALLBACK_RISK]
+      : data.risks;
+  const opportunities =
+    data.opportunities.length === 1 && data.opportunities[0] === "First-mover positioning available."
+      ? [JP_FALLBACK_OPP]
+      : data.opportunities;
+  const whyItMatters =
+    data.whyItMatters === "Strategic implications for market positioning." ? JP_FALLBACK_WHY : data.whyItMatters;
+  const patternTag = data.patternTag === "Emerging Signal" ? JP_FALLBACK_PATTERN : data.patternTag;
+  return { ...data, actions, risks, opportunities, whyItMatters, patternTag };
 }
 
 function parseSentimentMap(raw: string): Record<string, ArticleSentiment> | null {
@@ -469,6 +501,172 @@ IMPORTANT: For company lens, use the selected country's media perspective toward
   }
 }
 
+export type SentimentSectionSummaryInput = {
+  id: string;
+  title: string;
+  description?: string;
+  source?: string;
+  tone: ArticleSentiment;
+};
+
+function sentimentSectionSummaryCacheKey(params: {
+  lens: SentimentLens;
+  company?: string | null;
+  industry?: string | null;
+  countryName?: string | null;
+  language?: string;
+  articles: SentimentSectionSummaryInput[];
+}): string {
+  return JSON.stringify({
+    lens: params.lens,
+    company: params.company || "",
+    industry: params.industry || "",
+    country: params.countryName || "",
+    lang: params.language || "en",
+    articles: params.articles.map((a) => ({
+      id: a.id,
+      t: a.title || "",
+      d: a.description || "",
+      src: a.source || "",
+      tone: a.tone,
+    })),
+  });
+}
+
+type SentimentSummaryCacheEntry = {
+  savedAt: number;
+  data: { summary: string };
+};
+
+function readSentimentSectionSummaryCache(cacheKey: string): { summary: string } | null {
+  if (typeof sessionStorage === "undefined") return null;
+  try {
+    const raw = sessionStorage.getItem(AI_SENTIMENT_SUMMARY_CACHE_PREFIX + cacheKey);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as SentimentSummaryCacheEntry;
+    if (!parsed?.data?.summary || typeof parsed.savedAt !== "number") return null;
+    if (Date.now() - parsed.savedAt > AI_SENTIMENT_SUMMARY_MAX_AGE_MS) {
+      sessionStorage.removeItem(AI_SENTIMENT_SUMMARY_CACHE_PREFIX + cacheKey);
+      return null;
+    }
+    return parsed.data;
+  } catch {
+    return null;
+  }
+}
+
+function writeSentimentSectionSummaryCache(cacheKey: string, data: { summary: string }): void {
+  if (typeof sessionStorage === "undefined") return;
+  try {
+    const entry: SentimentSummaryCacheEntry = { savedAt: Date.now(), data };
+    sessionStorage.setItem(AI_SENTIMENT_SUMMARY_CACHE_PREFIX + cacheKey, JSON.stringify(entry));
+  } catch {
+    // ignore
+  }
+}
+
+function parseSentimentSectionSummary(raw: string): { summary: string } | null {
+  const m = raw.match(/SUMMARY:\s*([\s\S]+)/i);
+  if (!m || !m[1]?.trim()) return null;
+  return { summary: m[1].trim() };
+}
+
+/** Cross-article AI overview for the dashboard sentiment list (company or Japan lens). */
+export async function invokeSentimentSectionSummary(params: {
+  lens: SentimentLens;
+  company?: string | null;
+  industry?: string | null;
+  countryName?: string | null;
+  language?: string;
+  articles: SentimentSectionSummaryInput[];
+}): Promise<{ data: { summary: string } | null; error: Error | null }> {
+  const bounded = params.articles.slice(0, 10);
+  if (bounded.length === 0) return { data: null, error: null };
+
+  const cacheKey = sentimentSectionSummaryCacheKey({ ...params, articles: bounded });
+  const cached = readSentimentSectionSummaryCache(cacheKey);
+  if (cached) return { data: cached, error: null };
+
+  const apiKey = resolveAnthropicKey();
+  if (!apiKey) return { data: null, error: new Error("VITE_ANTHROPIC_API_KEY is not configured.") };
+  const jp = params.language === "jp";
+  const lines = bounded.map(
+    (a, i) =>
+      `${i + 1}. id=${a.id} | tone=${a.tone} | title=${a.title} | source=${a.source || ""} | snippet=${(a.description || "").slice(0, 320)}`,
+  );
+  const lensLine = params.lens === "japan"
+    ? (jp
+      ? `レンズ: グローバル報道における「日本」関連の論調`
+      : `Lens: global media sentiment toward Japan-related themes`)
+    : (jp
+      ? `レンズ: グローバル報道における企業「${params.company || "N/A"}」（業界: ${params.industry || "N/A"}）への論調`
+      : `Lens: global media sentiment toward company ${params.company || "N/A"} (industry: ${params.industry || "N/A"})`);
+
+  const prompt = jp
+    ? `あなたは経営向けダッシュボードの編集者です。以下は同一レンズで取得した記事一覧（各件にAIが付けたtone: positive|mixed|negative）です。
+${lensLine}
+
+記事:
+${lines.join("\n")}
+
+要件:
+- 入力記事の内容にのみ根ざす（外部の事実を捏造しない）
+- 4〜7文の1段落で、全体のトーン配分、繰り返しテーマ、経営が注視すべき点、時間軸の示唆を含める
+- 出力は次の形式のみ（見出しや箇条書き禁止）:
+SUMMARY: <段落>`
+    : `You are an editor for an executive dashboard. Below is a set of articles for one lens, each with an AI-assigned tone (positive|mixed|negative).
+${lensLine}
+
+Articles:
+${lines.join("\n")}
+
+Requirements:
+- Ground only in these headlines/snippets; do not invent facts.
+- One paragraph, 4-7 sentences: overall tone balance, recurring themes, what leadership should watch, and any timing nuance.
+- Output ONLY this format (no headings or bullets):
+SUMMARY: <paragraph>`;
+
+  try {
+    let lastError = "Unknown Anthropic error";
+    for (const model of resolveAnthropicModels()) {
+      const res = await fetch("https://api.anthropic.com/v1/messages", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-api-key": apiKey,
+          "anthropic-version": "2023-06-01",
+          "anthropic-dangerous-direct-browser-access": "true",
+        },
+        body: JSON.stringify({
+          model,
+          max_tokens: 720,
+          temperature: 0.25,
+          messages: [{ role: "user", content: prompt }],
+        }),
+      });
+      const json = await res.json().catch(() => null);
+      if (!res.ok) {
+        const msg =
+          (json && typeof json === "object" && "error" in json
+            ? JSON.stringify((json as { error?: unknown }).error)
+            : `HTTP ${res.status}`) || `HTTP ${res.status}`;
+        lastError = `Anthropic: ${msg}`;
+        continue;
+      }
+      const text = Array.isArray((json as any)?.content)
+        ? (json as any).content.map((c: any) => (c?.type === "text" ? c.text : "")).join("\n")
+        : "";
+      const parsed = parseSentimentSectionSummary(text);
+      if (!parsed) continue;
+      writeSentimentSectionSummaryCache(cacheKey, parsed);
+      return { data: parsed, error: null };
+    }
+    return { data: null, error: new Error(lastError) };
+  } catch (error) {
+    return { data: null, error: error instanceof Error ? error : new Error("Sentiment summary request failed") };
+  }
+}
+
 type CountrySignalInput = {
   title: string;
   description?: string;
@@ -635,6 +833,8 @@ type NewsletterSignalInput = {
   location?: string;
   urgency?: string;
   domain?: string;
+  /** When present (e.g. live news), shown as the roundup link target. */
+  articleUrl?: string;
 };
 
 type NewsletterCacheEntry = {
@@ -660,6 +860,7 @@ function newsletterCacheKey(params: {
       loc: s.location || "",
       u: s.urgency || "",
       dom: s.domain || "",
+      url: s.articleUrl || "",
     })),
   });
 }
@@ -707,12 +908,20 @@ function parseNewsletter(raw: string): CompanyNewsletterResult | null {
         ? parsed.roundupTitle
         : "Article Roundup";
       const selectedIds = Array.isArray(parsed.selectedIds) ? parsed.selectedIds.map(String) : [];
+      const risingRisks = Array.isArray((parsed as { risingRisks?: unknown }).risingRisks)
+        ? (parsed as { risingRisks: unknown[] }).risingRisks.map((x) => String(x).trim()).filter(Boolean).slice(0, 5)
+        : [];
+      const risingOpportunities = Array.isArray((parsed as { risingOpportunities?: unknown }).risingOpportunities)
+        ? (parsed as { risingOpportunities: unknown[] }).risingOpportunities.map((x) => String(x).trim()).filter(Boolean).slice(0, 5)
+        : [];
       return {
         title: String(parsed.title),
         dek: String(parsed.dek || ""),
         paragraphs: parsed.paragraphs.map((p) => String(p)).filter(Boolean),
         roundupTitle,
         selectedIds,
+        risingRisks,
+        risingOpportunities,
         roundup: parsed.roundup
           .map((r: any) => ({
             id: String(r?.id || ""),
@@ -721,6 +930,7 @@ function parseNewsletter(raw: string): CompanyNewsletterResult | null {
             location: String(r?.location || ""),
             sentiment: (String(r?.sentiment || "mixed").toLowerCase() as ArticleSentiment),
             summary: String(r?.summary || ""),
+            ...(typeof r?.url === "string" && r.url.trim().length > 0 ? { url: r.url.trim() } : {}),
           }))
           .filter((r) => r.id && r.title),
       };
@@ -752,15 +962,23 @@ export async function invokeCompanyNewsletter(params: {
   const apiKey = resolveAnthropicKey();
   if (!apiKey) return { data: null, error: new Error("VITE_ANTHROPIC_API_KEY is not configured.") };
   const jp = params.language === "jp";
+  const candidateLines = boundedSignals.map(
+    (s) =>
+      `- id=${s.id} | title=${s.title} | desc=${s.description || ""} | source=${s.source || ""} | location=${s.location || ""} | urgency=${s.urgency || ""} | domain=${s.domain || ""} | url=${s.articleUrl || ""}`,
+  );
+
   const prompt = jp
     ? `あなたは企業向け編集責任者です。以下の候補シグナルから、${params.company}（業界: ${params.industry || "N/A"}）に最も関連性が高いものを5件選び、週次ニュースレターを作成してください。
 要件:
 - 関連性の高い順に5件選定
 - JSONのみを返す
 - paragraphsは3本、各2-3文
-- roundupは5件
+- roundupは5件（各summaryは選んだシグナルの内容に基づく）
 - sentimentはpositive|mixed|negative
 - selectedIdsには選んだシグナルidを格納
+- risingRisks: 選んだシグナル／見出しの内容に根ざした「高まるリスク」を3〜4本の短文配列で（各1文）
+- risingOpportunities: 同様に「高まる機会」を3〜4本の短文配列で（各1文）
+- roundup各要素に、候補に url があれば同じ "url" フィールドを必ずコピー（なければ省略）
 
 JSON schema:
 {
@@ -769,20 +987,25 @@ JSON schema:
   "paragraphs":["...","...","..."],
   "roundupTitle":"...",
   "selectedIds":["id1","id2","id3","id4","id5"],
-  "roundup":[{"id":"id1","title":"...","source":"...","location":"...","sentiment":"mixed","summary":"..."}]
+  "risingRisks":["...","...","..."],
+  "risingOpportunities":["...","...","..."],
+  "roundup":[{"id":"id1","title":"...","source":"...","location":"...","sentiment":"mixed","summary":"...","url":"https://..."}]
 }
 
 候補:
-${boundedSignals.map((s) => `- id=${s.id} | title=${s.title} | desc=${s.description || ""} | source=${s.source || ""} | location=${s.location || ""} | urgency=${s.urgency || ""} | domain=${s.domain || ""}`).join("\n")}`
+${candidateLines.join("\n")}`
     : `You are an editorial strategist. From the candidate signals below, pick the 5 most relevant items for ${params.company} (industry: ${params.industry || "N/A"}) and write a weekly newsletter.
 Requirements:
 - Pick 5 most relevant items in ranked order
 - Return JSON only
 - Do not use markdown fences
 - Provide 3 newsletter paragraphs, each 2-3 sentences
-- Provide 5 roundup entries
+- Provide 5 roundup entries; each summary must reflect that signal's storyline
 - sentiment must be one of positive|mixed|negative
 - selectedIds must contain the chosen signal IDs
+- risingRisks: array of 3-4 short sentences (one line each) naming concrete risks implied by the SELECTED items only
+- risingOpportunities: array of 3-4 short sentences for upside implied by the SELECTED items only
+- For each roundup item, if the candidate line includes a non-empty url=..., copy it into the same "url" field on that roundup object; omit "url" if none
 
 JSON schema:
 {
@@ -791,11 +1014,13 @@ JSON schema:
   "paragraphs":["...","...","..."],
   "roundupTitle":"...",
   "selectedIds":["id1","id2","id3","id4","id5"],
-  "roundup":[{"id":"id1","title":"...","source":"...","location":"...","sentiment":"mixed","summary":"..."}]
+  "risingRisks":["...","...","..."],
+  "risingOpportunities":["...","...","..."],
+  "roundup":[{"id":"id1","title":"...","source":"...","location":"...","sentiment":"mixed","summary":"...","url":"https://..."}]
 }
 
 Candidates:
-${boundedSignals.map((s) => `- id=${s.id} | title=${s.title} | desc=${s.description || ""} | source=${s.source || ""} | location=${s.location || ""} | urgency=${s.urgency || ""} | domain=${s.domain || ""}`).join("\n")}`;
+${candidateLines.join("\n")}`;
 
   try {
     let lastError = "Unknown Anthropic error";
@@ -810,7 +1035,7 @@ ${boundedSignals.map((s) => `- id=${s.id} | title=${s.title} | desc=${s.descript
         },
         body: JSON.stringify({
           model,
-          max_tokens: 1400,
+          max_tokens: 2800,
           temperature: 0.3,
           messages: [{ role: "user", content: prompt }],
         }),
@@ -829,8 +1054,19 @@ ${boundedSignals.map((s) => `- id=${s.id} | title=${s.title} | desc=${s.descript
         : "";
       const parsed = parseNewsletter(text);
       if (!parsed) continue;
-      writeNewsletterCache(cacheKey, parsed);
-      return { data: parsed, error: null };
+      const urlById = new Map(
+        boundedSignals.map((s) => [s.id, (s.articleUrl || "").trim()]),
+      );
+      const enriched: CompanyNewsletterResult = {
+        ...parsed,
+        roundup: parsed.roundup.map((r) => {
+          const fromSignal = urlById.get(r.id) || "";
+          const mergedUrl = (r.url && r.url.trim().length > 0 ? r.url.trim() : fromSignal) || undefined;
+          return { ...r, ...(mergedUrl ? { url: mergedUrl } : {}) };
+        }),
+      };
+      writeNewsletterCache(cacheKey, enriched);
+      return { data: enriched, error: null };
     }
     return { data: null, error: new Error(lastError) };
   } catch (error) {
@@ -845,9 +1081,10 @@ export async function invokeAiInsight(body: AiInsightRequestBody): Promise<{ dat
 
   const apiKey = resolveAnthropicKey();
   if (!apiKey) {
+    const empty = jp ? localizeAiInsightDefaultsForJp(parseInsight("")) : parseInsight("");
     return {
       data: {
-        ...parseInsight(""),
+        ...empty,
         error: jp
           ? "VITE_ANTHROPIC_API_KEY が未設定です。"
           : "VITE_ANTHROPIC_API_KEY is not configured.",
@@ -868,6 +1105,8 @@ export async function invokeAiInsight(body: AiInsightRequestBody): Promise<{ dat
 
   const prompt = jp
     ? `あなたは企業向け戦略アナリストです。以下のシグナルをもとに、厳密に次の形式で出力してください。
+【言語】ラベル名（URGENCY 等）はそのまま。各フィールドの本文はすべて自然な日本語のみ。英語文は禁止。
+
 URGENCY: high|medium|low
 ARTICLE_SUMMARY: <記事の要点を1-2文で要約。固有名詞と出来事を明確に>
 HEADLINE: <15語以内>
@@ -955,14 +1194,16 @@ Company: ${body.company || "general"}`;
             .map((c: any) => (c?.type === "text" ? c.text : ""))
             .join("\n")
         : "";
-      const parsed = parseInsight(text);
+      const parsed = jp ? localizeAiInsightDefaultsForJp(parseInsight(text)) : parseInsight(text);
       writeInsightCache(body, parsed);
       return { data: parsed, error: null };
     }
-    return { data: { ...parseInsight(""), error: lastError }, error: null };
+    const emptyErr = jp ? localizeAiInsightDefaultsForJp(parseInsight("")) : parseInsight("");
+    return { data: { ...emptyErr, error: lastError }, error: null };
   } catch (err) {
+    const emptyErr = jp ? localizeAiInsightDefaultsForJp(parseInsight("")) : parseInsight("");
     return {
-      data: { ...parseInsight(""), error: err instanceof Error ? err.message : "LLM request failed" },
+      data: { ...emptyErr, error: err instanceof Error ? err.message : "LLM request failed" },
       error: null,
     };
   }

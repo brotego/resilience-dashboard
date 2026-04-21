@@ -10,6 +10,9 @@ import { DashboardMode } from "./DashboardLayout";
 import { invokeAiInsight } from "@/api/aiInsight";
 import { calculateResilienceScore } from "@/lib/resilienceScore";
 import { useLang } from "@/i18n/LanguageContext";
+import { useJpUi } from "@/i18n/jpUiContext";
+import { getCompanyDisplayName } from "@/i18n/companyLocale";
+import type { TranslationKey } from "@/i18n/translations";
 
 interface AIInsight {
   urgency: string;
@@ -85,7 +88,8 @@ const SectionHeader = ({ children, color = "text-primary" }: { children: React.R
 
 /** Auto-cycling preview of top signals when nothing is selected */
 const AutoCyclePreview = ({ signals, onSignalClick }: { signals: UnifiedSignal[]; onSignalClick: (s: UnifiedSignal) => void }) => {
-  const { lang } = useLang();
+  const { t } = useLang();
+  const { getSignalDisplay } = useJpUi();
   const topSignals = signals
     .sort((a, b) => b.resilienceScore - a.resilienceScore)
     .slice(0, 3);
@@ -107,6 +111,7 @@ const AutoCyclePreview = ({ signals, onSignalClick }: { signals: UnifiedSignal[]
   if (topSignals.length === 0) return null;
   const signal = topSignals[index % topSignals.length];
   if (!signal) return null;
+  const disp = getSignalDisplay(signal);
 
   return (
     <div className="flex-1 flex flex-col">
@@ -116,9 +121,9 @@ const AutoCyclePreview = ({ signals, onSignalClick }: { signals: UnifiedSignal[]
       >
         <div className="space-y-2">
           <UrgencyBadge level={signal.urgency} />
-          <h3 className="text-sm font-bold text-foreground leading-snug">{signal.title}</h3>
-          <p className="text-[10px] font-mono text-muted-foreground">{signal.location}</p>
-          <p className="text-[11px] text-foreground/60 leading-snug line-clamp-2">{signal.description}</p>
+          <h3 className="text-sm font-bold text-foreground leading-snug">{disp.title}</h3>
+          <p className="text-[10px] font-mono text-muted-foreground">{disp.location}</p>
+          <p className="text-[11px] text-foreground/60 leading-snug line-clamp-2">{disp.description}</p>
         </div>
       </button>
       <div className="px-4 pb-2 flex items-center justify-between">
@@ -128,7 +133,7 @@ const AutoCyclePreview = ({ signals, onSignalClick }: { signals: UnifiedSignal[]
           ))}
         </div>
         <span className="text-[8px] font-mono text-muted-foreground/50 uppercase tracking-widest">
-          {lang === "jp" ? "自動巡回中" : "auto-cycling"}
+          {t("panel.autoCycling")}
         </span>
       </div>
     </div>
@@ -148,6 +153,7 @@ const AIInsightPanel = ({
   signals = [],
 }: Props) => {
   const { lang, t } = useLang();
+  const { getSignalDisplay } = useJpUi();
   const [contextOpen, setContextOpen] = useState(false);
   const [insight, setInsight] = useState<AIInsight | null>(null);
   const [loading, setLoading] = useState(false);
@@ -175,29 +181,42 @@ const AIInsightPanel = ({
         ? GENZ_CATEGORIES.find(c => c.id === selectedSignal.category)
         : null;
 
+    const domainOrCategoryLabel =
+      selectedSignal.domain
+        ? t(`domain.${selectedSignal.domain}` as TranslationKey)
+        : selectedSignal.category
+          ? t(`genz.${selectedSignal.category}` as TranslationKey)
+          : "";
+
     setLoading(true);
     setError(null);
 
+    const sUi = getSignalDisplay(selectedSignal);
+    const companyForModel =
+      lang === "jp" && company
+        ? getCompanyDisplayName(company, lang)
+        : company?.name || selectedCompany || null;
+
     invokeAiInsight({
-        signalTitle: selectedSignal.title,
-        signalDescription: selectedSignal.description,
-        signalLocation: selectedSignal.location,
-        signalDomain: domainOrCategory?.label || "",
-        company: company?.name || selectedCompany || null,
+        signalTitle: sUi.title,
+        signalDescription: sUi.description,
+        signalLocation: sUi.location,
+        signalDomain: domainOrCategoryLabel,
+        company: companyForModel,
         mode,
         language: lang,
       })
       .then(({ data, error: fnError }) => {
-        if (fnError) { setError(lang === "jp" ? "インサイトの生成に失敗しました" : "Failed to generate insight"); }
+        if (fnError) { setError(t("panel.insightFailed")); }
         else if (data?.error) { setError(data.error); }
         else if (data) { setInsight(data as AIInsight); }
         setLoading(false);
       })
       .catch(() => {
-        setError(lang === "jp" ? "インサイトの生成に失敗しました" : "Failed to generate insight");
+        setError(t("panel.insightFailed"));
         setLoading(false);
       });
-  }, [selectedSignal?.id, selectedCompany, lang, mode]);
+  }, [selectedSignal?.id, selectedCompany, lang, mode, t, getSignalDisplay]);
 
   if (!selectedSignal) {
     return (
@@ -216,7 +235,8 @@ const AIInsightPanel = ({
       ? GENZ_CATEGORIES.find(c => c.id === selectedSignal.category)
       : null;
 
-  const companyLabel = company?.name;
+  const signalUi = getSignalDisplay(selectedSignal);
+  const companyLabel = company ? getCompanyDisplayName(company, lang) : undefined;
   const numberedIcon = (i: number) => `${i + 1}`;
 
   const signalDate = selectedSignal.date ? new Date(selectedSignal.date) : new Date();
@@ -241,7 +261,16 @@ const AIInsightPanel = ({
         <div className="flex items-start justify-between gap-2">
           <div className="flex items-center gap-1.5 flex-wrap">
             {insight && <UrgencyBadge level={insight.urgency} />}
-            {domainOrCategory && <Tag label={domainOrCategory.label} color="#1241ea" />}
+            {domainOrCategory && (
+              <Tag
+                label={
+                  selectedSignal.domain
+                    ? t(`domain.${selectedSignal.domain}` as TranslationKey)
+                    : t(`genz.${selectedSignal.category!}` as TranslationKey)
+                }
+                color="#1241ea"
+              />
+            )}
             {insight?.patternTag && <Tag label={insight.patternTag} color="hsl(220, 14%, 30%)" />}
           </div>
           <button onClick={onClose} className="text-muted-foreground hover:text-foreground transition-colors p-0.5 shrink-0">
@@ -254,9 +283,9 @@ const AIInsightPanel = ({
       <div className="flex-1 overflow-y-auto px-3 py-3 space-y-3">
         {/* 1. NEWS TITLE */}
         <div>
-          <h2 className="text-[13px] font-bold text-foreground leading-snug">{selectedSignal.title}</h2>
+          <h2 className="text-[13px] font-bold text-foreground leading-snug">{signalUi.title}</h2>
           <p className="text-[10px] font-mono text-muted-foreground mt-1">
-            {selectedSignal.location} · <span className="text-accent">{selectedSignal.source || "Signal"}</span> · <span className="text-muted-foreground/60">{relativeTime}</span>
+            {signalUi.location} · <span className="text-accent">{selectedSignal.source || t("panel.signalFallback")}</span> · <span className="text-muted-foreground/60">{relativeTime}</span>
           </p>
         </div>
 
@@ -272,8 +301,8 @@ const AIInsightPanel = ({
               />
             </div>
             <div className="mt-1.5 flex items-center justify-between text-[9px] font-mono text-muted-foreground">
-              <span>Marginal signal</span>
-              <span>Company fit</span>
+              <span>{t("panel.marginalSignal")}</span>
+              <span>{t("panel.companyFitSlider")}</span>
             </div>
           </div>
         </div>
@@ -303,7 +332,7 @@ const AIInsightPanel = ({
             {(insight.articleSummary || insight.headline) && (
               <div className="rounded-sm bg-muted/40 border border-border p-2.5">
                 <h4 className="text-[10px] font-mono font-bold uppercase tracking-widest text-muted-foreground mb-1">
-                  {lang === "jp" ? "ARTICLE SUMMARY" : "ARTICLE SUMMARY"}
+                  {t("panel.articleSummary")}
                 </h4>
                 <p className="text-[11px] text-foreground/85 leading-snug">
                   {insight.articleSummary || insight.headline}
@@ -375,7 +404,7 @@ const AIInsightPanel = ({
                   )}
                   <div>
                     <SectionHeader color="text-muted-foreground">{t("panel.originalSignal")}</SectionHeader>
-                    <p className="text-[10px] text-foreground/60 leading-snug">{selectedSignal.description}</p>
+                    <p className="text-[10px] text-foreground/60 leading-snug">{signalUi.description}</p>
                   </div>
                 </div>
               )}
@@ -389,7 +418,7 @@ const AIInsightPanel = ({
             onClick={() => onMoreInfo?.(selectedSignal)}
             className="w-full rounded-sm border border-primary/40 bg-primary/10 hover:bg-primary/20 text-primary text-[10px] font-mono font-semibold uppercase tracking-widest py-2 transition-colors"
           >
-            {lang === "jp" ? "詳細を見る" : "More info"}
+            {t("panel.moreInfo")}
           </button>
         </div>
       )}
