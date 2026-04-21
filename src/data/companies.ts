@@ -9,6 +9,8 @@ export interface Company {
   description: string;
   /** Keywords that make a signal relevant to this company */
   keywords: string[];
+  /** Sentiment tab: title+description must mention the company name or one of these phrases (no loose industry-only matches). */
+  sentimentBrandMarkers?: string[];
 }
 
 export const COMPANIES: Company[] = [
@@ -19,6 +21,19 @@ export const COMPANIES: Company[] = [
     relevantDomains: ["community", "environment", "aging"],
     relevantGenZCategories: ["belonging", "climate", "authenticity"],
     description: "Tokyo-based private urban developer behind Roppongi Hills, Toranomon Hills, and Azabudai Hills. Operates mixed-use vertical city ecosystems across office, residential, culture, and innovation.",
+    sentimentBrandMarkers: [
+      "Mori Building",
+      "Roppongi Hills",
+      "Toranomon Hills",
+      "Azabudai",
+      "Mori Art Museum",
+      "MORI LIVING",
+      "teamLab Borderless",
+      "CIC Tokyo",
+      "ARCH Toranomon",
+      "vertical garden city",
+      "Tokyo Venture Capital Hub",
+    ],
     keywords: [
       "Mori Building",
       "Roppongi Hills",

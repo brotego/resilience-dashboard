@@ -19,6 +19,10 @@ import {
   ArticleSentiment,
 } from "@/api/aiInsight";
 import { buildArticlePageSignal } from "@/lib/articlePageSignal";
+import {
+  articleStrictlyAboutCompany,
+  isJapanInternationalCoverageArticle,
+} from "@/lib/sentimentArticleFilters";
 import { ChevronDown, ChevronUp, ArrowRight } from "lucide-react";
 
 type TimeFilter = "24h" | "7d" | "30d";
@@ -86,34 +90,6 @@ const URGENCY_BAR_COLORS: Record<string, string> = {
 
 function sentimentToneLabel(tone: ArticleSentiment, t: (key: TranslationKey) => string): string {
   return t(`sentiment.${tone}` as TranslationKey);
-}
-
-function normalizeText(v: string): string {
-  return v.toLowerCase();
-}
-
-function includesAny(text: string, keywords: string[]): boolean {
-  return keywords.some((kw) => text.includes(kw.toLowerCase()));
-}
-
-function pickWithFallback<T>(items: T[], strict: (item: T) => boolean, limit: number): T[] {
-  const strictMatches = items.filter(strict).slice(0, limit);
-  if (strictMatches.length > 0) return strictMatches;
-  return items.slice(0, limit);
-}
-
-function isCompanyOrIndustryArticle(article: SentimentArticle, companyName: string, industry: string, companyKeywords: string[]): boolean {
-  const text = normalizeText(`${article.title} ${article.description} ${article.source}`);
-  const industryWords = industry
-    .toLowerCase()
-    .split(/[^a-z0-9]+/)
-    .filter((w) => w.length >= 4);
-  return includesAny(text, [companyName, ...companyKeywords, ...industryWords]);
-}
-
-function isJapanArticle(article: SentimentArticle): boolean {
-  const text = normalizeText(`${article.title} ${article.description} ${article.source}`);
-  return includesAny(text, ["japan", "japanese", "tokyo", "osaka", "jp"]);
 }
 
 const CompanyDashboard = ({ selectedCompany, signals, onSignalClick }: Props) => {
@@ -376,9 +352,11 @@ const CompanyDashboard = ({ selectedCompany, signals, onSignalClick }: Props) =>
   };
 
   useEffect(() => {
-    const companyKeywords = company.keywords.slice(0, 4).map((k) => `"${k}"`).join(" | ");
-    const companyQuery = `"${company.name}"${companyKeywords ? ` | (${companyKeywords})` : ""}`;
-    const japanQuery = `"Japan" | Japanese | "Japanese government" | "Japanese companies"`;
+    const markerSlice = (company.sentimentBrandMarkers ?? company.keywords).slice(0, 6);
+    const companyQuery =
+      `"${company.name}"` + (markerSlice.length ? ` | (${markerSlice.map((k) => `"${k}"`).join(" | ")})` : "");
+    const japanQuery =
+      '"Japan" OR "Japanese economy" OR "Japanese government" OR "Bank of Japan" OR "Tokyo Japan" OR "Osaka Japan"';
 
     let cancelled = false;
     setSentimentLoading(true);
@@ -387,12 +365,12 @@ const CompanyDashboard = ({ selectedCompany, signals, onSignalClick }: Props) =>
 
     Promise.all([
       withTimeout(
-        invokeNewsFeed({ type: "sentiment", topicQuery: companyQuery, pageSize: 8 }),
+        invokeNewsFeed({ type: "sentiment", topicQuery: companyQuery, pageSize: 45 }),
         12000,
         { data: { articles: [] }, error: new Error("timeout") },
       ),
       withTimeout(
-        invokeNewsFeed({ type: "sentiment", topicQuery: japanQuery, pageSize: 8 }),
+        invokeNewsFeed({ type: "sentiment", topicQuery: japanQuery, pageSize: 45 }),
         12000,
         { data: { articles: [] }, error: new Error("timeout") },
       ),
@@ -404,12 +382,12 @@ const CompanyDashboard = ({ selectedCompany, signals, onSignalClick }: Props) =>
         const rawJapanArticles = (japanData.data?.articles || [])
           .map((a, idx) => ({ ...a, id: a.url || `${a.title}-${idx}` }));
 
-        const companyArticles = pickWithFallback(
-          rawCompanyArticles,
-          (a) => isCompanyOrIndustryArticle(a, company.name, company.sector, company.keywords),
-          8,
-        );
-        const japanArticles = pickWithFallback(rawJapanArticles, (a) => isJapanArticle(a), 8);
+        const companyArticles = rawCompanyArticles
+          .filter((a) => articleStrictlyAboutCompany(a, company))
+          .slice(0, 8);
+        const japanArticles = rawJapanArticles
+          .filter((a) => isJapanInternationalCoverageArticle(a))
+          .slice(0, 8);
 
         const [companySentiment, japanSentiment, companyOpinion, japanOpinion] = await Promise.all([
           withTimeout(

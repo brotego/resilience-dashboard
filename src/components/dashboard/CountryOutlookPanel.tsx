@@ -15,6 +15,7 @@ import { translateJapaneseArticleRows } from "@/api/translateJapaneseUi";
 import { tr, type Lang, type TranslationKey } from "@/i18n/translations";
 import { invokeNewsFeed } from "@/api/newsFeed";
 import { invokeArticleSentimentBatch, invokeSentimentFallbackOpinion, invokeCountryCompanyInsight, ArticleSentiment } from "@/api/aiInsight";
+import { articleStrictlyAboutCompany, isJapanInternationalCoverageArticle } from "@/lib/sentimentArticleFilters";
 
 interface Props {
   countryName: string;
@@ -187,30 +188,6 @@ function getRecommendedActions(companyId: CompanyId | null, countryName: string,
   ];
 }
 
-function includesAny(text: string, keywords: string[]): boolean {
-  return keywords.some((kw) => text.includes(kw.toLowerCase()));
-}
-
-function pickWithFallback<T>(items: T[], strict: (item: T) => boolean, limit: number): T[] {
-  const strictMatches = items.filter(strict).slice(0, limit);
-  if (strictMatches.length > 0) return strictMatches;
-  return items.slice(0, limit);
-}
-
-function isJapanArticle(article: SentimentArticle): boolean {
-  const text = `${article.title} ${article.description} ${article.source}`.toLowerCase();
-  return includesAny(text, ["japan", "japanese", "tokyo", "osaka", "jp"]);
-}
-
-function isCompanyOrIndustryArticle(article: SentimentArticle, companyName: string, sector: string, keywords: string[]): boolean {
-  const text = `${article.title} ${article.description} ${article.source}`.toLowerCase();
-  const sectorTokens = sector
-    .toLowerCase()
-    .split(/[^a-z0-9]+/)
-    .filter((token) => token.length >= 4);
-  return includesAny(text, [companyName, ...keywords, ...sectorTokens]);
-}
-
 const COUNTRY_CODES: Record<string, string> = {
   "United States of America": "us", "Japan": "jp", "United Kingdom": "gb",
   "Germany": "de", "France": "fr", "China": "cn", "India": "in",
@@ -340,11 +317,16 @@ const CountryOutlookPanel = ({ countryName, mode, selectedCompany, signals, onCl
   useEffect(() => {
     const countryCode = COUNTRY_CODES[countryName] || "us";
     const companyName = company?.name;
-    const companyKeywords = company?.keywords.slice(0, 4).map((k) => `"${k}"`).join(" | ");
-    const companyQuery = companyName
-      ? `"${companyName}"${companyKeywords ? ` | (${companyKeywords})` : ""}`
-      : "";
-    const japanQuery = `"Japan" | Japanese | "Japanese government" | "Japanese companies"`;
+    const markerSlice = company
+      ? (company.sentimentBrandMarkers ?? company.keywords).slice(0, 6)
+      : [];
+    const companyQuery = !companyName
+      ? ""
+      : markerSlice.length > 0
+        ? `"${companyName}" | (${markerSlice.map((k) => `"${k}"`).join(" | ")})`
+        : `"${companyName}"`;
+    const japanQuery =
+      '"Japan" OR "Japanese economy" OR "Japanese government" OR "Bank of Japan" OR "Tokyo Japan" OR "Osaka Japan"';
 
     let cancelled = false;
     setSentimentLoading(true);
@@ -357,7 +339,7 @@ const CountryOutlookPanel = ({ countryName, mode, selectedCompany, signals, onCl
               countryCode,
               countryName,
               topicQuery: companyQuery,
-              pageSize: 6,
+              pageSize: 36,
             })
           : Promise.resolve({ data: { articles: [] }, error: null }),
         12000,
@@ -369,7 +351,7 @@ const CountryOutlookPanel = ({ countryName, mode, selectedCompany, signals, onCl
           countryCode,
           countryName,
           topicQuery: japanQuery,
-          pageSize: 6,
+          pageSize: 36,
         }),
         12000,
         { data: { articles: [] }, error: new Error("timeout") },
@@ -381,12 +363,12 @@ const CountryOutlookPanel = ({ countryName, mode, selectedCompany, signals, onCl
       const rawJapanArticles = (japanData.data?.articles || [])
         .map((a, idx) => ({ ...a, id: a.url || `${a.title}-${idx}` }));
 
-      const companyArticles = pickWithFallback(
-        rawCompanyArticles,
-        (a) => !company || isCompanyOrIndustryArticle(a, company.name, company.sector, company.keywords),
-        6,
-      );
-      const japanArticles = pickWithFallback(rawJapanArticles, (a) => isJapanArticle(a), 6);
+      const companyArticles = rawCompanyArticles
+        .filter((a) => !company || articleStrictlyAboutCompany(a, company))
+        .slice(0, 6);
+      const japanArticles = rawJapanArticles
+        .filter((a) => isJapanInternationalCoverageArticle(a))
+        .slice(0, 6);
 
       const [companySentiment, japanSentiment, companyOpinion, japanOpinion] = await Promise.all([
         withTimeout(
