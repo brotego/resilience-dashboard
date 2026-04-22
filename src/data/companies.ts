@@ -7,6 +7,11 @@ export interface Company {
   id: CompanyId;
   name: string;
   sector: string;
+  /**
+   * Industry / market vocabulary for news search and resilience-map filtering.
+   * Keep to concrete sector language (e.g. commercial real estate, office leasing), not broad geography or themes.
+   */
+  industryNewsTerms: string[];
   relevantDomains: string[];
   relevantGenZCategories: string[];
   description: string;
@@ -24,6 +29,18 @@ export const COMPANIES: Company[] = [
     intel: COMPANY_INTEL.kodansha,
     name: "Kodansha",
     sector: "Publishing & Media",
+    industryNewsTerms: [
+      "book publishing",
+      "magazine publishing",
+      "manga publishing",
+      "digital publishing",
+      "publishing industry",
+      "media licensing",
+      "IP licensing",
+      "editorial",
+      "periodicals",
+      "content publishing",
+    ],
     relevantDomains: ["community", "selfhood", "work"],
     relevantGenZCategories: ["authenticity", "belonging", "digital"],
     description:
@@ -65,6 +82,18 @@ export const COMPANIES: Company[] = [
     intel: COMPANY_INTEL.persol,
     name: "PERSOL",
     sector: "HR & Staffing",
+    industryNewsTerms: [
+      "staffing industry",
+      "temporary staffing",
+      "recruitment agency",
+      "human resources",
+      "workforce management",
+      "talent acquisition",
+      "employment agency",
+      "labor market",
+      "RPO recruiting",
+      "HR services",
+    ],
     relevantDomains: ["work", "community"],
     relevantGenZCategories: ["worklife", "belonging", "authenticity"],
     description:
@@ -100,6 +129,18 @@ export const COMPANIES: Company[] = [
     intel: COMPANY_INTEL.ntt_east,
     name: "NTT East",
     sector: "Telecommunications",
+    industryNewsTerms: [
+      "telecommunications",
+      "fiber broadband",
+      "fixed-line",
+      "broadband network",
+      "5G deployment",
+      "internet service provider",
+      "regional telecom",
+      "network infrastructure",
+      "fiber to the home",
+      "telecom operator",
+    ],
     relevantDomains: ["community", "aging", "work"],
     relevantGenZCategories: ["digital", "worklife", "belonging"],
     description:
@@ -131,6 +172,17 @@ export const COMPANIES: Company[] = [
     intel: COMPANY_INTEL.kikkoman,
     name: "Kikkoman",
     sector: "Food & Beverage",
+    industryNewsTerms: [
+      "food manufacturing",
+      "soy sauce",
+      "condiments",
+      "fermentation",
+      "food processing",
+      "seasonings",
+      "consumer foods",
+      "beverage ingredients",
+      "global food brands",
+    ],
     relevantDomains: ["environment", "community"],
     relevantGenZCategories: ["authenticity", "climate"],
     description:
@@ -162,6 +214,17 @@ export const COMPANIES: Company[] = [
     intel: COMPANY_INTEL.kirin,
     name: "Kirin",
     sector: "Beverages & Health",
+    industryNewsTerms: [
+      "beverage industry",
+      "beer brewing",
+      "soft drinks",
+      "functional beverages",
+      "brewery",
+      "alcoholic beverages",
+      "pharmaceutical business",
+      "health supplements",
+      "food and beverage",
+    ],
     relevantDomains: ["aging", "environment", "selfhood"],
     relevantGenZCategories: ["climate", "authenticity", "worklife"],
     description:
@@ -195,6 +258,17 @@ export const COMPANIES: Company[] = [
     intel: COMPANY_INTEL.nintendo,
     name: "Nintendo",
     sector: "Interactive Entertainment",
+    industryNewsTerms: [
+      "video game industry",
+      "game console",
+      "interactive entertainment",
+      "game software",
+      "mobile games",
+      "gaming hardware",
+      "game publisher",
+      "console market",
+      "game development studio",
+    ],
     relevantDomains: ["community", "selfhood", "aging"],
     relevantGenZCategories: ["digital", "authenticity", "belonging"],
     description:
@@ -229,6 +303,20 @@ export const COMPANIES: Company[] = [
     intel: COMPANY_INTEL.mori_building,
     name: "Mori Building",
     sector: "Real Estate & Urban Development",
+    industryNewsTerms: [
+      "commercial real estate",
+      "office leasing",
+      "Grade A office",
+      "property developer",
+      "urban redevelopment",
+      "mixed-use development",
+      "real estate development",
+      "office vacancy",
+      "corporate landlord",
+      "building development",
+      "real estate investment",
+      "town management",
+    ],
     relevantDomains: ["community", "environment", "aging"],
     relevantGenZCategories: ["belonging", "climate", "authenticity"],
     description:

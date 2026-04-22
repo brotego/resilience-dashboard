@@ -425,8 +425,8 @@ const GlobalMap = memo(({
 
   const spreadPositions = useMemo(() => {
     const raw = spreadCoincidentSignalPositions(signals, {
-      proximityMeters: 1_600,
-      ringStepDeg: 0.008,
+      proximityMeters: 260,
+      ringStepDeg: 0.014,
       altitudeStep: 0.004,
       countryFeatures: countries as { geometry: unknown; properties?: Record<string, unknown> }[],
     });

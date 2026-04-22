@@ -47,11 +47,17 @@ function haversineMeters(a: [number, number], b: [number, number]): number {
   return 2 * EARTH_RADIUS_M * Math.asin(Math.min(1, Math.sqrt(s1 + s2)));
 }
 
-function clusterByProximity<T extends { id: string; coordinates: [number, number]; location?: string }>(
+/**
+ * Union-find only within `items` (one geographic bucket). Caller must keep buckets small on the map
+ * so transitive chains cannot merge half a country into one ring.
+ */
+function unionFindProximityClusters<T extends { id: string; coordinates: [number, number]; location?: string }>(
   items: T[],
   maxMeters: number,
 ): T[][] {
   const n = items.length;
+  if (n === 0) return [];
+  if (n === 1) return [[items[0]]];
   const parent = Array.from({ length: n }, (_, i) => i);
   function find(a: number): number {
     if (parent[a] !== a) parent[a] = find(parent[a]);
@@ -64,7 +70,6 @@ function clusterByProximity<T extends { id: string; coordinates: [number, number
   }
   for (let i = 0; i < n; i++) {
     for (let j = i + 1; j < n; j++) {
-      // Keep clustering country-local so nearby countries don't get merged into one spread ring.
       const li = items[i].location;
       const lj = items[j].location;
       if (li && lj && normalizeCountryName(li) !== normalizeCountryName(lj)) continue;
@@ -82,6 +87,31 @@ function clusterByProximity<T extends { id: string; coordinates: [number, number
   return [...groups.values()];
 }
 
+/** ~3.2–3.6 km cells (latitude); union-find chains cannot span entire countries. */
+const PROXIMITY_BUCKET_DEG = 0.032;
+
+function clusterByProximity<T extends { id: string; coordinates: [number, number]; location?: string }>(
+  items: T[],
+  maxMeters: number,
+): T[][] {
+  if (items.length === 0) return [];
+  const byBucket = new Map<string, T[]>();
+  for (const item of items) {
+    const [lng, lat] = item.coordinates;
+    const cn = normalizeCountryName((item.location || "").trim());
+    const gx = Math.floor(lng / PROXIMITY_BUCKET_DEG);
+    const gy = Math.floor(lat / PROXIMITY_BUCKET_DEG);
+    const key = `${cn}|${gx}|${gy}`;
+    if (!byBucket.has(key)) byBucket.set(key, []);
+    byBucket.get(key)!.push(item);
+  }
+  const out: T[][] = [];
+  for (const bucket of byBucket.values()) {
+    out.push(...unionFindProximityClusters(bucket, maxMeters));
+  }
+  return out;
+}
+
 /**
  * Signals that share the same map stack as the selected one (same proximity cluster as spreadCoincidentSignalPositions).
  * Sorted by id to match the order used when spreading dots on the ring.
@@ -92,7 +122,7 @@ export function getCoincidentSignalsForSelection<T extends { id: string; coordin
   options?: { proximityMeters?: number },
 ): { cluster: T[]; index: number } | null {
   if (!items.length) return null;
-  const proximityMeters = options?.proximityMeters ?? 1_600;
+  const proximityMeters = options?.proximityMeters ?? 240;
   const clusters = clusterByProximity(items, proximityMeters);
   for (const group of clusters) {
     const sorted = [...group].sort((a, b) => a.id.localeCompare(b.id));
@@ -279,9 +309,15 @@ function snapLngLatToPolygon(
 
   let best = { lng: il, lat: ia };
   let found = false;
+  // If anchor equals target (common for single-point snap) and both sit outside/on water,
+  // interpolate from a known interior land point toward the target instead of a degenerate segment.
+  const sameAnchor =
+    Math.abs(anchorLng - lng) < 1e-8 && Math.abs(anchorLat - lat) < 1e-8;
+  const fromLng = sameAnchor && interior ? interior[0] : anchorLng;
+  const fromLat = sameAnchor && interior ? interior[1] : anchorLat;
   for (let t = 1; t >= 0; t -= 0.02) {
-    const nl = anchorLng + (lng - anchorLng) * t;
-    const na = anchorLat + (lat - anchorLat) * t;
+    const nl = fromLng + (lng - fromLng) * t;
+    const na = fromLat + (lat - fromLat) * t;
     try {
       if (geoContains(feature as GeoJSON.GeoJSON, [nl, na])) {
         best = { lng: nl, lat: na };
@@ -448,8 +484,8 @@ export function spreadCoincidentSignalPositions<T extends { id: string; coordina
     countryFeatures?: { geometry: unknown; properties?: Record<string, unknown> }[];
   },
 ): Map<string, SignalDisplayPosition> {
-  const proximityMeters = options?.proximityMeters ?? 1_600;
-  const ringStepDeg = options?.ringStepDeg ?? 0.008;
+  const proximityMeters = options?.proximityMeters ?? 240;
+  const ringStepDeg = options?.ringStepDeg ?? 0.014;
   const altitudeStep = options?.altitudeStep ?? 0.004;
   const countryFeatures = options?.countryFeatures ?? [];
 
@@ -475,7 +511,7 @@ export function spreadCoincidentSignalPositions<T extends { id: string; coordina
     const lat0 = sorted.reduce((s, p) => s + p.coordinates[1], 0) / n;
     const feat = resolveFeatureForSignal(sorted[0]);
     const anchor = snapLngLatToPolygon(feat, lng0, lat0, lng0, lat0);
-    const r = ringStepDeg * Math.sqrt(Math.max(1, n / 2));
+    const r = ringStepDeg * (0.55 + 0.45 * Math.sqrt(Math.max(1, n)));
     sorted.forEach((p, i) => {
       const theta = (2 * Math.PI * i) / n - Math.PI / 2;
       const latRad = anchor.lat * (Math.PI / 180);

@@ -40,7 +40,7 @@ function slimUnifiedSignalsForCache(signals: UnifiedSignal[]): UnifiedSignal[] {
 /** In-memory mirror of persistent TTL: refresh article bundles daily. */
 const CACHE_DURATION = 24 * 60 * 60 * 1000;
 const cache = new Map<string, CacheEntry>();
-const LIVE_CACHE_VERSION = "api-v13-resilience-industry-query";
+const LIVE_CACHE_VERSION = "api-v14-industry-news-anchors";
 const LEGACY_LIVE_CACHE_VERSIONS: string[] = ["api-v10-country-high-volume", "api-v11-company-scoped-24h"];
 const BUSINESS_ARTICLES_PER_PAGE = 100;
 const BUSINESS_PAGES = 2;
@@ -118,38 +118,57 @@ function durablePersistentKey(mode: DashboardMode, companyKey: string): string {
   return `unified-live-durable-v2-${mode}-${companyKey}`;
 }
 
+function companyIndustryAnchorsLower(company: Company): string[] {
+  return company.industryNewsTerms
+    .map((t) => t.toLowerCase().trim())
+    .filter((t) => t.length >= 4);
+}
+
+/** Sector tokens long enough to avoid junk hits (e.g. "real" from real estate). */
+function companySectorBitsStrict(company: Company): string[] {
+  return company.sector
+    .toLowerCase()
+    .split(/[^a-z0-9+]+/)
+    .filter((w) => w.length >= 6 && w !== "and");
+}
+
+/** Title + description match company industry lens (name, curated industry terms, strict sector). */
+function liveNewsTextMatchesCompanyIndustry(title: string, description: string, company: Company): boolean {
+  const text = `${title || ""} ${description || ""}`.toLowerCase();
+  const name = company.name.toLowerCase();
+  if (name && text.includes(name)) return true;
+  if (companyIndustryAnchorsLower(company).some((t) => text.includes(t))) return true;
+  return companySectorBitsStrict(company).some((w) => text.includes(w));
+}
+
 /**
- * Resilience-map business search: sector, public description, and concrete business lines / brands.
- * Omits generic strategy themes (e.g. "resilience-by-design") and the full keywords list so ER queries
- * stay anchored on industry and named assets instead of the word "resilience".
+ * Resilience-map Event Registry query: quoted name + sector + curated industry phrases (+ short description).
+ * Avoids long intel/brand lists that pull unrelated culture, VC, or city-generic news.
  */
 function buildResilienceMapBusinessTopicQuery(company: Company): string {
-  const intel = company.intel;
+  const desc = (company.description || "").trim();
   const parts = [
     `"${company.name.replace(/"/g, " ").trim()}"`,
     company.sector,
-    company.description,
-    ...(intel.brandsAndAssets?.slice(0, 10) ?? []),
-    ...intel.coreBusinessLines.slice(0, 5),
-    ...(intel.keyMarkets?.slice(0, 4) ?? []),
-    ...(intel.competitorsOrPeers?.slice(0, 3) ?? []),
+    ...company.industryNewsTerms,
+    desc.length > 140 ? `${desc.slice(0, 140)}…` : desc,
   ];
   let q = parts.join(" ").replace(/\s+/g, " ").trim();
   if (q.length > MAX_ER_TOPIC_CHARS) q = q.slice(0, MAX_ER_TOPIC_CHARS);
   return q;
 }
 
-/** Broader industry pass without keyword/intel theme strings that dilute the sector lens. */
+/** Second pass: add a few flagship brands/lines from intel for branded hits, still industry-first. */
 function buildResilienceMapBusinessTopicQueryRelaxed(company: Company): string {
   const intel = company.intel;
   const desc = (company.description || "").trim();
   const parts = [
     `"${company.name.replace(/"/g, " ").trim()}"`,
     company.sector,
-    ...intel.coreBusinessLines.slice(0, 8),
-    ...(intel.brandsAndAssets?.slice(0, 14) ?? []),
-    ...(intel.keyMarkets?.slice(0, 5) ?? []),
-    desc.length > 280 ? `${desc.slice(0, 280)}…` : desc,
+    ...company.industryNewsTerms,
+    ...(intel.brandsAndAssets?.slice(0, 4) ?? []),
+    ...intel.coreBusinessLines.slice(0, 4),
+    desc.length > 220 ? `${desc.slice(0, 220)}…` : desc,
   ];
   let q = parts.join(" ").replace(/\s+/g, " ").trim();
   if (q.length > MAX_ER_TOPIC_CHARS) q = q.slice(0, MAX_ER_TOPIC_CHARS);
@@ -161,8 +180,9 @@ function buildCompanyGenZContextHint(company: Company): string {
   const q = [
     `"${company.name.replace(/"/g, " ").trim()}"`,
     company.sector,
-    ...company.keywords.slice(0, 8),
-    intel.reputationAndGenZ ? intel.reputationAndGenZ.slice(0, 140) : "",
+    ...company.industryNewsTerms.slice(0, 5),
+    ...company.keywords.slice(0, 6),
+    intel.reputationAndGenZ ? intel.reputationAndGenZ.slice(0, 120) : "",
   ].join(" ");
   return q.slice(0, 260);
 }
@@ -334,18 +354,18 @@ function countryScatterCoords(
   anchor: { coords: [number, number] },
   articleKey: string,
   index: number,
-  spreadScale = 0.32,
+  spreadScale = 0.52,
 ): [number, number] {
   const u = hashToUnit(`${articleKey}::cu`);
   const v = hashToUnit(`${articleKey}::cv`);
   const angle = 2 * Math.PI * u;
-  // Keep scatter sub-degree so raw points usually stay inside the country before map clamping.
-  const rLat = (0.06 + 0.42 * Math.sqrt(v)) * spreadScale;
+  // Wider on-land scatter around city anchors; map clamp still pulls ocean points back into the polygon.
+  const rLat = (0.05 + 0.48 * Math.sqrt(v)) * spreadScale;
   const lat = anchor.coords[1] + rLat * Math.sin(angle);
   const cosLat = Math.max(0.3, Math.cos((Math.abs(anchor.coords[1]) * Math.PI) / 180));
   const rLon = rLat / cosLat;
   const lon = anchor.coords[0] + rLon * Math.cos(angle);
-  const j = jitter([lon, lat], index, 13, 0.12);
+  const j = jitter([lon, lat], index, 13, 0.17);
   return [Math.max(-179, Math.min(179, j[0])), Math.max(-70, Math.min(80, j[1]))];
 }
 
@@ -480,15 +500,16 @@ function looksLikeStrictGenZArticle(a: any): boolean {
 
 function isArticleRelevantToCompanyIndustry(a: any, company: Company | null): boolean {
   if (!company) return true;
+  const title = String(a?.title || "");
+  const description = String(a?.description || "");
+  if (company.industryNewsTerms.length > 0) {
+    if (liveNewsTextMatchesCompanyIndustry(title, description, company)) return true;
+  }
   const text = articleText(a);
   const companyNameLower = company.name.toLowerCase();
   if (companyNameLower && text.includes(companyNameLower)) return true;
   if (company.keywords.some((kw) => kw.length > 2 && text.includes(kw.toLowerCase()))) return true;
-  const sectorBits = company.sector
-    .toLowerCase()
-    .split(/[^a-z0-9+]+/)
-    .filter((w) => w.length > 2 && w !== "and");
-  return sectorBits.some((w) => text.includes(w));
+  return companySectorBitsStrict(company).some((w) => text.includes(w));
 }
 
 function inferDomainFromArticle(a: any): DomainId | undefined {
@@ -873,7 +894,19 @@ export function useUnifiedSignals(
       if (!selectedCompanyData) return 0;
       const text = `${s.title || ""} ${s.description || ""}`.toLowerCase();
       let score = 0;
-      if (companyNameLower && text.includes(companyNameLower)) score += 8;
+      if (companyNameLower && text.includes(companyNameLower)) score += 10;
+      if (selectedCompanyData.industryNewsTerms.length > 0) {
+        for (const t of companyIndustryAnchorsLower(selectedCompanyData)) {
+          if (t.length >= 4 && text.includes(t)) score += 5;
+        }
+        for (const bit of companySectorBitsStrict(selectedCompanyData)) {
+          if (text.includes(bit)) score += 3;
+        }
+        for (const kw of companyKeywords) {
+          if (kw.length >= 10 && text.includes(kw)) score += 2;
+        }
+        return score;
+      }
       for (const kw of companyKeywords) {
         if (kw.length > 2 && text.includes(kw)) score += 3;
       }
@@ -885,17 +918,27 @@ export function useUnifiedSignals(
     const isCompanyRelevantSignal = (s: UnifiedSignal): boolean => {
       if (s.layer !== "live-news") return true;
       if (!selectedCompanyData) return true;
-      const text = `${s.title || ""} ${s.description || ""}`.toLowerCase();
-      const industryRelevant =
-        (companyNameLower && text.includes(companyNameLower)) ||
-        companyKeywords.some((kw) => kw.length > 2 && text.includes(kw)) ||
-        companySectorBits.some((w) => text.includes(w));
+      const title = s.title || "";
+      const description = s.description || "";
+      const text = `${title} ${description}`.toLowerCase();
       if (mode === "genz") {
-        // Keep Gen Z strict on youth relevance, but do not hard-drop all non-brand mentions.
-        // We still rank strongly by company relevance below.
+        const industryRelevant =
+          selectedCompanyData.industryNewsTerms.length > 0
+            ? liveNewsTextMatchesCompanyIndustry(title, description, selectedCompanyData) ||
+              companyKeywords.some((kw) => kw.length > 2 && text.includes(kw))
+            : (companyNameLower && text.includes(companyNameLower)) ||
+              companyKeywords.some((kw) => kw.length > 2 && text.includes(kw)) ||
+              companySectorBits.some((w) => text.includes(w));
         return looksLikeGenZNews(s) && (industryRelevant || companyRelevanceScore(s) >= 1);
       }
-      return industryRelevant;
+      if (selectedCompanyData.industryNewsTerms.length > 0) {
+        return liveNewsTextMatchesCompanyIndustry(title, description, selectedCompanyData);
+      }
+      return (
+        (companyNameLower && text.includes(companyNameLower)) ||
+        companyKeywords.some((kw) => kw.length > 2 && text.includes(kw)) ||
+        companySectorBits.some((w) => text.includes(w))
+      );
     };
     const finalizeSignals = (arr: UnifiedSignal[]): UnifiedSignal[] => {
       const deduped = dedupeSignalsByArticleUrl(arr);
@@ -914,7 +957,15 @@ export function useUnifiedSignals(
         } else {
           const sectorPool = deduped.filter((s) => {
             if (s.layer !== "live-news") return true;
-            const text = `${s.title || ""} ${s.description || ""}`.toLowerCase();
+            const st = s.title || "";
+            const sd = s.description || "";
+            if (selectedCompanyData.industryNewsTerms.length > 0) {
+              return (
+                liveNewsTextMatchesCompanyIndustry(st, sd, selectedCompanyData) ||
+                companyRelevanceScore(s) >= 6
+              );
+            }
+            const text = `${st} ${sd}`.toLowerCase();
             const sectorHit = companySectorBits.some((w) => text.includes(w));
             return sectorHit || companyRelevanceScore(s) >= 1;
           });
@@ -949,6 +1000,14 @@ export function useUnifiedSignals(
         for (const extra of extras) {
           if (selected.length >= MIN_COMPANY_SIGNALS) break;
           if (mode !== "genz" && companyRelevanceScore(extra) < minExtraRelevance) continue;
+          if (
+            mode !== "genz" &&
+            selectedCompanyData?.industryNewsTerms.length &&
+            !liveNewsTextMatchesCompanyIndustry(extra.title || "", extra.description || "", selectedCompanyData) &&
+            companyRelevanceScore(extra) < 8
+          ) {
+            continue;
+          }
           if (mode === "genz" && !looksLikeGenZNews(extra)) continue;
           selected.push(extra);
         }
@@ -981,6 +1040,13 @@ export function useUnifiedSignals(
         const loc = (s.location || "").trim().toLowerCase();
         if (!loc) continue;
         if (out.some((x) => (x.location || "").trim().toLowerCase() === loc)) continue;
+        if (
+          mode !== "genz" &&
+          selectedCompanyData?.industryNewsTerms.length &&
+          !liveNewsTextMatchesCompanyIndustry(s.title || "", s.description || "", selectedCompanyData)
+        ) {
+          continue;
+        }
         out.push(s);
         taken.add(s.id);
       }
@@ -1118,6 +1184,11 @@ export function useUnifiedSignals(
               // Early in the run we allow youth-relevant but weakly branded items so
               // smaller company profiles can still fill density targets.
               if (!industryRelevant && results.length >= 140) return [];
+            }
+            if (mode === "resilience" && selectedCompanyData?.industryNewsTerms.length) {
+              const at = String(a?.title || "");
+              const ad = String(a?.description || "");
+              if (!liveNewsTextMatchesCompanyIndustry(at, ad, selectedCompanyData)) return [];
             }
             const dom = resolveArticleDomain(selectedCompanyData, a);
             // Avoid starving Gen Z map when inference is uncertain:
