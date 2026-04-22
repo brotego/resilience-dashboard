@@ -25,6 +25,12 @@ import {
 } from "@/lib/sentimentArticleFilters";
 import { ChevronDown, ChevronUp, ArrowRight } from "lucide-react";
 
+function clipNewsletterText(s: string, max: number): string {
+  const t = (s || "").replace(/\s+/g, " ").trim();
+  if (!t) return "";
+  return t.length <= max ? t : `${t.slice(0, Math.max(0, max - 1))}…`;
+}
+
 type TimeFilter = "6h" | "12h" | "24h" | "beyond";
 type SentimentView = "company" | "japan";
 type SentimentArticle = { id: string; title: string; source: string; description: string; date: string; url: string };
@@ -200,11 +206,13 @@ const CompanyDashboard = ({ selectedCompany, signals, onSignalClick }: Props) =>
 
     const risingRisks =
       negatives.length > 0
-        ? negatives.slice(0, 4).map((s) =>
-            lang === "jp"
-              ? `「${s.title}」— 緊急度が高く、実行・評判リスクの監視が必要です。`
-              : `"${s.title}" — elevated urgency; monitor execution and reputational exposure.`,
-          )
+        ? negatives.slice(0, 4).map((s) => {
+            const title = clipNewsletterText(s.title, 78);
+            const desc = clipNewsletterText(s.description || "", 120);
+            return lang === "jp"
+              ? `「${title}」— ${company.name}にとって規制・コスト・評判のいずれかに効く可能性。${desc ? `内容: ${desc}` : ""}`.trim()
+              : `${title} — For ${company.name}, watch regulation, cost, or reputation impact. ${desc ? `Story: ${desc}` : ""}`.trim();
+          })
         : [
             lang === "jp"
               ? "この週の上位セットに顕著なリスク集中はありません。"
@@ -213,11 +221,13 @@ const CompanyDashboard = ({ selectedCompany, signals, onSignalClick }: Props) =>
 
     const risingOpportunities =
       positives.length > 0
-        ? positives.slice(0, 4).map((s) =>
-            lang === "jp"
-              ? `「${s.title}」— 機会ウィンドウの検討に値する動きです。`
-              : `"${s.title}" — worth evaluating as a potential opportunity window.`,
-          )
+        ? positives.slice(0, 4).map((s) => {
+            const title = clipNewsletterText(s.title, 78);
+            const desc = clipNewsletterText(s.description || "", 120);
+            return lang === "jp"
+              ? `「${title}」— ${company.name}にとって需要・提携・ポジションのいずれかの追い風になり得る。${desc ? `内容: ${desc}` : ""}`.trim()
+              : `${title} — For ${company.name}, possible upside in demand, partnerships, or positioning. ${desc ? `Story: ${desc}` : ""}`.trim();
+          })
         : [
             lang === "jp"
               ? "明確な機会シグナルは限定的です。継続監視を推奨します。"
@@ -589,7 +599,14 @@ const CompanyDashboard = ({ selectedCompany, signals, onSignalClick }: Props) =>
           if (text.includes(bit)) score += 1;
         }
         if (s.articleUrl && s.articleUrl !== "#") score += 1;
-        return score;
+        const hasStrongCompanyTie =
+          (companyName && text.includes(companyName)) || brandMarkers.some((m) => text.includes(m));
+        const looksOffTopicNews =
+          /\b(red carpet|celebrity|movie premiere|eredivisie|la liga|premier league|champions league|serie a|match report|injury update|dresses worn)\b/i.test(
+            text,
+          );
+        if (looksOffTopicNews && !hasStrongCompanyTie) score -= 10;
+        return Math.max(0, score);
       };
 
       const base = filteredSignals
@@ -602,10 +619,10 @@ const CompanyDashboard = ({ selectedCompany, signals, onSignalClick }: Props) =>
           return b.s.resilienceScore - a.s.resilienceScore;
         });
 
-      // Absolute relevance gate first; relax slightly only if we don't have enough article candidates.
-      const strict = base.filter((row) => row.relevance >= 8);
-      const medium = base.filter((row) => row.relevance >= 4);
-      const chosen = strict.length >= 12 ? strict : medium.length >= 8 ? medium : base;
+      // Absolute relevance gate first; relax only if we don't have enough article candidates.
+      const strict = base.filter((row) => row.relevance >= 10);
+      const medium = base.filter((row) => row.relevance >= 6);
+      const chosen = strict.length >= 8 ? strict : medium.length >= 10 ? medium : base;
 
       return chosen.slice(0, 30).map(({ s }) => ({
         id: s.id,

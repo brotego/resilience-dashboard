@@ -82,7 +82,7 @@ const AI_SENTIMENT_OPINION_CACHE_PREFIX = "rr.ai.sentiment.opinion.v1.";
 const AI_SENTIMENT_OPINION_MAX_AGE_MS = 6 * 60 * 60 * 1000;
 const AI_COUNTRY_INSIGHT_CACHE_PREFIX = "rr.ai.country.insight.v1.";
 const AI_COUNTRY_INSIGHT_MAX_AGE_MS = 6 * 60 * 60 * 1000;
-const AI_NEWSLETTER_CACHE_PREFIX = "rr.ai.newsletter.v4.";
+const AI_NEWSLETTER_CACHE_PREFIX = "rr.ai.newsletter.v5.";
 const AI_NEWSLETTER_CACHE_MAX_AGE_MS = 6 * 60 * 60 * 1000;
 const AI_SENTIMENT_SUMMARY_CACHE_PREFIX = "rr.ai.sentiment.summary.v2.";
 const AI_SENTIMENT_SUMMARY_MAX_AGE_MS = 6 * 60 * 60 * 1000;
@@ -1101,6 +1101,64 @@ function newsletterCacheKey(params: {
   });
 }
 
+/** Detects the old non-AI fallback template so we can strip or replace it when the model echoes boilerplate. */
+function isTemplateRisingLine(line: string): boolean {
+  const s = line.trim();
+  return (
+    /—\s*elevated urgency;\s*monitor execution and reputational exposure\.?\s*$/i.test(s) ||
+    /—\s*worth evaluating as a potential opportunity window\.?\s*$/i.test(s) ||
+    /—\s*watch for adverse narrative or downside risk\.?\s*$/i.test(s) ||
+    /—\s*favorable narrative worth tracking for upside\.?\s*$/i.test(s) ||
+    /—\s*緊急度が高く、実行・評判リスクの監視が必要です。?\s*$/.test(s) ||
+    /—\s*機会ウィンドウの検討に値する動きです。?\s*$/.test(s)
+  );
+}
+
+function dedupeRisingLines(lines: string[]): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const raw of lines) {
+    const line = raw.trim();
+    if (!line) continue;
+    const key = (line.split("—").pop() || line).slice(0, 96).toLowerCase().replace(/\s+/g, " ");
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(line);
+    if (out.length >= 6) break;
+  }
+  return out;
+}
+
+/** Replace thin / templated bullets with readable lines from the roundup the model already wrote. */
+function polishNewsletterRisingBullets(data: CompanyNewsletterResult): CompanyNewsletterResult {
+  const fillFromRoundup = (kind: "risk" | "opp") => {
+    const rows = data.roundup.filter((r) => {
+      if (kind === "risk") return r.sentiment === "negative" || r.sentiment === "mixed";
+      return r.sentiment === "positive" || r.sentiment === "mixed";
+    });
+    return rows.map((r) => {
+      const title = r.title.length > 76 ? `${r.title.slice(0, 73)}…` : r.title;
+      const sum = (r.summary || "").replace(/\s+/g, " ").trim();
+      const body = sum.length > 160 ? `${sum.slice(0, 157)}…` : sum;
+      return body ? `${title} — ${body}` : `${title} — (${r.location || "Global"}) ${r.source ? `via ${r.source}` : ""}`.trim();
+    });
+  };
+
+  const clean = (lines: string[], kind: "risk" | "opp") => {
+    let v = dedupeRisingLines(lines.filter((l) => l.trim().length > 0 && !isTemplateRisingLine(l)));
+    if (v.length < 2) {
+      v = dedupeRisingLines([...v, ...fillFromRoundup(kind)]);
+    }
+    return v.slice(0, 5);
+  };
+
+  return {
+    ...data,
+    risingRisks: clean(data.risingRisks || [], "risk"),
+    risingOpportunities: clean(data.risingOpportunities || [], "opp"),
+  };
+}
+
 function readNewsletterCache(cacheKey: string): CompanyNewsletterResult | null {
   if (typeof sessionStorage === "undefined") return null;
   try {
@@ -1112,7 +1170,7 @@ function readNewsletterCache(cacheKey: string): CompanyNewsletterResult | null {
       sessionStorage.removeItem(AI_NEWSLETTER_CACHE_PREFIX + cacheKey);
       return null;
     }
-    return parsed.data;
+    return polishNewsletterRisingBullets(parsed.data);
   } catch {
     return null;
   }
@@ -1219,8 +1277,9 @@ export async function invokeCompanyNewsletter(params: {
     rawKey: cacheKey,
   });
   if (sharedCached) {
-    writeNewsletterCache(cacheKey, sharedCached);
-    return { data: sharedCached, error: null };
+    const polishedShared = polishNewsletterRisingBullets(sharedCached);
+    writeNewsletterCache(cacheKey, polishedShared);
+    return { data: polishedShared, error: null };
   }
 
   const apiKey = resolveAnthropicKey();
@@ -1248,8 +1307,7 @@ ${dossierJp}要件:
 - roundupは5件（各summaryは選んだシグナルの内容に基づく）
 - sentimentはpositive|mixed|negative
 - selectedIdsには選んだシグナルidを格納
-- risingRisks: 選んだシグナル／見出しの内容に根ざした「高まるリスク」を3〜4本の短文配列で（各1文）
-- risingOpportunities: 同様に「高まる機会」を3〜4本の短文配列で（各1文）
+- risingRisks / risingOpportunities: 選んだ5件だけを根拠に、${params.company}の事業にどう効くかを1行ずつ書く（3〜4本）。各行は「具体的な論点 — なぜ${params.company}に効くか」の形にし、全行で同じ文末や定型句を繰り返さない。外国語の見出しは出力言語（日本語）に要約・翻訳してから書く。娯楽・ゴシップ・無関係な話題は選ばず、選んだ場合もライジング欄に載せない。
 - roundup各要素に、候補に url があれば同じ "url" フィールドを必ずコピー（なければ省略）
 
 JSON schema:
@@ -1276,8 +1334,7 @@ ${dossierEn}Requirements:
 - Provide 5 roundup entries; each summary must reflect that signal's storyline
 - sentiment must be one of positive|mixed|negative
 - selectedIds must contain the chosen signal IDs
-- risingRisks: array of 3-4 short sentences (one line each) naming concrete risks implied by the SELECTED items only
-- risingOpportunities: array of 3-4 short sentences for upside implied by the SELECTED items only
+- risingRisks / risingOpportunities: 3-4 lines each, grounded ONLY in the five selected items. Each line must be unique: start from the story's concrete angle, then explain why it matters for ${params.company} (regulation, cost, demand, partners, reputation, etc.). Do NOT reuse the same closing phrase across lines (avoid generic "monitor execution" type endings). If a headline is not in English, translate/clarify it into the output language for readability. Do not include tabloid, sports, or celebrity gossip unless the dossier shows clear business relevance to ${params.company}.
 - For each roundup item, if the candidate line includes a non-empty url=..., copy it into the same "url" field on that roundup object; omit "url" if none
 
 JSON schema:
@@ -1338,18 +1395,19 @@ ${candidateLines.join("\n")}`;
           return { ...r, ...(mergedUrl ? { url: mergedUrl } : {}) };
         }),
       };
-      writeNewsletterCache(cacheKey, enriched);
+      const polished = polishNewsletterRisingBullets(enriched);
+      writeNewsletterCache(cacheKey, polished);
       void writeAiShared({
         artifact: "company_newsletter",
         mode: "resilience",
         companyId: params.companyId || companyCacheId(params.company),
         locale: params.language || "en",
         rawKey: cacheKey,
-        payload: enriched,
+        payload: polished,
         model,
         ttlHours: 24,
       });
-      return { data: enriched, error: null };
+      return { data: polished, error: null };
     }
     return { data: null, error: new Error(lastError) };
   } catch (error) {

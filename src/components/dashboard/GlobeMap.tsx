@@ -647,7 +647,7 @@ const GlobeMap = memo(
         isSelected,
       };
     });
-  }, [signals, spreadPositions, selectedCompany, selectedSignalId, readSignalIds, mode, signalViewAltitude]);
+  }, [signals, spreadPositions, selectedCompany, selectedSignalId, readSignalIds, mode]);
 
   const ensureSignalMarkerHost = useCallback((id: string) => {
     let row = signalMarkerRootsRef.current.get(id);

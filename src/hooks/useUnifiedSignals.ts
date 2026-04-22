@@ -40,7 +40,7 @@ function slimUnifiedSignalsForCache(signals: UnifiedSignal[]): UnifiedSignal[] {
 /** In-memory mirror of persistent TTL: refresh article bundles daily. */
 const CACHE_DURATION = 24 * 60 * 60 * 1000;
 const cache = new Map<string, CacheEntry>();
-const LIVE_CACHE_VERSION = "api-v12-stratified-geo-sources";
+const LIVE_CACHE_VERSION = "api-v13-resilience-industry-query";
 const LEGACY_LIVE_CACHE_VERSIONS: string[] = ["api-v10-country-high-volume", "api-v11-company-scoped-24h"];
 const BUSINESS_ARTICLES_PER_PAGE = 100;
 const BUSINESS_PAGES = 2;
@@ -118,31 +118,42 @@ function durablePersistentKey(mode: DashboardMode, companyKey: string): string {
   return `unified-live-durable-v2-${mode}-${companyKey}`;
 }
 
-/** Event Registry keyword string: selected company industry + dossier context (not other companies). */
-function buildCompanyIndustryTopicQuery(company: Company): string {
+/**
+ * Resilience-map business search: sector, public description, and concrete business lines / brands.
+ * Omits generic strategy themes (e.g. "resilience-by-design") and the full keywords list so ER queries
+ * stay anchored on industry and named assets instead of the word "resilience".
+ */
+function buildResilienceMapBusinessTopicQuery(company: Company): string {
   const intel = company.intel;
   const parts = [
     `"${company.name.replace(/"/g, " ").trim()}"`,
     company.sector,
     company.description,
-    ...company.keywords.slice(0, 14),
-    ...(intel.brandsAndAssets?.slice(0, 6) ?? []),
-    ...intel.coreBusinessLines.slice(0, 2),
-    ...intel.strategicPriorities.slice(0, 2),
-    ...(intel.riskAndWatchThemes?.slice(0, 2) ?? []),
+    ...(intel.brandsAndAssets?.slice(0, 10) ?? []),
+    ...intel.coreBusinessLines.slice(0, 5),
+    ...(intel.keyMarkets?.slice(0, 4) ?? []),
+    ...(intel.competitorsOrPeers?.slice(0, 3) ?? []),
   ];
   let q = parts.join(" ").replace(/\s+/g, " ").trim();
   if (q.length > MAX_ER_TOPIC_CHARS) q = q.slice(0, MAX_ER_TOPIC_CHARS);
   return q;
 }
 
-function buildCompanyTopicQueryRelaxed(company: Company): string {
-  const q = [
+/** Broader industry pass without keyword/intel theme strings that dilute the sector lens. */
+function buildResilienceMapBusinessTopicQueryRelaxed(company: Company): string {
+  const intel = company.intel;
+  const desc = (company.description || "").trim();
+  const parts = [
     `"${company.name.replace(/"/g, " ").trim()}"`,
     company.sector,
-    ...company.keywords.slice(0, 8),
-  ].join(" ");
-  return q.slice(0, MAX_ER_TOPIC_CHARS);
+    ...intel.coreBusinessLines.slice(0, 8),
+    ...(intel.brandsAndAssets?.slice(0, 14) ?? []),
+    ...(intel.keyMarkets?.slice(0, 5) ?? []),
+    desc.length > 280 ? `${desc.slice(0, 280)}…` : desc,
+  ];
+  let q = parts.join(" ").replace(/\s+/g, " ").trim();
+  if (q.length > MAX_ER_TOPIC_CHARS) q = q.slice(0, MAX_ER_TOPIC_CHARS);
+  return q;
 }
 
 function buildCompanyGenZContextHint(company: Company): string {
@@ -1082,10 +1093,10 @@ export function useUnifiedSignals(
       let countryBuiltCount = 0;
       let providerLimited = false;
       const businessTopicQueryStrict = selectedCompanyData
-        ? buildCompanyIndustryTopicQuery(selectedCompanyData)
+        ? buildResilienceMapBusinessTopicQuery(selectedCompanyData)
         : "business finance economy innovation supply chain regulation";
       const businessTopicQueryFallback = selectedCompanyData
-        ? buildCompanyTopicQueryRelaxed(selectedCompanyData)
+        ? buildResilienceMapBusinessTopicQueryRelaxed(selectedCompanyData)
         : "";
       const genzTopicAugment = selectedCompanyData ? buildCompanyGenZContextHint(selectedCompanyData) : "";
       const genzTopicQueryFallback = genzTopicAugment;

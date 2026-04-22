@@ -1,6 +1,7 @@
 /**
- * Shared sizing for signal markers: 2D map (SVG px) and 3D globe (deg on sphere).
- * Mirrors GlobalMap: urgency multiplier, relevance base width, and `map2dDotScaleFromZoom`.
+ * Shared sizing for signal markers: 2D map (SVG map-units) and 3D globe (HTML overlays + deg pick radius).
+ * 2D uses `map2dDotScaleFromZoom` because ZoomableGroup scales all SVG by zoom. The globe does not
+ * behave the same way, so globe HTML markers use a ~fixed scale (see `globeDotScaleFromCameraAltitude`).
  */
 
 export function getUrgencyMultiplier(score: number): number {
@@ -25,16 +26,11 @@ export function map2dDotScaleFromZoom(zoom: number): number {
 }
 
 /**
- * Globe.gl: lower `altitude` = closer to the surface (zoomed in). Scale like 2D: zoom in → smaller dots.
- * (Previously refAlt/altitude made markers grow when zooming in.)
+ * Globe.gl HTML overlays: unlike react-simple-maps’ ZoomableGroup, dot size must not track camera
+ * altitude like the 2D zoom compensation (that made markers vanish when flying close to the surface).
  */
-export function globeDotScaleFromCameraAltitude(cameraAltitude: number): number {
-  const refAlt = 2.5;
-  const refLiveZoom = 1.5;
-  const a = Math.max(cameraAltitude, 0.28);
-  // Steeper than linear so “zoomed all the way in” (very low altitude) keeps shrinking.
-  const raw = (Math.pow(a / refAlt, 1.35) / refLiveZoom) * 1.05;
-  return Math.max(0.018, Math.min(1.45, raw));
+export function globeDotScaleFromCameraAltitude(_cameraAltitude: number): number {
+  return 1;
 }
 
 /**
@@ -51,9 +47,9 @@ export function globeSignalRadiusDeg(o: {
   const r = baseR * globeDotScaleFromCameraAltitude(o.cameraAltitude);
   const deg = r * 0.028;
   const selectedBoost = o.isSelected ? 1.15 : 1;
-  // Floor scales up with camera distance so close-in views are not clamped to a huge minimum.
+  // Slightly larger floor when the camera is tight on the surface so pick targets stay usable.
   const alt = Math.max(0.28, o.cameraAltitude);
-  const floorDeg = 0.011 + 0.055 * Math.min(1, (alt - 0.28) / 2.35);
+  const floorDeg = 0.024 + 0.042 * Math.min(1, (alt - 0.28) / 2.35);
   return Math.min(0.48, Math.max(floorDeg, deg * selectedBoost));
 }
 
