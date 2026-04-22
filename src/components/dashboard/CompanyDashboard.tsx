@@ -72,7 +72,10 @@ function timeAgo(date: Date, lang: string): string {
 function assignDates(signals: UnifiedSignal[]): (UnifiedSignal & { _date: Date })[] {
   const now = Date.now();
   return signals.map((s, i) => {
-    if (s.date) return { ...s, _date: new Date(s.date) };
+    if (s.date) {
+      const parsed = new Date(s.date);
+      if (!Number.isNaN(parsed.getTime())) return { ...s, _date: parsed };
+    }
     // Deterministic pseudo-random based on id
     const hash = s.id.split("").reduce((a, c) => a + c.charCodeAt(0), 0);
     const daysAgo = (hash * 7 + i * 3) % 30;
@@ -135,9 +138,11 @@ const CompanyDashboard = ({ selectedCompany, signals, onSignalClick }: Props) =>
     const now = Date.now();
     const cutoff = timeFilter === "24h" ? 86400000 : timeFilter === "7d" ? 604800000 : 2592000000;
     return datedSignals
-      .filter(s => now - s._date.getTime() < cutoff)
+      .filter(s => now - s._date.getTime() <= cutoff)
       .sort((a, b) => {
         const urgencyOrder = { critical: 0, high: 1, medium: 2, low: 3 };
+        const dateDiff = b._date.getTime() - a._date.getTime();
+        if (Math.abs(dateDiff) > 1000) return dateDiff;
         return (urgencyOrder[a.urgency] || 3) - (urgencyOrder[b.urgency] || 3);
       });
   }, [datedSignals, timeFilter]);
@@ -567,6 +572,9 @@ const CompanyDashboard = ({ selectedCompany, signals, onSignalClick }: Props) =>
 
   useEffect(() => {
     let cancelled = false;
+    // Prevent stale newsletter carry-over when changing company/time window.
+    setAiNewsletter(null);
+    setAiNewsletterActive(false);
     if (newsletterCandidates.length === 0) {
       setAiNewsletter(null);
       setAiNewsletterActive(false);
@@ -652,7 +660,7 @@ const CompanyDashboard = ({ selectedCompany, signals, onSignalClick }: Props) =>
     return () => {
       cancelled = true;
     };
-  }, [company.id, company.name, company.sector, companyAiContext, lang, newsletterCandidatesKey]);
+  }, [company.id, company.name, company.sector, companyAiContext, lang, newsletterCandidatesKey, timeFilter]);
 
   return (
     <ScrollArea className="h-full">

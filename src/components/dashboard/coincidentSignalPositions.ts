@@ -134,6 +134,19 @@ function nearestFeatureByCentroid(
   return best;
 }
 
+function isInsideFeature(
+  feature: { geometry: unknown } | null,
+  lng: number,
+  lat: number,
+): boolean {
+  if (!feature) return false;
+  try {
+    return geoContains(feature as GeoJSON.GeoJSON, [lng, lat]);
+  } catch {
+    return false;
+  }
+}
+
 const interiorPointCache = new WeakMap<object, [number, number] | null>();
 
 function findInteriorPoint(feature: { geometry: unknown }): [number, number] | null {
@@ -255,6 +268,18 @@ export function clampPositionsToContainingCountry<
     if (!found) {
       const interior = findInteriorPoint(feat);
       if (interior) best = { lng: interior[0], lat: interior[1] };
+    }
+
+    // Final guard: never leave a marker in water.
+    // If still outside the target polygon, snap to nearest country's interior land point.
+    if (!isInsideFeature(feat, best.lng, best.lat)) {
+      const nearestLand =
+        nearestFeatureByCentroid(best.lng, best.lat, countryFeatures) ||
+        nearestFeatureByCentroid(homeLng, homeLat, countryFeatures);
+      const landInterior = nearestLand ? findInteriorPoint(nearestLand) : null;
+      if (landInterior) {
+        best = { lng: landInterior[0], lat: landInterior[1] };
+      }
     }
     out.set(signal.id, { ...cur, lng: best.lng, lat: best.lat });
   }

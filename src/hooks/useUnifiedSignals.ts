@@ -870,6 +870,22 @@ export function useUnifiedSignals(
       });
       const companyFiltered = deduped.filter(isCompanyRelevantSignal);
       let selected = companyFiltered.length > 0 ? companyFiltered : deduped;
+      // Adaptive widening for low-coverage companies:
+      // keep company-priority, but avoid stalling at tiny bundles.
+      if (selected.length < MIN_COMPANY_SIGNALS) {
+        if (mode === "genz") {
+          const youthPool = deduped.filter((s) => looksLikeGenZNews(s));
+          if (youthPool.length > selected.length) selected = youthPool;
+        } else {
+          const sectorPool = deduped.filter((s) => {
+            if (s.layer !== "live-news") return true;
+            const text = `${s.title || ""} ${s.description || ""}`.toLowerCase();
+            const sectorHit = companySectorBits.some((w) => text.includes(w));
+            return sectorHit || companyRelevanceScore(s) >= 1;
+          });
+          if (sectorPool.length > selected.length) selected = sectorPool;
+        }
+      }
       // For Gen Z, if strict company filtering under-fills, widen to youth-relevant pool
       // and let company relevance ordering decide priority.
       if (mode === "genz" && selected.length < MIN_COMPANY_SIGNALS) {
@@ -878,6 +894,14 @@ export function useUnifiedSignals(
       }
       // Keep each map per-company dense (250-500) while still preferring company/industry relevance.
       if (selected.length < MIN_COMPANY_SIGNALS && deduped.length > selected.length) {
+        const minExtraRelevance =
+          mode === "genz"
+            ? 0
+            : selected.length < 120
+              ? 0
+              : selected.length < 220
+                ? 1
+                : 2;
         const seen = new Set(selected.map((s) => s.id));
         const extras = deduped
           .filter((s) => !seen.has(s.id))
@@ -889,7 +913,7 @@ export function useUnifiedSignals(
           });
         for (const extra of extras) {
           if (selected.length >= MIN_COMPANY_SIGNALS) break;
-          if (mode !== "genz" && companyRelevanceScore(extra) < 2) continue;
+          if (mode !== "genz" && companyRelevanceScore(extra) < minExtraRelevance) continue;
           if (mode === "genz" && !looksLikeGenZNews(extra)) continue;
           selected.push(extra);
         }
@@ -980,11 +1004,13 @@ export function useUnifiedSignals(
     const fetchAll = async () => {
       const sharedSupabaseEntry = await readSignalBundleCache<UnifiedSignal[]>({
         cacheKey: signalBundleCacheKey,
-        minSignals: MIN_COMPANY_SIGNALS,
-        minCoverageCountries: 12,
+        minSignals: MIN_SHARED_SIGNAL_ACCEPT_COUNT,
+        minCoverageCountries: 8,
       });
+      let sharedWarmStart: UnifiedSignal[] = [];
       if (sharedSupabaseEntry?.data?.length) {
         const filtered = finalizeSignals(sharedSupabaseEntry.data);
+        sharedWarmStart = filtered;
         cache.set(cacheKey, { signals: filtered, timestamp: sharedSupabaseEntry.savedAt });
         writeSessionCache(cacheKey, slimUnifiedSignalsForCache(filtered));
         writePersistentCache(cacheKey, slimUnifiedSignalsForCache(filtered));
@@ -993,10 +1019,14 @@ export function useUnifiedSignals(
           setIsLive(true);
           setLoading(false);
         }
-        return;
+        // Fully-filled final bundles can short-circuit. Otherwise continue fetching and
+        // refresh the shared cache upward toward 500 using the latest logic.
+        if (sharedSupabaseEntry.isFinal && sharedSupabaseEntry.signalCount >= MAX_COMPANY_SIGNALS) {
+          return;
+        }
       }
 
-      const results: UnifiedSignal[] = [];
+      const results: UnifiedSignal[] = [...sharedWarmStart];
       let lastSharedWriteAt = 0;
       let lastSharedWriteCount = 0;
       const SHARED_WRITE_INTERVAL_MS = 3000;
@@ -1026,7 +1056,10 @@ export function useUnifiedSignals(
             const strictGenZMode = mode === "genz";
             if (strictGenZMode) {
               if (!looksLikeStrictGenZArticle(a)) return [];
-              if (!isArticleRelevantToCompanyIndustry(a, selectedCompanyData)) return [];
+              const industryRelevant = isArticleRelevantToCompanyIndustry(a, selectedCompanyData);
+              // Early in the run we allow youth-relevant but weakly branded items so
+              // smaller company profiles can still fill density targets.
+              if (!industryRelevant && results.length >= 140) return [];
             }
             const dom = resolveArticleDomain(selectedCompanyData, a);
             // Avoid starving Gen Z map when inference is uncertain:
@@ -1183,7 +1216,7 @@ export function useUnifiedSignals(
           const type = mode === "genz" ? "genz" : "business";
           const query = mode === "genz"
             ? `Gen Z youth social media young adults ${genzTopicQueryFallback}`.trim()
-            : businessTopicQueryStrict;
+            : `${businessTopicQueryStrict} ${businessTopicQueryFallback}`.trim();
           const fillRes = await fetchPagedArticles(type, country, 80, 1, query)
             .catch(() => ({ articles: [] as any[], providerLimited: false }));
           appendLiveArticles(fillRes.articles, country, mode === "genz" ? "live-gz-fill" : "live-biz-fill");
