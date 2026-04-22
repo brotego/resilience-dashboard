@@ -47,7 +47,7 @@ function haversineMeters(a: [number, number], b: [number, number]): number {
   return 2 * EARTH_RADIUS_M * Math.asin(Math.min(1, Math.sqrt(s1 + s2)));
 }
 
-function clusterByProximity<T extends { id: string; coordinates: [number, number] }>(
+function clusterByProximity<T extends { id: string; coordinates: [number, number]; location?: string }>(
   items: T[],
   maxMeters: number,
 ): T[][] {
@@ -65,8 +65,8 @@ function clusterByProximity<T extends { id: string; coordinates: [number, number
   for (let i = 0; i < n; i++) {
     for (let j = i + 1; j < n; j++) {
       // Keep clustering country-local so nearby countries don't get merged into one spread ring.
-      const li = (items[i] as any).location as string | undefined;
-      const lj = (items[j] as any).location as string | undefined;
+      const li = items[i].location;
+      const lj = items[j].location;
       if (li && lj && normalizeCountryName(li) !== normalizeCountryName(lj)) continue;
       if (haversineMeters(items[i].coordinates, items[j].coordinates) <= maxMeters) {
         union(i, j);
@@ -86,7 +86,7 @@ function clusterByProximity<T extends { id: string; coordinates: [number, number
  * Signals that share the same map stack as the selected one (same proximity cluster as spreadCoincidentSignalPositions).
  * Sorted by id to match the order used when spreading dots on the ring.
  */
-export function getCoincidentSignalsForSelection<T extends { id: string; coordinates: [number, number] }>(
+export function getCoincidentSignalsForSelection<T extends { id: string; coordinates: [number, number]; location?: string }>(
   items: T[],
   selectedId: string,
   options?: { proximityMeters?: number },
@@ -144,6 +144,97 @@ function featureCountryKeys(feature: { geometry: unknown; properties?: Record<st
   return [...keys];
 }
 
+function approxFeatureBBoxAreaDegSq(feature: { geometry: unknown }): number {
+  try {
+    const b = geoBounds(feature as GeoJSON.GeoJSON);
+    const w = b[1][0] - b[0][0];
+    const h = b[1][1] - b[0][1];
+    if (!Number.isFinite(w) || !Number.isFinite(h)) return 0;
+    return Math.max(0, w) * Math.max(0, h);
+  } catch {
+    return 0;
+  }
+}
+
+function buildFeaturesByCountry(
+  countryFeatures: { geometry: unknown; properties?: Record<string, unknown> }[],
+): Map<string, { geometry: unknown; properties?: Record<string, unknown> }[]> {
+  const featuresByCountry = new Map<string, { geometry: unknown; properties?: Record<string, unknown> }[]>();
+  for (const f of countryFeatures) {
+    const keys = featureCountryKeys(f);
+    for (const name of keys) {
+      if (!featuresByCountry.has(name)) featuresByCountry.set(name, []);
+      featuresByCountry.get(name)!.push(f);
+    }
+  }
+  return featuresByCountry;
+}
+
+/**
+ * Pick the GeoJSON feature that best represents `signal.location`, using home coordinates only to
+ * disambiguate multi-part countries — never a foreign neighbor polygon.
+ */
+function resolveCountryFeatureForSignal<T extends { coordinates: [number, number]; location?: string }>(
+  signal: T,
+  countryFeatures: { geometry: unknown; properties?: Record<string, unknown> }[],
+  featuresByCountry: Map<string, { geometry: unknown; properties?: Record<string, unknown> }[]>,
+): { geometry: unknown; properties?: Record<string, unknown> } | null {
+  const [homeLng, homeLat] = signal.coordinates;
+  const raw = (signal.location || "").trim();
+  const targetNorm = raw ? normalizeCountryName(raw) : "";
+  const isGlobal = !targetNorm || targetNorm === "global";
+
+  if (isGlobal || !countryFeatures.length) {
+    return (
+      findContainingFeature(homeLng, homeLat, countryFeatures) ||
+      nearestFeatureByCentroid(homeLng, homeLat, countryFeatures)
+    );
+  }
+
+  let candidates: { geometry: unknown; properties?: Record<string, unknown> }[] = [];
+  if (featuresByCountry.has(targetNorm)) {
+    candidates = featuresByCountry.get(targetNorm)!;
+  } else {
+    const fuzzy = countryFeatures.filter((f) => {
+      const name = featureCountryName(f);
+      if (!name) return false;
+      return name.includes(targetNorm) || targetNorm.includes(name);
+    });
+    if (fuzzy.length > 0) candidates = fuzzy;
+  }
+
+  if (candidates.length === 0) {
+    return (
+      findContainingFeature(homeLng, homeLat, countryFeatures) ||
+      nearestFeatureByCentroid(homeLng, homeLat, countryFeatures)
+    );
+  }
+  if (candidates.length === 1) return candidates[0];
+
+  for (const f of candidates) {
+    try {
+      if (geoContains(f as GeoJSON.GeoJSON, [homeLng, homeLat])) return f;
+    } catch {
+      /* ignore */
+    }
+  }
+
+  let best = candidates[0];
+  let bestDist = Number.POSITIVE_INFINITY;
+  for (const f of candidates) {
+    const interior = findInteriorPoint(f);
+    if (!interior) continue;
+    const d = haversineMeters([homeLng, homeLat], interior);
+    if (d < bestDist) {
+      bestDist = d;
+      best = f;
+    }
+  }
+  if (bestDist < Number.POSITIVE_INFINITY) return best;
+
+  return candidates.reduce((a, b) => (approxFeatureBBoxAreaDegSq(a) >= approxFeatureBBoxAreaDegSq(b) ? a : b));
+}
+
 function nearestFeatureByCentroid(
   lng: number,
   lat: number,
@@ -188,7 +279,7 @@ function snapLngLatToPolygon(
 
   let best = { lng: il, lat: ia };
   let found = false;
-  for (let t = 1; t >= 0; t -= 0.05) {
+  for (let t = 1; t >= 0; t -= 0.02) {
     const nl = anchorLng + (lng - anchorLng) * t;
     const na = anchorLat + (lat - anchorLat) * t;
     try {
@@ -285,44 +376,13 @@ export function clampPositionsToContainingCountry<
 ): Map<string, SignalDisplayPosition> {
   if (!countryFeatures.length) return spread;
   const out = new Map(spread);
-  const featuresByCountry = new Map<string, { geometry: unknown; properties?: Record<string, unknown> }[]>();
-  for (const f of countryFeatures) {
-    const keys = featureCountryKeys(f);
-    for (const name of keys) {
-      if (!featuresByCountry.has(name)) featuresByCountry.set(name, []);
-      featuresByCountry.get(name)!.push(f);
-    }
-  }
+  const featuresByCountry = buildFeaturesByCountry(countryFeatures);
 
   for (const signal of signals) {
     const cur = out.get(signal.id);
     if (!cur) continue;
     const [homeLng, homeLat] = signal.coordinates;
-    const targetCountry = signal.location ? normalizeCountryName(signal.location) : "";
-    let feat: { geometry: unknown; properties?: Record<string, unknown> } | null = null;
-    if (targetCountry && featuresByCountry.has(targetCountry)) {
-      const candidates = featuresByCountry.get(targetCountry)!;
-      feat =
-        findContainingFeature(homeLng, homeLat, candidates) ||
-        nearestFeatureByCentroid(homeLng, homeLat, candidates);
-    } else if (targetCountry) {
-      // Fuzzy fallback for label mismatches like "Cote d Ivoire" vs "Ivory Coast".
-      const fuzzyCandidates = countryFeatures.filter((f) => {
-        const name = featureCountryName(f);
-        if (!name) return false;
-        return name.includes(targetCountry) || targetCountry.includes(name);
-      });
-      if (fuzzyCandidates.length > 0) {
-        feat =
-          findContainingFeature(homeLng, homeLat, fuzzyCandidates) ||
-          nearestFeatureByCentroid(homeLng, homeLat, fuzzyCandidates);
-      }
-    }
-    if (!feat) {
-      feat =
-        findContainingFeature(homeLng, homeLat, countryFeatures) ||
-        nearestFeatureByCentroid(homeLng, homeLat, countryFeatures);
-    }
+    const feat = resolveCountryFeatureForSignal(signal, countryFeatures, featuresByCountry);
     if (!feat) continue;
 
     const { lng, lat } = cur;
@@ -334,36 +394,41 @@ export function clampPositionsToContainingCountry<
     }
     if (candidateInside) continue;
 
-    let best = { lng: homeLng, lat: homeLat };
-    let found = false;
-    for (let t = 1; t >= 0; t -= 0.05) {
-      const nl = homeLng + (lng - homeLng) * t;
-      const na = homeLat + (lat - homeLat) * t;
-      try {
-        if (geoContains(feat as GeoJSON.GeoJSON, [nl, na])) {
-          best = { lng: nl, lat: na };
-          found = true;
-          break;
+    const interiorSeed = findInteriorPoint(feat);
+    const anchorLng = interiorSeed?.[0] ?? homeLng;
+    const anchorLat = interiorSeed?.[1] ?? homeLat;
+
+    let best = snapLngLatToPolygon(feat, lng, lat, anchorLng, anchorLat);
+    if (!isInsideFeature(feat, best.lng, best.lat)) {
+      let found = false;
+      for (let t = 1; t >= 0; t -= 0.02) {
+        const nl = homeLng + (lng - homeLng) * t;
+        const na = homeLat + (lat - homeLat) * t;
+        try {
+          if (geoContains(feat as GeoJSON.GeoJSON, [nl, na])) {
+            best = { lng: nl, lat: na };
+            found = true;
+            break;
+          }
+        } catch {
+          /* ignore */
         }
-      } catch {
-        /* ignore */
       }
-    }
-    if (!found) {
-      const interior = findInteriorPoint(feat);
-      if (interior) best = { lng: interior[0], lat: interior[1] };
+      if (!found && interiorSeed) {
+        best = { lng: interiorSeed[0], lat: interiorSeed[1] };
+      }
     }
 
-    // Final guard: never leave a marker in water.
-    // If still outside the target polygon, snap to nearest country's interior land point.
+    // Stay inside the labeled country's polygon only (never jump to a neighbor across water).
     if (!isInsideFeature(feat, best.lng, best.lat)) {
-      const nearestLand =
-        nearestFeatureByCentroid(best.lng, best.lat, countryFeatures) ||
-        nearestFeatureByCentroid(homeLng, homeLat, countryFeatures);
-      const landInterior = nearestLand ? findInteriorPoint(nearestLand) : null;
-      if (landInterior) {
-        best = { lng: landInterior[0], lat: landInterior[1] };
+      const interior = findInteriorPoint(feat);
+      if (interior) {
+        best = snapLngLatToPolygon(feat, best.lng, best.lat, interior[0], interior[1]);
       }
+    }
+    if (!isInsideFeature(feat, best.lng, best.lat)) {
+      const interior = findInteriorPoint(feat);
+      if (interior) best = { lng: interior[0], lat: interior[1] };
     }
     out.set(signal.id, { ...cur, lng: best.lng, lat: best.lat });
   }
@@ -391,44 +456,10 @@ export function spreadCoincidentSignalPositions<T extends { id: string; coordina
   const out = new Map<string, SignalDisplayPosition>();
   const clusters = clusterByProximity(items, proximityMeters);
 
-  const featuresByCountry = new Map<string, { geometry: unknown; properties?: Record<string, unknown> }[]>();
-  for (const f of countryFeatures) {
-    const keys = featureCountryKeys(f);
-    for (const name of keys) {
-      if (!featuresByCountry.has(name)) featuresByCountry.set(name, []);
-      featuresByCountry.get(name)!.push(f);
-    }
-  }
+  const featuresByCountry = buildFeaturesByCountry(countryFeatures);
 
-  const resolveFeatureForSignal = (signal: T): { geometry: unknown; properties?: Record<string, unknown> } | null => {
-    if (!countryFeatures.length) return null;
-    const [homeLng, homeLat] = signal.coordinates;
-    const targetCountry = signal.location ? normalizeCountryName(signal.location) : "";
-    let feat: { geometry: unknown; properties?: Record<string, unknown> } | null = null;
-    if (targetCountry && featuresByCountry.has(targetCountry)) {
-      const candidates = featuresByCountry.get(targetCountry)!;
-      feat =
-        findContainingFeature(homeLng, homeLat, candidates) ||
-        nearestFeatureByCentroid(homeLng, homeLat, candidates);
-    } else if (targetCountry) {
-      const fuzzyCandidates = countryFeatures.filter((f) => {
-        const name = featureCountryName(f);
-        if (!name) return false;
-        return name.includes(targetCountry) || targetCountry.includes(name);
-      });
-      if (fuzzyCandidates.length > 0) {
-        feat =
-          findContainingFeature(homeLng, homeLat, fuzzyCandidates) ||
-          nearestFeatureByCentroid(homeLng, homeLat, fuzzyCandidates);
-      }
-    }
-    if (!feat) {
-      feat =
-        findContainingFeature(homeLng, homeLat, countryFeatures) ||
-        nearestFeatureByCentroid(homeLng, homeLat, countryFeatures);
-    }
-    return feat;
-  };
+  const resolveFeatureForSignal = (signal: T): { geometry: unknown; properties?: Record<string, unknown> } | null =>
+    resolveCountryFeatureForSignal(signal, countryFeatures, featuresByCountry);
 
   for (const group of clusters) {
     if (group.length === 1) {

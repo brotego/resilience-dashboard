@@ -283,11 +283,16 @@ function newsApiKeyFingerprint(): string {
   return Math.abs(hash >>> 0).toString(36);
 }
 
-function jitter(coords: [number, number], index: number, offset = 0): [number, number] {
+/** Small angular jitter for map coordinates (degrees), keeps points near anchors and on-land once clamped. */
+function jitter(coords: [number, number], index: number, offset = 0, maxRadiusDeg = 0.18): [number, number] {
   const seed = index + offset * 7;
   const angle = (seed * 137.5) * (Math.PI / 180);
-  const r = 2 + (seed % 5) * 1.2;
-  return [coords[0] + r * Math.cos(angle), coords[1] + r * Math.sin(angle)];
+  const u = hashToUnit(`jitter-${seed}-${offset}`);
+  const r = maxRadiusDeg * (0.3 + 0.7 * u);
+  const latRad = (coords[1] * Math.PI) / 180;
+  const dLat = r * Math.sin(angle);
+  const dLng = (r * Math.cos(angle)) / Math.max(0.35, Math.cos(latRad));
+  return [coords[0] + dLng, coords[1] + dLat];
 }
 
 function hashToUnit(key: string): number {
@@ -308,7 +313,7 @@ function globalScatterCoords(key: string, i: number): [number, number] {
   // Bias away from poles for nicer distribution on common map projections.
   const lat = -60 + 135 * v;
   // Tiny jitter so same-URL duplicates don’t perfectly overlap.
-  const j = jitter([lon, lat], i, 7);
+  const j = jitter([lon, lat], i, 7, 0.9);
   return [j[0], Math.max(-70, Math.min(80, j[1]))];
 }
 
@@ -316,17 +321,18 @@ function countryScatterCoords(
   anchor: { coords: [number, number] },
   articleKey: string,
   index: number,
-  spreadScale = 1.75,
+  spreadScale = 0.32,
 ): [number, number] {
   const u = hashToUnit(`${articleKey}::cu`);
   const v = hashToUnit(`${articleKey}::cv`);
   const angle = 2 * Math.PI * u;
-  const rLat = (0.55 + 2.4 * Math.sqrt(v)) * spreadScale;
+  // Keep scatter sub-degree so raw points usually stay inside the country before map clamping.
+  const rLat = (0.06 + 0.42 * Math.sqrt(v)) * spreadScale;
   const lat = anchor.coords[1] + rLat * Math.sin(angle);
   const cosLat = Math.max(0.3, Math.cos((Math.abs(anchor.coords[1]) * Math.PI) / 180));
   const rLon = rLat / cosLat;
   const lon = anchor.coords[0] + rLon * Math.cos(angle);
-  const j = jitter([lon, lat], index, 13);
+  const j = jitter([lon, lat], index, 13, 0.12);
   return [Math.max(-179, Math.min(179, j[0])), Math.max(-70, Math.min(80, j[1]))];
 }
 
