@@ -12,21 +12,27 @@ export function getSignalBaseR(relevant: boolean): number {
 }
 
 /**
- * 2D map (react-simple-maps): ZoomableGroup scales content by `zoom`. Using pure 1/zoom
- * for dot radius cancels that and keeps dots a constant *screen* size — they stay huge
- * when zoomed out. An exponent below 1 lets markers shrink when zoomed out and grow when zoomed in.
+ * 2D map (react-simple-maps): ZoomableGroup scales all SVG content by `zoom`, so a fixed
+ * map-unit radius grows on-screen roughly proportional to `zoom`. We use 1/z^exp with exp > 1
+ * so apparent dot size **shrinks** as the user zooms in (higher `zoom`), and grows when zoomed out.
  */
 export function map2dDotScaleFromZoom(zoom: number): number {
   const z = Math.max(0.85, Math.min(22, zoom));
-  const comp = 0.62;
-  return 1 / Math.pow(z, comp);
+  const exp = 1.18;
+  const raw = 1 / Math.pow(z, exp);
+  return Math.max(0.014, Math.min(1.05, raw));
 }
 
-/** GlobalMap uses dotScale = 1 / liveZoom (default liveZoom ~1.5). Map globe camera altitude to the same intent. */
+/**
+ * Globe.gl: lower `altitude` = closer to the surface (zoomed in). Scale like 2D: zoom in → smaller dots.
+ * (Previously refAlt/altitude made markers grow when zooming in.)
+ */
 export function globeDotScaleFromCameraAltitude(cameraAltitude: number): number {
   const refAlt = 2.5;
   const refLiveZoom = 1.5;
-  return (refAlt / Math.max(cameraAltitude, 0.35)) * (1 / refLiveZoom);
+  const a = Math.max(cameraAltitude, 0.35);
+  const raw = (a / refAlt) * (1 / refLiveZoom);
+  return Math.max(0.045, Math.min(1.35, raw));
 }
 
 /**

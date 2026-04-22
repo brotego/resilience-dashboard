@@ -293,7 +293,7 @@ const GlobalMap = memo(({
   const zoomIn = useCallback(() => animateZoom(clampZoom(targetZoomRef.current * ZOOM_STEP)), [animateZoom]);
   const zoomOut = useCallback(() => animateZoom(clampZoom(targetZoomRef.current / ZOOM_STEP)), [animateZoom]);
 
-  /** Partial inverse zoom so dots scale with the map (smaller when zoomed out). */
+  /** Stronger than 1/zoom so on-screen dots shrink as the user zooms in (ZoomableGroup scales content by zoom). */
   const dotScale = map2dDotScaleFromZoom(liveZoom);
   const mapSignalSizeFactor = 0.68;
   const labelFontSize = Math.max(0.6, 5 / Math.pow(liveZoom, 1.05));
