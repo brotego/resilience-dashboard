@@ -5,6 +5,7 @@ import {
   Geographies,
   Geography,
   Marker,
+  useZoomPanContext,
 } from "react-simple-maps";
 import { geoCentroid, geoBounds } from "d3-geo";
 import { DOMAINS } from "@/data/domains";
@@ -24,7 +25,11 @@ import {
 } from "@/data/countryMapLabels";
 import { getSignalBaseR, getUrgencyMultiplier, map2dDotScaleFromZoom } from "./signalMarkerStyle";
 import SignalMapDot from "./SignalMapDot";
-import { clampPositionsToContainingCountry, spreadCoincidentSignalPositions } from "./coincidentSignalPositions";
+import {
+  clampPositionsToContainingCountry,
+  spreadCoincidentSignalPositions,
+  type SignalDisplayPosition,
+} from "./coincidentSignalPositions";
 import { useLang } from "@/i18n/LanguageContext";
 import { useJpUi } from "@/i18n/jpUiContext";
 import type { TranslationKey } from "@/i18n/translations";
@@ -120,6 +125,128 @@ function calcCountryZoom(geo: any): number {
   const maxSpan = Math.max(lngSpan, latSpan);
   return Math.min(MAX_ZOOM, Math.max(2, 120 / maxSpan));
 }
+
+/** Cities + signal dots: size from actual d3 scale `k` so radius stays in sync with the zoom transform (avoids huge dots after country fly / pan). */
+const GlobalMapZoomedMarkers = memo(function GlobalMapZoomedMarkers({
+  signals,
+  spreadPositions,
+  mode,
+  selectedCompany,
+  selectedSignalId,
+  readSignalIds,
+  panToSignal,
+  onSignalClick,
+  showTooltip,
+  hideTooltip,
+  t,
+  getSignalDisplay,
+}: {
+  signals: UnifiedSignal[];
+  spreadPositions: Map<string, SignalDisplayPosition>;
+  mode: DashboardMode;
+  selectedCompany: CompanyId | null;
+  selectedSignalId: string | null;
+  readSignalIds: string[];
+  panToSignal: (coords: [number, number]) => void;
+  onSignalClick: (signal: UnifiedSignal) => void;
+  showTooltip: (e: MouseEvent, title: string, location: string, urgency: string, score: number) => void;
+  hideTooltip: () => void;
+  t: (k: TranslationKey) => string;
+  getSignalDisplay: (signal: UnifiedSignal) => { title: string; location: string };
+}) {
+  const { k } = useZoomPanContext();
+  const z = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, k));
+  const dotScale = map2dDotScaleFromZoom(z);
+  const mapSignalSizeFactor = 0.68;
+  const capitalFontSize = Math.max(0.5, 4 / Math.pow(z, 1.05));
+  const capitalDotR = Math.max(0.4, 1.2 * dotScale);
+
+  return (
+    <>
+      {z >= 3 &&
+        WORLD_CITIES.map((city) => {
+          const minZoom = getCityMinZoom(city.tier);
+          if (z < minZoom) return null;
+          const fadeProgress = Math.min(1, (z - minZoom) / 1);
+          return (
+            <Marker key={`city-${city.name}-${city.country}`} coordinates={city.coordinates}>
+              <circle
+                r={city.isCapital ? capitalDotR * 1.2 : capitalDotR}
+                fill={city.isCapital ? "hsl(220, 20%, 60%)" : "hsl(220, 10%, 50%)"}
+                opacity={fadeProgress * 0.8}
+              />
+              <text
+                textAnchor="start"
+                x={capitalDotR + 1.5 * dotScale}
+                dy="0.3em"
+                style={{
+                  fontFamily: "'Noto Sans JP', system-ui, sans-serif",
+                  fill: city.isCapital ? "hsl(220, 15%, 60%)" : "hsl(220, 10%, 50%)",
+                  fontSize: `${city.isCapital ? capitalFontSize * 1.1 : capitalFontSize * 0.9}px`,
+                  fontWeight: city.isCapital ? 500 : 400,
+                  fontStyle: city.isCapital ? "normal" : "italic",
+                  pointerEvents: "none",
+                  userSelect: "none",
+                  opacity: fadeProgress * 0.7,
+                  transition: "opacity 0.3s",
+                }}
+              >
+                {city.name}
+              </text>
+            </Marker>
+          );
+        })}
+
+      {signals.map((signal) => {
+        const color = getSignalColor(signal, mode);
+        const score = signal.resilienceScore;
+        const relevant = selectedCompany ? isRelevantToCompany(`${signal.title} ${signal.description}`, selectedCompany) : false;
+        const isSelected = selectedSignalId === signal.id;
+        const isRead = readSignalIds.includes(signal.id);
+        const dimmed = !!(selectedCompany && !relevant && signal.layer !== "live-news");
+        const renderColor = isSelected || isRead ? "hsl(220, 8%, 48%)" : color;
+        const pos = spreadPositions.get(signal.id)!;
+
+        const urgencyMultiplier = getUrgencyMultiplier(score);
+        const urgencyKey = `urgency.${signal.urgency}` as TranslationKey;
+        const urgencyLabel = t(urgencyKey);
+        const disp = getSignalDisplay(signal);
+
+        const baseR = getSignalBaseR(relevant) * urgencyMultiplier * mapSignalSizeFactor;
+        const r = baseR * dotScale;
+
+        return (
+          <Marker
+            key={signal.id}
+            coordinates={[pos.lng, pos.lat]}
+            onClick={() => {
+              onSignalClick(signal);
+              panToSignal(signal.coordinates);
+            }}
+            style={{ cursor: "pointer" }}
+          >
+            <SignalMapDot
+              r={r}
+              dotScale={dotScale}
+              renderColor={renderColor}
+              dimmed={dimmed}
+              score={score}
+              isSelected={isSelected}
+              onMainMouseEnter={(e) =>
+                showTooltip(e as unknown as MouseEvent, disp.title, disp.location, urgencyLabel, score)
+              }
+              onMainMouseMove={(e) =>
+                showTooltip(e as unknown as MouseEvent, disp.title, disp.location, urgencyLabel, score)
+              }
+              onMainMouseLeave={hideTooltip}
+            />
+          </Marker>
+        );
+      })}
+    </>
+  );
+});
+GlobalMapZoomedMarkers.displayName = "GlobalMapZoomedMarkers";
 
 function getSignalColor(signal: UnifiedSignal, mode: DashboardMode): string {
   if (signal.layer === "genz") return GENZ_COLOR;
@@ -293,12 +420,7 @@ const GlobalMap = memo(({
   const zoomIn = useCallback(() => animateZoom(clampZoom(targetZoomRef.current * ZOOM_STEP)), [animateZoom]);
   const zoomOut = useCallback(() => animateZoom(clampZoom(targetZoomRef.current / ZOOM_STEP)), [animateZoom]);
 
-  /** Stronger than 1/zoom so on-screen dots shrink as the user zooms in (ZoomableGroup scales content by zoom). */
-  const dotScale = map2dDotScaleFromZoom(liveZoom);
-  const mapSignalSizeFactor = 0.68;
   const labelFontSize = Math.max(0.6, 5 / Math.pow(liveZoom, 1.05));
-  const capitalFontSize = Math.max(0.5, 4 / Math.pow(liveZoom, 1.05));
-  const capitalDotR = Math.max(0.4, 1.2 * dotScale);
   const currentZoom = liveZoom;
 
   const spreadPositions = useMemo(() => {
@@ -435,69 +557,20 @@ const GlobalMap = memo(({
             )}
           </Geographies>
 
-          {/* City markers */}
-          {currentZoom >= 3 && WORLD_CITIES.map(city => {
-            const minZoom = getCityMinZoom(city.tier);
-            if (currentZoom < minZoom) return null;
-            const fadeProgress = Math.min(1, (currentZoom - minZoom) / 1);
-            return (
-              <Marker key={`city-${city.name}-${city.country}`} coordinates={city.coordinates}>
-                <circle r={city.isCapital ? capitalDotR * 1.2 : capitalDotR} fill={city.isCapital ? "hsl(220, 20%, 60%)" : "hsl(220, 10%, 50%)"} opacity={fadeProgress * 0.8} />
-                <text textAnchor="start" x={capitalDotR + 1.5 * dotScale} dy="0.3em" style={{
-                  fontFamily: "'Noto Sans JP', system-ui, sans-serif",
-                  fill: city.isCapital ? "hsl(220, 15%, 60%)" : "hsl(220, 10%, 50%)",
-                  fontSize: `${city.isCapital ? capitalFontSize * 1.1 : capitalFontSize * 0.9}px`,
-                  fontWeight: city.isCapital ? 500 : 400, fontStyle: city.isCapital ? "normal" : "italic",
-                  pointerEvents: "none", userSelect: "none", opacity: fadeProgress * 0.7, transition: "opacity 0.3s",
-                }}>{city.name}</text>
-              </Marker>
-            );
-          })}
-
-          {/* UNIFIED SIGNAL DOTS */}
-          {signals.map(signal => {
-            const color = getSignalColor(signal, mode);
-            const score = signal.resilienceScore;
-            const relevant = selectedCompany ? isRelevantToCompany(`${signal.title} ${signal.description}`, selectedCompany) : false;
-            const isSelected = selectedSignalId === signal.id;
-            const isRead = readSignalIds.includes(signal.id);
-            const dimmed = !!(selectedCompany && !relevant && signal.layer !== "live-news");
-            const renderColor = (isSelected || isRead) ? "hsl(220, 8%, 48%)" : color;
-            const pos = spreadPositions.get(signal.id)!;
-
-            const urgencyMultiplier = getUrgencyMultiplier(score);
-            const urgencyKey = `urgency.${signal.urgency}` as TranslationKey;
-            const urgencyLabel = t(urgencyKey);
-            const disp = getSignalDisplay(signal);
-
-            const baseR = getSignalBaseR(relevant) * urgencyMultiplier * mapSignalSizeFactor;
-            const r = baseR * dotScale;
-
-            return (
-              <Marker
-                key={signal.id}
-                coordinates={[pos.lng, pos.lat]}
-                onClick={() => { onSignalClick(signal); panToSignal(signal.coordinates); }}
-                style={{ cursor: "pointer" }}
-              >
-                <SignalMapDot
-                  r={r}
-                  dotScale={dotScale}
-                  renderColor={renderColor}
-                  dimmed={dimmed}
-                  score={score}
-                  isSelected={isSelected}
-                  onMainMouseEnter={(e) =>
-                    showTooltip(e as unknown as MouseEvent, disp.title, disp.location, urgencyLabel, score)
-                  }
-                  onMainMouseMove={(e) =>
-                    showTooltip(e as unknown as MouseEvent, disp.title, disp.location, urgencyLabel, score)
-                  }
-                  onMainMouseLeave={hideTooltip}
-                />
-              </Marker>
-            );
-          })}
+          <GlobalMapZoomedMarkers
+            signals={signals}
+            spreadPositions={spreadPositions}
+            mode={mode}
+            selectedCompany={selectedCompany}
+            selectedSignalId={selectedSignalId}
+            readSignalIds={readSignalIds}
+            panToSignal={panToSignal}
+            onSignalClick={onSignalClick}
+            showTooltip={showTooltip}
+            hideTooltip={hideTooltip}
+            t={t}
+            getSignalDisplay={getSignalDisplay}
+          />
         </ZoomableGroup>
       </ComposableMap>
 

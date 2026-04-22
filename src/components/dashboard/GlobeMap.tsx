@@ -213,6 +213,22 @@ const GlobeMap = memo(
   });
   const lastGlobeAltBucketRef = useRef(bucketSignalAltitude(2.5));
   const [globeCameraAltitude, setGlobeCameraAltitude] = useState(2.5);
+  /** Finer than label buckets: HTML signal dots track true camera distance (label throttle was freezing dot size mid–fly-to-country). */
+  const [signalViewAltitude, setSignalViewAltitude] = useState(2.5);
+  const signalAltPendingRef = useRef<number | null>(null);
+  const signalAltRafRef = useRef<number | null>(null);
+
+  const scheduleSignalViewAltitude = useCallback((alt: number) => {
+    if (!Number.isFinite(alt)) return;
+    signalAltPendingRef.current = alt;
+    if (signalAltRafRef.current != null) return;
+    signalAltRafRef.current = requestAnimationFrame(() => {
+      signalAltRafRef.current = null;
+      const a = signalAltPendingRef.current;
+      if (a == null || !Number.isFinite(a)) return;
+      setSignalViewAltitude((prev) => (Math.abs(prev - a) < 0.007 ? prev : a));
+    });
+  }, []);
 
   const bumpGlobeAltitudeIfNeeded = useCallback((alt: number) => {
     if (!Number.isFinite(alt)) return;
@@ -246,6 +262,7 @@ const GlobeMap = memo(
   }, []);
 
   const syncLabelStateFromAltitude = useCallback((alt: number) => {
+    scheduleSignalViewAltitude(alt);
     bumpGlobeAltitudeIfNeeded(alt);
     const ez = globeEquivalentMapZoom(alt);
     lastEzBucketRef.current = bucketEquivZoom(ez, alt);
@@ -259,7 +276,7 @@ const GlobeMap = memo(
     startTransition(() => {
       setLabelView({ equivZoom: ez, sizeAltitude: bucketSizeAltitude(alt) });
     });
-  }, [bumpGlobeAltitudeIfNeeded]);
+  }, [bumpGlobeAltitudeIfNeeded, scheduleSignalViewAltitude]);
 
   const finishWheelZoomLabels = useCallback(() => {
     const pov = globeRef.current?.pointOfView?.();
@@ -269,6 +286,7 @@ const GlobeMap = memo(
       return;
     }
     const alt = pov.altitude;
+    scheduleSignalViewAltitude(alt);
     bumpGlobeAltitudeIfNeeded(alt);
     const ez = globeEquivalentMapZoom(alt);
     lastEzBucketRef.current = bucketEquivZoom(ez, alt);
@@ -284,7 +302,7 @@ const GlobeMap = memo(
       setLabelView({ equivZoom: ez, sizeAltitude: bucketSizeAltitude(alt) });
       setLabelsSuppressed(false);
     });
-  }, [bumpGlobeAltitudeIfNeeded]);
+  }, [bumpGlobeAltitudeIfNeeded, scheduleSignalViewAltitude]);
 
   const flushPendingLabelView = useCallback(() => {
     const p = pendingLabelRef.current;
@@ -332,6 +350,9 @@ const GlobeMap = memo(
   );
 
   const handleZoom = useCallback((pov: { lat: number; lng: number; altitude: number }) => {
+    if (Number.isFinite(pov.altitude)) {
+      scheduleSignalViewAltitude(pov.altitude);
+    }
     if (labelsSuppressedRef.current) return;
     pendingAltRef.current = pov.altitude;
     if (zoomRafRef.current != null) return;
@@ -346,7 +367,7 @@ const GlobeMap = memo(
       if (ezB === lastEzBucketRef.current && szB === lastSizeAltBucketRef.current) return;
       queueLabelViewForZoom(ez, alt);
     });
-  }, [queueLabelViewForZoom, bumpGlobeAltitudeIfNeeded]);
+  }, [queueLabelViewForZoom, bumpGlobeAltitudeIfNeeded, scheduleSignalViewAltitude]);
 
   const labels = useMemo<CountryLabel[]>(() => {
     if (labelsSuppressed) return [];
@@ -422,6 +443,7 @@ const GlobeMap = memo(
   useEffect(() => {
     return () => {
       if (zoomRafRef.current != null) cancelAnimationFrame(zoomRafRef.current);
+      if (signalAltRafRef.current != null) cancelAnimationFrame(signalAltRafRef.current);
       if (zoomLabelTimerRef.current != null) clearTimeout(zoomLabelTimerRef.current);
       if (wheelIdleTimerRef.current != null) clearTimeout(wheelIdleTimerRef.current);
     };
@@ -594,7 +616,7 @@ const GlobeMap = memo(
   }, [signals, countries]);
 
   const signalMarkers = useMemo<GlobeSignalMarker[]>(() => {
-    const dotScale = globeDotScaleFromCameraAltitude(globeCameraAltitude);
+    const dotScale = globeDotScaleFromCameraAltitude(signalViewAltitude);
     return signals.map((signal) => {
       const baseColor = getSignalColor(signal, mode);
       const score = signal.resilienceScore;
@@ -625,7 +647,7 @@ const GlobeMap = memo(
         isSelected,
       };
     });
-  }, [signals, spreadPositions, selectedCompany, selectedSignalId, readSignalIds, mode, globeCameraAltitude]);
+  }, [signals, spreadPositions, selectedCompany, selectedSignalId, readSignalIds, mode, signalViewAltitude]);
 
   const ensureSignalMarkerHost = useCallback((id: string) => {
     let row = signalMarkerRootsRef.current.get(id);
@@ -697,7 +719,7 @@ const GlobeMap = memo(
       const baseR = globeSignalRadiusDeg({
         score,
         relevant,
-        cameraAltitude: globeCameraAltitude,
+        cameraAltitude: signalViewAltitude,
         isSelected,
       });
       const pickRadius = Math.min(0.55, Math.max(0.045, baseR * 2.2));
@@ -710,7 +732,7 @@ const GlobeMap = memo(
         pickRadius,
       };
     });
-  }, [signals, spreadPositions, selectedCompany, selectedSignalId, globeCameraAltitude]);
+  }, [signals, spreadPositions, selectedCompany, selectedSignalId, signalViewAltitude]);
 
   useEffect(() => {
     return () => {
