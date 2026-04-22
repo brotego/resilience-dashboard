@@ -11,7 +11,11 @@ import { calculateResilienceScore, scoreToUrgency } from "@/lib/resilienceScore"
 import { isNewsApiAiConfigured } from "@/lib/newsApiConfigured";
 import { readSessionCache, writeSessionCache } from "@/lib/newsSessionCache";
 import { readPersistentCache, writePersistentCache } from "@/lib/newsPersistentCache";
-import { readSignalBundleCache, writeSignalBundleCache } from "@/lib/projectSupabaseCache";
+import {
+  isSupabaseSignalBundleCacheConfigured,
+  readSignalBundleCache,
+  writeSignalBundleCache,
+} from "@/lib/projectSupabaseCache";
 import { DashboardMode } from "@/components/dashboard/DashboardLayout";
 
 interface CacheEntry {
@@ -1001,6 +1005,30 @@ export function useUnifiedSignals(
     /** In API mode we still warm the UI from local cache, but continue fetch to refresh shared source-of-truth. */
     const canShortCircuitFromLocalCache = !apiConfigured;
 
+    type SharedBundleRow = NonNullable<Awaited<ReturnType<typeof readSignalBundleCache<UnifiedSignal[]>>>>;
+
+    const readSharedBundleFromSupabase = () =>
+      readSignalBundleCache<UnifiedSignal[]>({
+        cacheKey: signalBundleCacheKey,
+        // Do not filter rows out in SQL: partial bundles must still hydrate other machines.
+        minSignals: 0,
+        minCoverageCountries: 0,
+      });
+
+    const applySharedBundleToCaches = (entry: SharedBundleRow): boolean => {
+      const filtered = finalizeSignals(entry.data);
+      if (!filtered.length) return false;
+      cache.set(cacheKey, { signals: filtered, timestamp: entry.savedAt });
+      writeSessionCache(cacheKey, slimUnifiedSignalsForCache(filtered));
+      writePersistentCache(cacheKey, slimUnifiedSignalsForCache(filtered));
+      if (!cancelled) {
+        setLiveSignals(filtered);
+        setIsLive(true);
+        setLoading(false);
+      }
+      return true;
+    };
+
     const cached = cache.get(cacheKey);
     if (cached && Date.now() - cached.timestamp < CACHE_DURATION) {
       const filtered = finalizeSignals(cached.signals);
@@ -1012,61 +1040,31 @@ export function useUnifiedSignals(
       if (canShortCircuitFromLocalCache) return;
     }
 
-    const sessionEntryEarly = readSessionCache<UnifiedSignal[]>(cacheKey);
-    if (sessionEntryEarly?.data?.length) {
-      const filtered = finalizeSignals(sessionEntryEarly.data);
-      cache.set(cacheKey, { signals: filtered, timestamp: sessionEntryEarly.savedAt });
-      if (!cancelled) {
-        setLiveSignals(filtered);
-        setIsLive(true);
-        setLoading(false);
-      }
-      if (canShortCircuitFromLocalCache) return;
-    }
-
-    const persistentEntry = readPersistentCache<UnifiedSignal[]>(cacheKey);
-    if (persistentEntry?.data?.length) {
-      const filtered = finalizeSignals(persistentEntry.data);
-      cache.set(cacheKey, { signals: filtered, timestamp: persistentEntry.savedAt });
-      if (!cancelled) {
-        setLiveSignals(filtered);
-        setIsLive(true);
-        setLoading(false);
-      }
-      if (canShortCircuitFromLocalCache) return;
-    }
-    const durableSharedEntry = readPersistentCache<UnifiedSignal[]>(durableKey);
-    if (durableSharedEntry?.data?.length) {
-      const filtered = finalizeSignals(durableSharedEntry.data);
-      cache.set(cacheKey, { signals: filtered, timestamp: durableSharedEntry.savedAt });
-      if (!cancelled) {
-        setLiveSignals(filtered);
-        setIsLive(true);
-        setLoading(false);
-      }
-      if (canShortCircuitFromLocalCache) return;
-    }
-
-    const fetchAll = async () => {
-      // Always load the latest non-expired row for this key (no min signal/country filters in SQL).
-      // Strict thresholds used to skip rows <120 signals or <18 countries, so new devices never saw
-      // partial bundles and restarted full live fetches instead.
-      const sharedSupabaseEntry = await readSignalBundleCache<UnifiedSignal[]>({
-        cacheKey: signalBundleCacheKey,
-        minSignals: 0,
-        minCoverageCountries: 0,
-      });
+    const fetchAll = async (
+      preloadedShared: SharedBundleRow | null | undefined,
+      skipInitialSharedDiskWrite: boolean,
+    ) => {
+      const sharedSupabaseEntry =
+        preloadedShared === undefined
+          ? isSupabaseSignalBundleCacheConfigured()
+            ? await readSharedBundleFromSupabase()
+            : null
+          : preloadedShared;
       let sharedWarmStart: UnifiedSignal[] = [];
       if (sharedSupabaseEntry?.data?.length) {
         const filtered = finalizeSignals(sharedSupabaseEntry.data);
-        sharedWarmStart = filtered;
-        cache.set(cacheKey, { signals: filtered, timestamp: sharedSupabaseEntry.savedAt });
-        writeSessionCache(cacheKey, slimUnifiedSignalsForCache(filtered));
-        writePersistentCache(cacheKey, slimUnifiedSignalsForCache(filtered));
-        if (!cancelled) {
-          setLiveSignals(filtered);
-          setIsLive(true);
-          setLoading(false);
+        if (filtered.length) {
+          sharedWarmStart = filtered;
+          if (!skipInitialSharedDiskWrite) {
+            cache.set(cacheKey, { signals: filtered, timestamp: sharedSupabaseEntry.savedAt });
+            writeSessionCache(cacheKey, slimUnifiedSignalsForCache(filtered));
+            writePersistentCache(cacheKey, slimUnifiedSignalsForCache(filtered));
+            if (!cancelled) {
+              setLiveSignals(filtered);
+              setIsLive(true);
+              setLoading(false);
+            }
+          }
         }
         // Fully-filled final bundles can short-circuit. Otherwise continue fetching and
         // refresh the shared cache upward toward 500 using the latest logic.
@@ -1363,14 +1361,69 @@ export function useUnifiedSignals(
         if (!restored && !cancelled) {
           if (retryTimerRef.current) window.clearTimeout(retryTimerRef.current);
           retryTimerRef.current = window.setTimeout(() => {
-            void fetchAll();
+            void fetchAll(undefined, false);
           }, 30_000);
         }
       }
       if (!cancelled) setLoading(false);
     };
 
-    void fetchAll();
+    const run = async () => {
+      let primed: SharedBundleRow | null | undefined = undefined;
+      if (isSupabaseSignalBundleCacheConfigured()) {
+        primed = await readSharedBundleFromSupabase();
+      }
+
+      let hydratedFromShared = false;
+      if (primed?.data?.length && applySharedBundleToCaches(primed)) {
+        hydratedFromShared = true;
+        if (primed.isFinal && primed.signalCount >= MAX_COMPANY_SIGNALS) {
+          if (!cancelled) setLoading(false);
+          return;
+        }
+      }
+
+      if (!hydratedFromShared) {
+        const sessionEntryEarly = readSessionCache<UnifiedSignal[]>(cacheKey);
+        if (sessionEntryEarly?.data?.length) {
+          const filtered = finalizeSignals(sessionEntryEarly.data);
+          cache.set(cacheKey, { signals: filtered, timestamp: sessionEntryEarly.savedAt });
+          if (!cancelled) {
+            setLiveSignals(filtered);
+            setIsLive(true);
+            setLoading(false);
+          }
+          if (canShortCircuitFromLocalCache) return;
+        }
+
+        const persistentEntry = readPersistentCache<UnifiedSignal[]>(cacheKey);
+        if (persistentEntry?.data?.length) {
+          const filtered = finalizeSignals(persistentEntry.data);
+          cache.set(cacheKey, { signals: filtered, timestamp: persistentEntry.savedAt });
+          if (!cancelled) {
+            setLiveSignals(filtered);
+            setIsLive(true);
+            setLoading(false);
+          }
+          if (canShortCircuitFromLocalCache) return;
+        }
+        const durableSharedEntry = readPersistentCache<UnifiedSignal[]>(durableKey);
+        if (durableSharedEntry?.data?.length) {
+          const filtered = finalizeSignals(durableSharedEntry.data);
+          cache.set(cacheKey, { signals: filtered, timestamp: durableSharedEntry.savedAt });
+          if (!cancelled) {
+            setLiveSignals(filtered);
+            setIsLive(true);
+            setLoading(false);
+          }
+          if (canShortCircuitFromLocalCache) return;
+        }
+      }
+
+      await fetchAll(primed, hydratedFromShared);
+    };
+
+    void run();
     return () => {
       cancelled = true;
       if (retryTimerRef.current) {
