@@ -3,12 +3,36 @@ import { supabase } from "@/integrations/supabase/client";
 const SIGNAL_TABLE = "signal_bundle_cache";
 const AI_TABLE = "ai_output_cache";
 
+function reportSupabaseCacheDebug(event: Record<string, unknown>) {
+  if (typeof window === "undefined") return;
+  const payload = {
+    at: new Date().toISOString(),
+    ...event,
+  };
+  (window as unknown as { __rrSupabaseCacheDebug?: Record<string, unknown> }).__rrSupabaseCacheDebug = payload;
+  if (import.meta.env.DEV) {
+    console.debug("[rr-supabase-cache]", payload);
+  }
+}
+
 function supabaseReady(): boolean {
   const url = (import.meta.env.VITE_SUPABASE_URL as string | undefined)?.trim();
   const key =
     (import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY as string | undefined)?.trim() ||
     (import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined)?.trim();
-  return !!url && !!key;
+  const ok = !!url && !!key;
+  if (!ok) {
+    reportSupabaseCacheDebug({
+      op: "env_check",
+      ok: false,
+      missingUrl: !url,
+      missingKey: !key,
+      envUrlPresent: !!url,
+      envAnonPresent: !!(import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined),
+      envPublishablePresent: !!(import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY as string | undefined),
+    });
+  }
+  return ok;
 }
 
 export type SignalBundleCacheRow<T> = {
@@ -48,12 +72,33 @@ export async function readSignalBundleCache<T>(params: {
       query = query.gte("coverage_country_count", minCoverageCountries);
     }
     const { data, error } = await query.maybeSingle();
-    if (error || !data) return null;
+    if (error || !data) {
+      reportSupabaseCacheDebug({
+        op: "read_signal_bundle",
+        ok: false,
+        cacheKey: params.cacheKey,
+        error: error?.message || "no_row",
+      });
+      return null;
+    }
     const row = data as SignalBundleCacheRow<T>;
     const savedAt = Date.parse(row.saved_at);
     if (!Number.isFinite(savedAt)) return null;
+    reportSupabaseCacheDebug({
+      op: "read_signal_bundle",
+      ok: true,
+      cacheKey: params.cacheKey,
+      signalCount: row.signal_count || 0,
+      isFinal: !!row.is_final,
+    });
     return { data: row.payload, savedAt, signalCount: row.signal_count || 0, isFinal: !!row.is_final };
-  } catch {
+  } catch (err) {
+    reportSupabaseCacheDebug({
+      op: "read_signal_bundle",
+      ok: false,
+      cacheKey: params.cacheKey,
+      error: err instanceof Error ? err.message : String(err),
+    });
     return null;
   }
 }
@@ -91,8 +136,40 @@ export async function writeSignalBundleCache<T>(params: {
       },
       { onConflict: "cache_key" },
     );
-    return !error;
-  } catch {
+    if (error) {
+      reportSupabaseCacheDebug({
+        op: "write_signal_bundle",
+        ok: false,
+        cacheKey: params.cacheKey,
+        companyId: params.companyId,
+        mode: params.mode,
+        signalCount: params.signalCount,
+        isFinal: params.isFinal,
+        error: error.message,
+      });
+      return false;
+    }
+    reportSupabaseCacheDebug({
+      op: "write_signal_bundle",
+      ok: true,
+      cacheKey: params.cacheKey,
+      companyId: params.companyId,
+      mode: params.mode,
+      signalCount: params.signalCount,
+      isFinal: params.isFinal,
+    });
+    return true;
+  } catch (err) {
+    reportSupabaseCacheDebug({
+      op: "write_signal_bundle",
+      ok: false,
+      cacheKey: params.cacheKey,
+      companyId: params.companyId,
+      mode: params.mode,
+      signalCount: params.signalCount,
+      isFinal: params.isFinal,
+      error: err instanceof Error ? err.message : String(err),
+    });
     return false;
   }
 }

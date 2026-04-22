@@ -13,9 +13,13 @@ export const supabase = createClient<Database>(
   SUPABASE_URL || "",
   SUPABASE_PUBLISHABLE_KEY || "",
   {
-  auth: {
-    storage: localStorage,
-    persistSession: true,
-    autoRefreshToken: true,
+    // This dashboard does not rely on user auth sessions for cache reads/writes.
+    // Disable persisted auth state so stale browser tokens never override anon key requests.
+    auth: {
+      persistSession: false,
+      autoRefreshToken: false,
+      detectSessionInUrl: false,
+      storageKey: "rr-noauth-supabase",
+    },
   },
-});
+);
