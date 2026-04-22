@@ -856,8 +856,9 @@ export function useUnifiedSignals(
         companyKeywords.some((kw) => kw.length > 2 && text.includes(kw)) ||
         companySectorBits.some((w) => text.includes(w));
       if (mode === "genz") {
-        if (!industryRelevant) return false;
-        return looksLikeGenZNews(s);
+        // Keep Gen Z strict on youth relevance, but do not hard-drop all non-brand mentions.
+        // We still rank strongly by company relevance below.
+        return looksLikeGenZNews(s) && (industryRelevant || companyRelevanceScore(s) >= 1);
       }
       return industryRelevant;
     };
@@ -869,6 +870,12 @@ export function useUnifiedSignals(
       });
       const companyFiltered = deduped.filter(isCompanyRelevantSignal);
       let selected = companyFiltered.length > 0 ? companyFiltered : deduped;
+      // For Gen Z, if strict company filtering under-fills, widen to youth-relevant pool
+      // and let company relevance ordering decide priority.
+      if (mode === "genz" && selected.length < MIN_COMPANY_SIGNALS) {
+        const youthPool = deduped.filter((s) => looksLikeGenZNews(s));
+        if (youthPool.length > selected.length) selected = youthPool;
+      }
       // Keep each map per-company dense (250-500) while still preferring company/industry relevance.
       if (selected.length < MIN_COMPANY_SIGNALS && deduped.length > selected.length) {
         const seen = new Set(selected.map((s) => s.id));
@@ -882,7 +889,7 @@ export function useUnifiedSignals(
           });
         for (const extra of extras) {
           if (selected.length >= MIN_COMPANY_SIGNALS) break;
-          if (companyRelevanceScore(extra) < 2) continue;
+          if (mode !== "genz" && companyRelevanceScore(extra) < 2) continue;
           if (mode === "genz" && !looksLikeGenZNews(extra)) continue;
           selected.push(extra);
         }
@@ -1022,8 +1029,9 @@ export function useUnifiedSignals(
               if (!isArticleRelevantToCompanyIndustry(a, selectedCompanyData)) return [];
             }
             const dom = resolveArticleDomain(selectedCompanyData, a);
-            const cat = resolveArticleCategory(selectedCompanyData, a, { strict: strictGenZMode });
-            if (strictGenZMode && !cat) return [];
+            // Avoid starving Gen Z map when inference is uncertain:
+            // use company/default fallback category instead of dropping.
+            const cat = resolveArticleCategory(selectedCompanyData, a, { strict: false });
             const articleKey = String(a?.url || a?.title || `${idStem}-${i}`);
             const score = calculateResilienceScore({
               title: a.title || "", description: a.description || "",

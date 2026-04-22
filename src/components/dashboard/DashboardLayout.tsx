@@ -1,7 +1,7 @@
 import { useState, useCallback, useEffect } from "react";
 import { DomainId, MindsetId } from "@/data/types";
 import { GenZCategoryId } from "@/data/genzTypes";
-import { CompanyId } from "@/data/companies";
+import { CompanyId, COMPANIES } from "@/data/companies";
 import { UnifiedSignal } from "@/data/unifiedSignalTypes";
 import DomainSelector from "./DomainSelector";
 import GenZCategorySelector from "./GenZCategorySelector";
@@ -58,7 +58,8 @@ const DashboardLayout = () => {
     try {
       const raw = localStorage.getItem(SELECTED_COMPANY_STORAGE_KEY);
       if (!raw) return "mori_building";
-      return raw as CompanyId;
+      const valid = COMPANIES.some((c) => c.id === raw);
+      return valid ? (raw as CompanyId) : "mori_building";
     } catch {
       return "mori_building";
     }
