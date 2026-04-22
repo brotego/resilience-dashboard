@@ -394,6 +394,7 @@ const CompanyDashboard = ({ selectedCompany, signals, onSignalClick }: Props) =>
           withTimeout(
             invokeArticleSentimentBatch({
               lens: "company",
+              companyId: company.id,
               company: company.name,
               industry: company.sector,
               companyContext: companyAiContext,
@@ -413,6 +414,7 @@ const CompanyDashboard = ({ selectedCompany, signals, onSignalClick }: Props) =>
           withTimeout(
             invokeArticleSentimentBatch({
               lens: "japan",
+              companyId: company.id,
               countryName: "Japan",
               language: lang,
               articles: japanArticles.map((a) => ({
@@ -431,6 +433,7 @@ const CompanyDashboard = ({ selectedCompany, signals, onSignalClick }: Props) =>
             ? withTimeout(
                 invokeSentimentFallbackOpinion({
                   lens: "company",
+                  companyId: company.id,
                   company: company.name,
                   industry: company.sector,
                   language: lang,
@@ -443,6 +446,7 @@ const CompanyDashboard = ({ selectedCompany, signals, onSignalClick }: Props) =>
             ? withTimeout(
                 invokeSentimentFallbackOpinion({
                   lens: "japan",
+                  companyId: company.id,
                   countryName: "Japan",
                   language: lang,
                 }),
@@ -490,6 +494,7 @@ const CompanyDashboard = ({ selectedCompany, signals, onSignalClick }: Props) =>
             ? withTimeout(
                 invokeSentimentSectionSummary({
                   lens: "company",
+                  companyId: company.id,
                   company: company.name,
                   industry: company.sector,
                   companyContext: companyAiContext,
@@ -504,6 +509,7 @@ const CompanyDashboard = ({ selectedCompany, signals, onSignalClick }: Props) =>
             ? withTimeout(
                 invokeSentimentSectionSummary({
                   lens: "japan",
+                  companyId: company.id,
                   countryName: "Japan",
                   language: lang,
                   articles: jaInputs,
@@ -567,6 +573,7 @@ const CompanyDashboard = ({ selectedCompany, signals, onSignalClick }: Props) =>
       return;
     }
     invokeCompanyNewsletter({
+      companyId: company.id,
       company: company.name,
       industry: company.sector,
       companyContext: companyAiContext,

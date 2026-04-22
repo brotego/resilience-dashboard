@@ -11,6 +11,7 @@ import { calculateResilienceScore, scoreToUrgency } from "@/lib/resilienceScore"
 import { isNewsApiAiConfigured } from "@/lib/newsApiConfigured";
 import { readSessionCache, writeSessionCache } from "@/lib/newsSessionCache";
 import { readPersistentCache, writePersistentCache } from "@/lib/newsPersistentCache";
+import { readSignalBundleCache, writeSignalBundleCache } from "@/lib/projectSupabaseCache";
 import { DashboardMode } from "@/components/dashboard/DashboardLayout";
 
 interface CacheEntry {
@@ -39,12 +40,23 @@ const LIVE_CACHE_VERSION = "api-v12-stratified-geo-sources";
 const LEGACY_LIVE_CACHE_VERSIONS: string[] = ["api-v10-country-high-volume", "api-v11-company-scoped-24h"];
 const BUSINESS_ARTICLES_PER_PAGE = 100;
 const BUSINESS_PAGES = 2;
-const GENZ_ARTICLES_PER_PAGE = 50;
-const GENZ_PAGES = 2;
+const GENZ_ARTICLES_PER_PAGE = 80;
+const GENZ_PAGES = 3;
 const MAX_COMPANY_SIGNALS = 500;
+const MIN_COMPANY_SIGNALS = 250;
 /** Avoid one wire dominating the map / click stack (per normalized outlet name). */
-const MAX_SIGNALS_PER_SOURCE = 10;
+const MAX_SIGNALS_PER_SOURCE = 25;
+/** Treat shared cache below this as partial warm-start and continue live fetch. */
+const MIN_SHARED_SIGNAL_ACCEPT_COUNT = 120;
 const MAX_ER_TOPIC_CHARS = 480;
+
+function dayBucketKey(): string {
+  const d = new Date();
+  const y = d.getUTCFullYear();
+  const m = String(d.getUTCMonth() + 1).padStart(2, "0");
+  const day = String(d.getUTCDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
 const COUNTRY_CODES: Record<string, string> = {
   "United States of America": "us",
   "United Kingdom": "gb",
@@ -428,7 +440,7 @@ function looksLikeStrictGenZArticle(a: any): boolean {
   const mediumHits = mediumGenZ.reduce((n, kw) => n + (text.includes(kw) ? 1 : 0), 0);
   const businessHits = businessHeavy.reduce((n, kw) => n + (text.includes(kw) ? 1 : 0), 0);
   const score = strongHits * 2 + mediumHits - businessHits;
-  return score >= 2;
+  return score >= 1;
 }
 
 function isArticleRelevantToCompanyIndustry(a: any, company: Company | null): boolean {
@@ -595,6 +607,9 @@ async function fetchGenZArticleBuckets(
     `Gen Z youth culture social media TikTok creator economy${hint}`.trim(),
     `Gen Z worklife burnout career remote work gig economy${hint}`.trim(),
     `Gen Z climate activism sustainability community belonging${hint}`.trim(),
+    `young adults students university campus digital behavior social apps${hint}`.trim(),
+    `Gen Z spending trends brand loyalty creator content video platforms${hint}`.trim(),
+    `youth employment internships side hustle creator monetization${hint}`.trim(),
   ];
   const seen = new Set<string>();
   const merged: any[] = [];
@@ -639,7 +654,12 @@ function normalizeOutletKey(source: string | undefined): string {
  * Round-robin across countries (so every market gets dots), cap each outlet, then fill by score.
  * Applied after dedupe + relevance so the map stays diverse instead of one wire + one city stack.
  */
-function stratifiedSourceCapPack(signals: UnifiedSignal[], maxTotal: number, maxPerSource: number): UnifiedSignal[] {
+function stratifiedSourceCapPack(
+  signals: UnifiedSignal[],
+  maxTotal: number,
+  maxPerSource: number,
+  minFloor: number,
+): UnifiedSignal[] {
   if (signals.length === 0) return [];
 
   const byCountry = new Map<string, UnifiedSignal[]>();
@@ -694,6 +714,17 @@ function stratifiedSourceCapPack(signals: UnifiedSignal[], maxTotal: number, max
     out.push(s);
     taken.add(s.id);
     sourceCount.set(sk, (sourceCount.get(sk) || 0) + 1);
+  }
+
+  // Hard floor: if source-cap prevented enough density, keep filling (ignoring source cap)
+  // until we hit the requested minimum, as long as unique signals are available.
+  if (out.length < Math.min(minFloor, maxTotal)) {
+    for (const s of remainder) {
+      if (out.length >= Math.min(minFloor, maxTotal)) break;
+      if (taken.has(s.id)) continue;
+      out.push(s);
+      taken.add(s.id);
+    }
   }
 
   return out;
@@ -756,7 +787,7 @@ export function useUnifiedSignals(
   mode: DashboardMode,
   activeDomains: DomainId[],
   activeCategories: GenZCategoryId[],
-  selectedCompany: CompanyId | null,
+  selectedCompany: CompanyId,
 ) {
   const [liveSignals, setLiveSignals] = useState<UnifiedSignal[]>([]);
   const [loading, setLoading] = useState(true);
@@ -778,13 +809,18 @@ export function useUnifiedSignals(
   // Fetch live news and convert to UnifiedSignal
   useEffect(() => {
     let cancelled = false;
+    // Prevent cross-contamination flashes when switching company/mode:
+    // clear previous bundle immediately before loading the next cache/fetch cycle.
+    setLiveSignals([]);
+    setIsLive(false);
+    setLoading(true);
     if (retryTimerRef.current) {
       window.clearTimeout(retryTimerRef.current);
       retryTimerRef.current = null;
     }
 
     const apiConfigured = isNewsApiAiConfigured();
-    const companyKey = selectedCompany ?? "none";
+    const companyKey = selectedCompany;
     const selectedCompanyData = selectedCompany
       ? COMPANIES.find((c) => c.id === selectedCompany)
       : null;
@@ -798,6 +834,19 @@ export function useUnifiedSignals(
           .split(/[^a-z0-9+]+/)
           .filter((w) => w.length > 2 && w !== "and")
       : [];
+    const companyRelevanceScore = (s: UnifiedSignal): number => {
+      if (!selectedCompanyData) return 0;
+      const text = `${s.title || ""} ${s.description || ""}`.toLowerCase();
+      let score = 0;
+      if (companyNameLower && text.includes(companyNameLower)) score += 8;
+      for (const kw of companyKeywords) {
+        if (kw.length > 2 && text.includes(kw)) score += 3;
+      }
+      for (const bit of companySectorBits) {
+        if (text.includes(bit)) score += 2;
+      }
+      return score;
+    };
     const isCompanyRelevantSignal = (s: UnifiedSignal): boolean => {
       if (s.layer !== "live-news") return true;
       if (!selectedCompanyData) return true;
@@ -808,10 +857,9 @@ export function useUnifiedSignals(
         companySectorBits.some((w) => text.includes(w));
       if (mode === "genz") {
         if (!industryRelevant) return false;
-        return !!s.category || looksLikeGenZNews(s);
+        return looksLikeGenZNews(s);
       }
-      if (industryRelevant) return true;
-      return s.resilienceScore >= 26;
+      return industryRelevant;
     };
     const finalizeSignals = (arr: UnifiedSignal[]): UnifiedSignal[] => {
       const deduped = dedupeSignalsByArticleUrl(arr);
@@ -820,16 +868,61 @@ export function useUnifiedSignals(
         return a.id.localeCompare(b.id);
       });
       const companyFiltered = deduped.filter(isCompanyRelevantSignal);
-      const selected = companyFiltered.length > 0 ? companyFiltered : deduped;
-      return stratifiedSourceCapPack(selected, MAX_COMPANY_SIGNALS, MAX_SIGNALS_PER_SOURCE);
+      let selected = companyFiltered.length > 0 ? companyFiltered : deduped;
+      // Keep each map per-company dense (250-500) while still preferring company/industry relevance.
+      if (selected.length < MIN_COMPANY_SIGNALS && deduped.length > selected.length) {
+        const seen = new Set(selected.map((s) => s.id));
+        const extras = deduped
+          .filter((s) => !seen.has(s.id))
+          .sort((a, b) => {
+            const diff = companyRelevanceScore(b) - companyRelevanceScore(a);
+            if (diff !== 0) return diff;
+            if (b.resilienceScore !== a.resilienceScore) return b.resilienceScore - a.resilienceScore;
+            return a.id.localeCompare(b.id);
+          });
+        for (const extra of extras) {
+          if (selected.length >= MIN_COMPANY_SIGNALS) break;
+          if (companyRelevanceScore(extra) < 2) continue;
+          if (mode === "genz" && !looksLikeGenZNews(extra)) continue;
+          selected.push(extra);
+        }
+      }
+      return stratifiedSourceCapPack(
+        selected,
+        MAX_COMPANY_SIGNALS,
+        MAX_SIGNALS_PER_SOURCE,
+        MIN_COMPANY_SIGNALS,
+      );
     };
     const apiKeySuffix = apiConfigured ? newsApiKeyFingerprint() : "seed";
     const cacheKey = `unified-live-${apiConfigured ? LIVE_CACHE_VERSION : "seed"}-${apiKeySuffix}-${mode}-${companyKey}`;
-    const sharedApiCacheKey = `unified-live-${LIVE_CACHE_VERSION}-shared-${mode}-${companyKey}`;
+    const signalBundleCacheKey = `signals:${LIVE_CACHE_VERSION}:${mode}:${companyKey}:${dayBucketKey()}`;
     const durableKey = durablePersistentKey(mode, companyKey);
     const legacyCacheKeys = getLegacyCacheKeys(apiKeySuffix);
-    const legacySharedKeys = LEGACY_LIVE_CACHE_VERSIONS.map((version) => `unified-live-${version}-shared`);
     const LEGACY_DURABLE_SHARED = "unified-live-durable-shared";
+    const bundleStats = (signals: UnifiedSignal[]) => {
+      const countries = new Set(signals.map((s) => (s.location || "").trim().toLowerCase()).filter(Boolean));
+      const sources = new Set(signals.map((s) => (s.source || "").trim().toLowerCase()).filter(Boolean));
+      return { coverageCountryCount: countries.size, sourceDiversityCount: sources.size };
+    };
+    const writeSignalBundle = (signals: UnifiedSignal[], isFinal: boolean) => {
+      const slim = slimUnifiedSignalsForCache(signals);
+      const stats = bundleStats(slim);
+      void writeSignalBundleCache({
+        cacheKey: signalBundleCacheKey,
+        companyId: companyKey,
+        mode,
+        payload: slim,
+        signalCount: slim.length,
+        isFinal,
+        coverageCountryCount: stats.coverageCountryCount,
+        sourceDiversityCount: stats.sourceDiversityCount,
+        modelVersion: LIVE_CACHE_VERSION,
+        ttlHours: 24,
+      });
+    };
+    /** In API mode we still warm the UI from local cache, but continue fetch to refresh shared source-of-truth. */
+    const canShortCircuitFromLocalCache = !apiConfigured;
 
     const cached = cache.get(cacheKey);
     if (cached && Date.now() - cached.timestamp < CACHE_DURATION) {
@@ -839,7 +932,7 @@ export function useUnifiedSignals(
         setIsLive(true);
         setLoading(false);
       }
-      return;
+      if (canShortCircuitFromLocalCache) return;
     }
 
     const sessionEntryEarly = readSessionCache<UnifiedSignal[]>(cacheKey);
@@ -851,7 +944,7 @@ export function useUnifiedSignals(
         setIsLive(true);
         setLoading(false);
       }
-      return;
+      if (canShortCircuitFromLocalCache) return;
     }
 
     const persistentEntry = readPersistentCache<UnifiedSignal[]>(cacheKey);
@@ -863,18 +956,7 @@ export function useUnifiedSignals(
         setIsLive(true);
         setLoading(false);
       }
-      return;
-    }
-    const sharedPersistentEntry = readPersistentCache<UnifiedSignal[]>(sharedApiCacheKey);
-    if (sharedPersistentEntry?.data?.length) {
-      const filtered = finalizeSignals(sharedPersistentEntry.data);
-      cache.set(cacheKey, { signals: filtered, timestamp: sharedPersistentEntry.savedAt });
-      if (!cancelled) {
-        setLiveSignals(filtered);
-        setIsLive(true);
-        setLoading(false);
-      }
-      return;
+      if (canShortCircuitFromLocalCache) return;
     }
     const durableSharedEntry = readPersistentCache<UnifiedSignal[]>(durableKey);
     if (durableSharedEntry?.data?.length) {
@@ -885,13 +967,33 @@ export function useUnifiedSignals(
         setIsLive(true);
         setLoading(false);
       }
-      return;
+      if (canShortCircuitFromLocalCache) return;
     }
 
-    setLoading(true);
-
     const fetchAll = async () => {
+      const sharedSupabaseEntry = await readSignalBundleCache<UnifiedSignal[]>({
+        cacheKey: signalBundleCacheKey,
+        minSignals: MIN_COMPANY_SIGNALS,
+        minCoverageCountries: 12,
+      });
+      if (sharedSupabaseEntry?.data?.length) {
+        const filtered = finalizeSignals(sharedSupabaseEntry.data);
+        cache.set(cacheKey, { signals: filtered, timestamp: sharedSupabaseEntry.savedAt });
+        writeSessionCache(cacheKey, slimUnifiedSignalsForCache(filtered));
+        writePersistentCache(cacheKey, slimUnifiedSignalsForCache(filtered));
+        if (!cancelled) {
+          setLiveSignals(filtered);
+          setIsLive(true);
+          setLoading(false);
+        }
+        return;
+      }
+
       const results: UnifiedSignal[] = [];
+      let lastSharedWriteAt = 0;
+      let lastSharedWriteCount = 0;
+      const SHARED_WRITE_INTERVAL_MS = 3000;
+      const SHARED_WRITE_MIN_GROWTH = 12;
       let gotLive = false;
       let countryBuiltCount = 0;
       let providerLimited = false;
@@ -959,6 +1061,16 @@ export function useUnifiedSignals(
           const partial = finalizeSignals(results);
           setLiveSignals(partial);
           setIsLive(true);
+          const now = Date.now();
+          const grewEnough = partial.length >= lastSharedWriteCount + SHARED_WRITE_MIN_GROWTH;
+          if (grewEnough || now - lastSharedWriteAt >= SHARED_WRITE_INTERVAL_MS) {
+            lastSharedWriteAt = now;
+            lastSharedWriteCount = partial.length;
+            const slim = slimUnifiedSignalsForCache(partial);
+            writeSessionCache(cacheKey, slim);
+            writePersistentCache(cacheKey, slim);
+            writeSignalBundle(partial, false);
+          }
         }
         await new Promise<void>((resolve) => {
           requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
@@ -968,7 +1080,7 @@ export function useUnifiedSignals(
       // One country at a time: each completion updates the map (removed duplicate global bootstrap that blocked UI for minutes).
       const fetchCountries = getFetchCountries();
       for (let idx = 0; idx < fetchCountries.length; idx++) {
-        if (cancelled || providerLimited) break;
+        if (cancelled) break;
         const country = fetchCountries[idx];
 
         if (mode === "genz") {
@@ -976,9 +1088,9 @@ export function useUnifiedSignals(
             .catch(() => ({ articles: [] as any[], providerLimited: false }));
           if (gzResult.providerLimited) {
             providerLimited = true;
-            break;
+            continue;
           }
-          if (!gzResult.providerLimited && gzResult.articles.length < 18) {
+          if (!gzResult.providerLimited && gzResult.articles.length < 30) {
             const relaxedGz = await fetchPagedArticles("genz", country, GENZ_ARTICLES_PER_PAGE, GENZ_PAGES, genzTopicQueryFallback)
               .catch(() => ({ articles: [] as any[], providerLimited: false }));
             if (!relaxedGz.providerLimited && relaxedGz.articles.length > gzResult.articles.length) gzResult = relaxedGz;
@@ -990,7 +1102,7 @@ export function useUnifiedSignals(
             .catch(() => ({ articles: [] as any[], providerLimited: false }));
           if (bizResult.providerLimited) {
             providerLimited = true;
-            break;
+            continue;
           }
           if (!bizResult.providerLimited && bizResult.articles.length < 18) {
             const relaxedBiz = await fetchPagedArticles("business", country, BUSINESS_ARTICLES_PER_PAGE, BUSINESS_PAGES, businessTopicQueryFallback)
@@ -1028,6 +1140,49 @@ export function useUnifiedSignals(
         }
       }
 
+      // Gen Z top-up: if still below minimum density, run broader youth passes across priority countries.
+      if (mode === "genz" && finalizeSignals(results).length < MIN_COMPANY_SIGNALS) {
+        const topUpCountries = getFetchCountries().slice(0, 20);
+        const broadQueries = [
+          `Gen Z youth social media students young adults creator economy ${genzTopicQueryFallback}`.trim(),
+          `Gen Z culture digital behavior young consumers platform trends ${genzTopicQueryFallback}`.trim(),
+        ];
+        for (let ci = 0; ci < topUpCountries.length; ci++) {
+          if (cancelled) break;
+          const country = topUpCountries[ci];
+          for (const query of broadQueries) {
+            const res = await fetchPagedArticles("genz", country, 100, 2, query)
+              .catch(() => ({ articles: [] as any[], providerLimited: false }));
+            if (res.providerLimited) {
+              providerLimited = true;
+              continue;
+            }
+            appendLiveArticles(res.articles, country, "live-gz-topup");
+            await flushPartialToUi();
+            if (finalizeSignals(results).length >= MIN_COMPANY_SIGNALS) break;
+          }
+          if (finalizeSignals(results).length >= MIN_COMPANY_SIGNALS) break;
+        }
+      }
+
+      // Global top-up (both modes): keep sweeping countries until we hit minimum density.
+      if (finalizeSignals(results).length < MIN_COMPANY_SIGNALS) {
+        const fillCountries = getFetchCountries();
+        for (let i = 0; i < fillCountries.length; i++) {
+          if (cancelled) break;
+          if (finalizeSignals(results).length >= MIN_COMPANY_SIGNALS) break;
+          const country = fillCountries[i];
+          const type = mode === "genz" ? "genz" : "business";
+          const query = mode === "genz"
+            ? `Gen Z youth social media young adults ${genzTopicQueryFallback}`.trim()
+            : businessTopicQueryStrict;
+          const fillRes = await fetchPagedArticles(type, country, 80, 1, query)
+            .catch(() => ({ articles: [] as any[], providerLimited: false }));
+          appendLiveArticles(fillRes.articles, country, mode === "genz" ? "live-gz-fill" : "live-biz-fill");
+          await flushPartialToUi();
+        }
+      }
+
       const finalMerged = finalizeSignals(results);
 
       if (typeof window !== "undefined") {
@@ -1050,6 +1205,8 @@ export function useUnifiedSignals(
         writeSessionCache(cacheKey, forCache);
         writePersistentCache(cacheKey, forCache);
         writePersistentCache(durableKey, forCache);
+        lastSharedWriteCount = finalMerged.length;
+        writeSignalBundle(finalMerged, true);
         setLiveSignals(finalMerged);
         setIsLive(true);
       } else if (apiConfigured) {
@@ -1060,24 +1217,17 @@ export function useUnifiedSignals(
           setIsLive(true);
           restored = true;
         } else {
-          const sharedPersistentFallback = readPersistentCache<UnifiedSignal[]>(sharedApiCacheKey);
-          if (sharedPersistentFallback?.data?.length && !cancelled) {
-            setLiveSignals(sharedPersistentFallback.data);
+          const sessionFallback = readSessionCache<UnifiedSignal[]>(cacheKey);
+          if (sessionFallback?.data?.length && !cancelled) {
+            setLiveSignals(sessionFallback.data);
             setIsLive(true);
             restored = true;
           } else {
-            const sessionFallback = readSessionCache<UnifiedSignal[]>(cacheKey);
-            if (sessionFallback?.data?.length && !cancelled) {
-              setLiveSignals(sessionFallback.data);
+            const snap = cache.get(cacheKey);
+            if (snap?.signals?.length && !cancelled) {
+              setLiveSignals(snap.signals);
               setIsLive(true);
               restored = true;
-            } else {
-              const snap = cache.get(cacheKey);
-              if (snap?.signals?.length && !cancelled) {
-                setLiveSignals(snap.signals);
-                setIsLive(true);
-                restored = true;
-              }
             }
           }
         }
@@ -1094,18 +1244,6 @@ export function useUnifiedSignals(
             const sessionLegacy = readSessionCache<UnifiedSignal[]>(key);
             if (sessionLegacy?.data?.length && !cancelled) {
               setLiveSignals(sessionLegacy.data);
-              setIsLive(true);
-              restored = true;
-              break;
-            }
-          }
-        }
-
-        if (!restored) {
-          for (const key of legacySharedKeys) {
-            const sharedLegacy = readPersistentCache<UnifiedSignal[]>(key);
-            if (sharedLegacy?.data?.length && !cancelled) {
-              setLiveSignals(sharedLegacy.data);
               setIsLive(true);
               restored = true;
               break;

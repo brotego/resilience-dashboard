@@ -347,12 +347,11 @@ export async function invokeNewsFeed(body: NewsFeedRequestBody): Promise<{ data:
         return { data: { articles: [], error: "Missing countryName for business feed" }, error: null };
       }
       const keyword = topicQuery
-        ? `business finance economy markets stocks ${topicQuery}`
+        ? topicQuery
         : "business finance economy markets stocks";
       payload = eventRegistryArticlePayload(apiKey, currentPage, size, {
         keyword,
         sourceLocationUri: locUri,
-        lang: "eng",
       });
     } else if (type === "genz") {
       const base = "Gen Z TikTok viral youth culture sustainability";
@@ -360,7 +359,6 @@ export async function invokeNewsFeed(body: NewsFeedRequestBody): Promise<{ data:
       payload = eventRegistryArticlePayload(apiKey, currentPage, size, {
         keyword,
         sourceLocationUri: locUri,
-        lang: "eng",
       });
     } else if (type === "domain") {
       const text = domain ? DOMAIN_KEYWORDS_ER[domain] : undefined;
@@ -370,7 +368,6 @@ export async function invokeNewsFeed(body: NewsFeedRequestBody): Promise<{ data:
       const keywordStr = countryName ? `${text} ${countryName}` : text;
       payload = eventRegistryArticlePayload(apiKey, currentPage, size, {
         keyword: keywordStr,
-        lang: "eng",
       });
     } else if (type === "sentiment") {
       if (!topicQuery || typeof topicQuery !== "string") {
@@ -379,7 +376,6 @@ export async function invokeNewsFeed(body: NewsFeedRequestBody): Promise<{ data:
       const keywordStr = countryName ? `${topicQuery} ${countryName}` : topicQuery;
       const sentimentQuery: Record<string, unknown> = {
         keyword: keywordStr,
-        lang: "eng",
       };
       // Country panel sentiment should reflect that country's media perspective.
       if (locUri) sentimentQuery.sourceLocationUri = locUri;

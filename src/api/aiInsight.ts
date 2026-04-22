@@ -3,6 +3,7 @@
  */
 
 import { hashCompanyContextSnippet } from "@/data/companyIntel";
+import { readAiOutputCache, writeAiOutputCache } from "@/lib/projectSupabaseCache";
 
 export type AiInsightRequestBody = {
   signalTitle?: string;
@@ -10,6 +11,7 @@ export type AiInsightRequestBody = {
   signalLocation?: string;
   signalDomain?: string;
   company?: string | null;
+  companyId?: string | null;
   /** Rich dossier text from formatCompanyContextForAi — improves tailoring vs name alone. */
   companyContext?: string;
   mode?: "resilience" | "genz";
@@ -85,6 +87,70 @@ const AI_NEWSLETTER_CACHE_MAX_AGE_MS = 6 * 60 * 60 * 1000;
 const AI_SENTIMENT_SUMMARY_CACHE_PREFIX = "rr.ai.sentiment.summary.v2.";
 const AI_SENTIMENT_SUMMARY_MAX_AGE_MS = 6 * 60 * 60 * 1000;
 
+function hashLite(input: string): string {
+  let h = 2166136261;
+  for (let i = 0; i < input.length; i++) {
+    h ^= input.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  return (h >>> 0).toString(36);
+}
+
+function aiCacheDayBucket(): string {
+  const d = new Date();
+  const y = d.getUTCFullYear();
+  const m = String(d.getUTCMonth() + 1).padStart(2, "0");
+  const day = String(d.getUTCDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+
+function aiSharedKey(artifact: string, mode: "resilience" | "genz", companyId: string, raw: string): string {
+  return `ai:${artifact}:${mode}:${companyId}:${aiCacheDayBucket()}:${hashLite(raw)}`;
+}
+
+function companyCacheId(company?: string | null): string {
+  const c = (company || "").trim().toLowerCase();
+  if (!c) return "global";
+  return c.replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "") || "global";
+}
+
+async function readAiShared<T>(params: {
+  artifact: string;
+  mode: "resilience" | "genz";
+  companyId: string;
+  locale?: string;
+  rawKey: string;
+}): Promise<T | null> {
+  const cacheKey = aiSharedKey(params.artifact, params.mode, params.companyId, params.rawKey);
+  const row = await readAiOutputCache<T>({ cacheKey });
+  return row?.data ?? null;
+}
+
+async function writeAiShared<T>(params: {
+  artifact: string;
+  mode: "resilience" | "genz";
+  companyId: string;
+  locale?: string;
+  rawKey: string;
+  payload: T;
+  model?: string;
+  ttlHours?: number;
+}): Promise<void> {
+  const cacheKey = aiSharedKey(params.artifact, params.mode, params.companyId, params.rawKey);
+  const promptHash = hashLite(params.rawKey);
+  await writeAiOutputCache({
+    cacheKey,
+    companyId: params.companyId,
+    mode: params.mode,
+    artifactType: params.artifact,
+    locale: params.locale || "en",
+    model: params.model || "anthropic",
+    promptHash,
+    payload: params.payload,
+    ttlHours: params.ttlHours ?? 24,
+  });
+}
+
 function insightCacheKey(body: AiInsightRequestBody): string {
   return JSON.stringify({
     t: body.signalTitle || "",
@@ -131,6 +197,7 @@ type AiSentimentCacheEntry = {
 };
 
 function sentimentCacheKey(params: {
+  companyId?: string | null;
   lens: SentimentLens;
   company?: string | null;
   industry?: string | null;
@@ -140,6 +207,7 @@ function sentimentCacheKey(params: {
   articles: SentimentArticleInput[];
 }): string {
   return JSON.stringify({
+    companyId: params.companyId || "",
     lens: params.lens,
     company: params.company || "",
     industry: params.industry || "",
@@ -284,6 +352,7 @@ function parseSentimentMap(raw: string): Record<string, ArticleSentiment> | null
 }
 
 export async function invokeArticleSentimentBatch(params: {
+  companyId?: string | null;
   lens: SentimentLens;
   company?: string | null;
   industry?: string | null;
@@ -297,7 +366,29 @@ export async function invokeArticleSentimentBatch(params: {
   if (articles.length === 0) return { data: {}, error: null };
   const cacheKey = sentimentCacheKey({ ...params, articles });
   const cached = readSentimentCache(cacheKey);
-  if (cached) return { data: cached, error: null };
+  if (cached) {
+    void writeAiShared({
+      artifact: `sentiment_batch_${params.lens}`,
+      mode: "resilience",
+      companyId: params.companyId || companyCacheId(params.company),
+      locale: params.language || "en",
+      rawKey: cacheKey,
+      payload: cached,
+      ttlHours: 24,
+    });
+    return { data: cached, error: null };
+  }
+  const sharedCached = await readAiShared<Record<string, ArticleSentiment>>({
+    artifact: `sentiment_batch_${params.lens}`,
+    mode: params.lens === "japan" ? "resilience" : "resilience",
+    companyId: params.companyId || companyCacheId(params.company),
+    locale: params.language || "en",
+    rawKey: cacheKey,
+  });
+  if (sharedCached) {
+    writeSentimentCache(cacheKey, sharedCached);
+    return { data: sharedCached, error: null };
+  }
 
   const apiKey = resolveAnthropicKey();
   if (!apiKey) return { data: null, error: new Error("VITE_ANTHROPIC_API_KEY is not configured.") };
@@ -371,6 +462,16 @@ ${articles.map((a) => `- id=${a.id}\n  title=${a.title}\n  description=${a.descr
       const parsed = parseSentimentMap(text);
       if (!parsed) continue;
       writeSentimentCache(cacheKey, parsed);
+      void writeAiShared({
+        artifact: `sentiment_batch_${params.lens}`,
+        mode: "resilience",
+        companyId: params.companyId || companyCacheId(params.company),
+        locale: params.language || "en",
+        rawKey: cacheKey,
+        payload: parsed,
+        model,
+        ttlHours: 24,
+      });
       return { data: parsed, error: null };
     }
     return { data: null, error: new Error(lastError) };
@@ -380,6 +481,7 @@ ${articles.map((a) => `- id=${a.id}\n  title=${a.title}\n  description=${a.descr
 }
 
 function sentimentOpinionCacheKey(params: {
+  companyId?: string | null;
   lens: SentimentLens;
   company?: string | null;
   industry?: string | null;
@@ -387,6 +489,7 @@ function sentimentOpinionCacheKey(params: {
   language?: string;
 }): string {
   return JSON.stringify({
+    companyId: params.companyId || "",
     lens: params.lens,
     company: params.company || "",
     industry: params.industry || "",
@@ -439,6 +542,7 @@ function parseSentimentOpinion(raw: string): SentimentFallbackOpinion | null {
 }
 
 export async function invokeSentimentFallbackOpinion(params: {
+  companyId?: string | null;
   lens: SentimentLens;
   company?: string | null;
   industry?: string | null;
@@ -447,7 +551,29 @@ export async function invokeSentimentFallbackOpinion(params: {
 }): Promise<{ data: SentimentFallbackOpinion | null; error: Error | null }> {
   const cacheKey = sentimentOpinionCacheKey(params);
   const cached = readSentimentOpinionCache(cacheKey);
-  if (cached) return { data: cached, error: null };
+  if (cached) {
+    void writeAiShared({
+      artifact: `sentiment_fallback_${params.lens}`,
+      mode: "resilience",
+      companyId: params.companyId || companyCacheId(params.company),
+      locale: params.language || "en",
+      rawKey: cacheKey,
+      payload: cached,
+      ttlHours: 24,
+    });
+    return { data: cached, error: null };
+  }
+  const sharedCached = await readAiShared<SentimentFallbackOpinion>({
+    artifact: `sentiment_fallback_${params.lens}`,
+    mode: "resilience",
+    companyId: params.companyId || companyCacheId(params.company),
+    locale: params.language || "en",
+    rawKey: cacheKey,
+  });
+  if (sharedCached) {
+    writeSentimentOpinionCache(cacheKey, sharedCached);
+    return { data: sharedCached, error: null };
+  }
 
   const apiKey = resolveAnthropicKey();
   if (!apiKey) return { data: null, error: new Error("VITE_ANTHROPIC_API_KEY is not configured.") };
@@ -508,6 +634,16 @@ IMPORTANT: For company lens, use the selected country's media perspective toward
       const parsed = parseSentimentOpinion(text);
       if (!parsed) continue;
       writeSentimentOpinionCache(cacheKey, parsed);
+      void writeAiShared({
+        artifact: `sentiment_fallback_${params.lens}`,
+        mode: "resilience",
+        companyId: params.companyId || companyCacheId(params.company),
+        locale: params.language || "en",
+        rawKey: cacheKey,
+        payload: parsed,
+        model,
+        ttlHours: 24,
+      });
       return { data: parsed, error: null };
     }
     return { data: null, error: new Error(lastError) };
@@ -525,6 +661,7 @@ export type SentimentSectionSummaryInput = {
 };
 
 function sentimentSectionSummaryCacheKey(params: {
+  companyId?: string | null;
   lens: SentimentLens;
   company?: string | null;
   industry?: string | null;
@@ -534,6 +671,7 @@ function sentimentSectionSummaryCacheKey(params: {
   articles: SentimentSectionSummaryInput[];
 }): string {
   return JSON.stringify({
+    companyId: params.companyId || "",
     lens: params.lens,
     company: params.company || "",
     industry: params.industry || "",
@@ -590,6 +728,7 @@ function parseSentimentSectionSummary(raw: string): { summary: string } | null {
 
 /** Cross-article AI overview for the dashboard sentiment list (company or Japan lens). */
 export async function invokeSentimentSectionSummary(params: {
+  companyId?: string | null;
   lens: SentimentLens;
   company?: string | null;
   industry?: string | null;
@@ -603,7 +742,29 @@ export async function invokeSentimentSectionSummary(params: {
 
   const cacheKey = sentimentSectionSummaryCacheKey({ ...params, articles: bounded });
   const cached = readSentimentSectionSummaryCache(cacheKey);
-  if (cached) return { data: cached, error: null };
+  if (cached) {
+    void writeAiShared({
+      artifact: `sentiment_summary_${params.lens}`,
+      mode: "resilience",
+      companyId: params.companyId || companyCacheId(params.company),
+      locale: params.language || "en",
+      rawKey: cacheKey,
+      payload: cached,
+      ttlHours: 24,
+    });
+    return { data: cached, error: null };
+  }
+  const sharedCached = await readAiShared<{ summary: string }>({
+    artifact: `sentiment_summary_${params.lens}`,
+    mode: "resilience",
+    companyId: params.companyId || companyCacheId(params.company),
+    locale: params.language || "en",
+    rawKey: cacheKey,
+  });
+  if (sharedCached) {
+    writeSentimentSectionSummaryCache(cacheKey, sharedCached);
+    return { data: sharedCached, error: null };
+  }
 
   const apiKey = resolveAnthropicKey();
   if (!apiKey) return { data: null, error: new Error("VITE_ANTHROPIC_API_KEY is not configured.") };
@@ -683,6 +844,16 @@ SUMMARY: <paragraph>`;
       const parsed = parseSentimentSectionSummary(text);
       if (!parsed) continue;
       writeSentimentSectionSummaryCache(cacheKey, parsed);
+      void writeAiShared({
+        artifact: `sentiment_summary_${params.lens}`,
+        mode: "resilience",
+        companyId: params.companyId || companyCacheId(params.company),
+        locale: params.language || "en",
+        rawKey: cacheKey,
+        payload: parsed,
+        model,
+        ttlHours: 24,
+      });
       return { data: parsed, error: null };
     }
     return { data: null, error: new Error(lastError) };
@@ -701,6 +872,7 @@ type CountrySignalInput = {
 };
 
 function countryInsightCacheKey(params: {
+  companyId?: string | null;
   company?: string | null;
   industry?: string | null;
   countryName: string;
@@ -708,6 +880,7 @@ function countryInsightCacheKey(params: {
   signals: CountrySignalInput[];
 }): string {
   return JSON.stringify({
+    companyId: params.companyId || "",
     company: params.company || "",
     industry: params.industry || "",
     country: params.countryName,
@@ -762,6 +935,7 @@ function parseCountryInsight(raw: string): CountryCompanyInsight | null {
 }
 
 export async function invokeCountryCompanyInsight(params: {
+  companyId?: string | null;
   company?: string | null;
   industry?: string | null;
   countryName: string;
@@ -771,7 +945,29 @@ export async function invokeCountryCompanyInsight(params: {
   const boundedSignals = params.signals.slice(0, 40);
   const cacheKey = countryInsightCacheKey({ ...params, signals: boundedSignals });
   const cached = readCountryInsightCache(cacheKey);
-  if (cached) return { data: cached, error: null };
+  if (cached) {
+    void writeAiShared({
+      artifact: "country_company_insight",
+      mode: "resilience",
+      companyId: params.companyId || companyCacheId(params.company),
+      locale: params.language || "en",
+      rawKey: cacheKey,
+      payload: cached,
+      ttlHours: 24,
+    });
+    return { data: cached, error: null };
+  }
+  const sharedCached = await readAiShared<CountryCompanyInsight>({
+    artifact: "country_company_insight",
+    mode: "resilience",
+    companyId: params.companyId || companyCacheId(params.company),
+    locale: params.language || "en",
+    rawKey: cacheKey,
+  });
+  if (sharedCached) {
+    writeCountryInsightCache(cacheKey, sharedCached);
+    return { data: sharedCached, error: null };
+  }
 
   const apiKey = resolveAnthropicKey();
   if (!apiKey) return { data: null, error: new Error("VITE_ANTHROPIC_API_KEY is not configured.") };
@@ -841,6 +1037,16 @@ ${boundedSignals.map((s, i) => `${i + 1}. ${s.title} | ${s.description || ""} | 
       const parsed = parseCountryInsight(text);
       if (!parsed) continue;
       writeCountryInsightCache(cacheKey, parsed);
+      void writeAiShared({
+        artifact: "country_company_insight",
+        mode: "resilience",
+        companyId: params.companyId || companyCacheId(params.company),
+        locale: params.language || "en",
+        rawKey: cacheKey,
+        payload: parsed,
+        model,
+        ttlHours: 24,
+      });
       return { data: parsed, error: null };
     }
     return { data: null, error: new Error(lastError) };
@@ -867,6 +1073,7 @@ type NewsletterCacheEntry = {
 };
 
 function newsletterCacheKey(params: {
+  companyId?: string | null;
   company: string;
   industry?: string;
   companyContext?: string;
@@ -874,6 +1081,7 @@ function newsletterCacheKey(params: {
   signals: NewsletterSignalInput[];
 }): string {
   return JSON.stringify({
+    companyId: params.companyId || "",
     company: params.company,
     industry: params.industry || "",
     cc: hashCompanyContextSnippet(params.companyContext ?? ""),
@@ -968,6 +1176,7 @@ function parseNewsletter(raw: string): CompanyNewsletterResult | null {
 }
 
 export async function invokeCompanyNewsletter(params: {
+  companyId?: string | null;
   company: string;
   industry?: string;
   companyContext?: string;
@@ -978,6 +1187,7 @@ export async function invokeCompanyNewsletter(params: {
   if (!params.company || boundedSignals.length === 0) return { data: null, error: new Error("Missing company or signals") };
 
   const cacheKey = newsletterCacheKey({
+    companyId: params.companyId,
     company: params.company,
     industry: params.industry,
     companyContext: params.companyContext,
@@ -985,7 +1195,29 @@ export async function invokeCompanyNewsletter(params: {
     signals: boundedSignals,
   });
   const cached = readNewsletterCache(cacheKey);
-  if (cached) return { data: cached, error: null };
+  if (cached) {
+    void writeAiShared({
+      artifact: "company_newsletter",
+      mode: "resilience",
+      companyId: params.companyId || companyCacheId(params.company),
+      locale: params.language || "en",
+      rawKey: cacheKey,
+      payload: cached,
+      ttlHours: 24,
+    });
+    return { data: cached, error: null };
+  }
+  const sharedCached = await readAiShared<CompanyNewsletterResult>({
+    artifact: "company_newsletter",
+    mode: "resilience",
+    companyId: params.companyId || companyCacheId(params.company),
+    locale: params.language || "en",
+    rawKey: cacheKey,
+  });
+  if (sharedCached) {
+    writeNewsletterCache(cacheKey, sharedCached);
+    return { data: sharedCached, error: null };
+  }
 
   const apiKey = resolveAnthropicKey();
   if (!apiKey) return { data: null, error: new Error("VITE_ANTHROPIC_API_KEY is not configured.") };
@@ -1101,6 +1333,16 @@ ${candidateLines.join("\n")}`;
         }),
       };
       writeNewsletterCache(cacheKey, enriched);
+      void writeAiShared({
+        artifact: "company_newsletter",
+        mode: "resilience",
+        companyId: params.companyId || companyCacheId(params.company),
+        locale: params.language || "en",
+        rawKey: cacheKey,
+        payload: enriched,
+        model,
+        ttlHours: 24,
+      });
       return { data: enriched, error: null };
     }
     return { data: null, error: new Error(lastError) };
@@ -1112,7 +1354,33 @@ ${candidateLines.join("\n")}`;
 export async function invokeAiInsight(body: AiInsightRequestBody): Promise<{ data: AiInsightResult | null; error: Error | null }> {
   const jp = body.language === "jp";
   const cached = readInsightCache(body);
-  if (cached) return { data: cached, error: null };
+  if (cached) {
+    const rawKey = insightCacheKey(body);
+    const mode: "resilience" | "genz" = body.mode === "genz" ? "genz" : "resilience";
+    void writeAiShared({
+      artifact: "ai_insight",
+      mode,
+      companyId: body.companyId || companyCacheId(body.company),
+      locale: body.language || "en",
+      rawKey,
+      payload: cached,
+      ttlHours: 24,
+    });
+    return { data: cached, error: null };
+  }
+  const rawKey = insightCacheKey(body);
+  const mode: "resilience" | "genz" = body.mode === "genz" ? "genz" : "resilience";
+  const sharedCached = await readAiShared<AiInsightResult>({
+    artifact: "ai_insight",
+    mode,
+    companyId: body.companyId || companyCacheId(body.company),
+    locale: body.language || "en",
+    rawKey,
+  });
+  if (sharedCached) {
+    writeInsightCache(body, sharedCached);
+    return { data: sharedCached, error: null };
+  }
 
   const apiKey = resolveAnthropicKey();
   if (!apiKey) {
@@ -1238,6 +1506,16 @@ Company: ${body.company || "general"}`;
         : "";
       const parsed = jp ? localizeAiInsightDefaultsForJp(parseInsight(text)) : parseInsight(text);
       writeInsightCache(body, parsed);
+      void writeAiShared({
+        artifact: "ai_insight",
+        mode,
+        companyId: body.companyId || companyCacheId(body.company),
+        locale: body.language || "en",
+        rawKey,
+        payload: parsed,
+        model,
+        ttlHours: 24,
+      });
       return { data: parsed, error: null };
     }
     const emptyErr = jp ? localizeAiInsightDefaultsForJp(parseInsight("")) : parseInsight("");

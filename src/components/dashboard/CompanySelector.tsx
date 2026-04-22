@@ -9,14 +9,14 @@ import { useLang } from "@/i18n/LanguageContext";
 import { getCompanyDisplayName, getCompanyDisplaySector } from "@/i18n/companyLocale";
 
 interface Props {
-  selectedCompany: CompanyId | null;
-  onSelect: (id: CompanyId | null) => void;
+  selectedCompany: CompanyId;
+  onSelect: (id: CompanyId) => void;
 }
 
 const CompanySelector = ({ selectedCompany, onSelect }: Props) => {
   const [open, setOpen] = useState(false);
   const { t, lang } = useLang();
-  const selected = COMPANIES.find((c) => c.id === selectedCompany);
+  const selected = COMPANIES.find((c) => c.id === selectedCompany) ?? COMPANIES[0];
 
   return (
     <Popover open={open} onOpenChange={setOpen}>
@@ -27,7 +27,7 @@ const CompanySelector = ({ selectedCompany, onSelect }: Props) => {
           aria-expanded={open}
           className="w-full justify-between bg-secondary/50 border-border text-[11px] font-mono h-7 rounded-sm font-normal"
         >
-          {selected ? getCompanyDisplayName(selected, lang) : t("company.all")}
+          {getCompanyDisplayName(selected, lang)}
           <ChevronsUpDown className="ml-2 h-3 w-3 shrink-0 opacity-50" />
         </Button>
       </PopoverTrigger>
@@ -37,14 +37,6 @@ const CompanySelector = ({ selectedCompany, onSelect }: Props) => {
           <CommandList>
             <CommandEmpty className="text-[10px] font-mono">{t("company.empty")}</CommandEmpty>
             <CommandGroup>
-              <CommandItem
-                value="all-companies"
-                onSelect={() => { onSelect(null); setOpen(false); }}
-                className="text-[11px]"
-              >
-                {t("company.all")}
-                <Check className={cn("ml-auto h-3 w-3", !selectedCompany ? "opacity-100" : "opacity-0")} />
-              </CommandItem>
               {COMPANIES.map((c) => (
                 <CommandItem
                   key={c.id}

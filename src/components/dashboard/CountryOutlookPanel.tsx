@@ -374,6 +374,7 @@ const CountryOutlookPanel = ({ countryName, mode, selectedCompany, signals, onCl
         withTimeout(
           invokeArticleSentimentBatch({
             lens: "company",
+            companyId: company?.id || null,
             company: company?.name || null,
             industry: company?.sector || null,
             countryName,
@@ -394,6 +395,7 @@ const CountryOutlookPanel = ({ countryName, mode, selectedCompany, signals, onCl
         withTimeout(
           invokeArticleSentimentBatch({
             lens: "japan",
+            companyId: company?.id || null,
             countryName,
             language: lang,
             articles: japanArticles.map((a) => ({
@@ -412,6 +414,7 @@ const CountryOutlookPanel = ({ countryName, mode, selectedCompany, signals, onCl
           ? withTimeout(
               invokeSentimentFallbackOpinion({
                 lens: "company",
+                companyId: company?.id || null,
                 company: company?.name || null,
                 industry: company?.sector || null,
                 countryName,
@@ -425,6 +428,7 @@ const CountryOutlookPanel = ({ countryName, mode, selectedCompany, signals, onCl
           ? withTimeout(
               invokeSentimentFallbackOpinion({
                 lens: "japan",
+                companyId: company?.id || null,
                 countryName,
                 language: lang,
               }),
@@ -471,6 +475,7 @@ const CountryOutlookPanel = ({ countryName, mode, selectedCompany, signals, onCl
     setCompanyInsightLoading(true);
     withTimeout(
       invokeCountryCompanyInsight({
+        companyId: company.id,
         company: company.name,
         industry: company.sector,
         countryName,

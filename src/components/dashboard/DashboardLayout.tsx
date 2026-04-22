@@ -20,6 +20,7 @@ export type DashboardMode = "resilience" | "genz";
 export type ViewTab = "dashboard" | "map";
 type MapView = "map2d" | "globe3d";
 const READ_SIGNALS_STORAGE_KEY = "read-signal-ids";
+const SELECTED_COMPANY_STORAGE_KEY = "selected-company-id";
 
 const LiveClock = () => {
   const [now, setNow] = useState(new Date());
@@ -53,7 +54,15 @@ const DashboardLayout = () => {
     "digital",
     "belonging",
   ]);
-  const [selectedCompany, setSelectedCompany] = useState<CompanyId | null>("mori_building");
+  const [selectedCompany, setSelectedCompany] = useState<CompanyId>(() => {
+    try {
+      const raw = localStorage.getItem(SELECTED_COMPANY_STORAGE_KEY);
+      if (!raw) return "mori_building";
+      return raw as CompanyId;
+    } catch {
+      return "mori_building";
+    }
+  });
   const [selectedSignal, setSelectedSignal] = useState<UnifiedSignal | null>(null);
   const [selectedCountry, setSelectedCountry] = useState<string | null>(null);
   const [mapView, setMapView] = useState<MapView>("map2d");
@@ -137,6 +146,10 @@ const DashboardLayout = () => {
   useEffect(() => {
     localStorage.setItem(READ_SIGNALS_STORAGE_KEY, JSON.stringify(readSignalIds));
   }, [readSignalIds]);
+
+  useEffect(() => {
+    localStorage.setItem(SELECTED_COMPANY_STORAGE_KEY, selectedCompany);
+  }, [selectedCompany]);
 
   const handleMoreInfo = useCallback((signal: UnifiedSignal) => {
     // IDs can contain URLs (slashes); must be one path segment or the route becomes /signal/* / * → 404

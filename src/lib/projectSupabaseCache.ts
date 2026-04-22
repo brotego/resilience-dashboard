@@ -1,0 +1,158 @@
+import { supabase } from "@/integrations/supabase/client";
+
+const SIGNAL_TABLE = "signal_bundle_cache";
+const AI_TABLE = "ai_output_cache";
+
+function supabaseReady(): boolean {
+  const url = (import.meta.env.VITE_SUPABASE_URL as string | undefined)?.trim();
+  const key =
+    (import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY as string | undefined)?.trim() ||
+    (import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined)?.trim();
+  return !!url && !!key;
+}
+
+export type SignalBundleCacheRow<T> = {
+  cache_key: string;
+  company_id: string;
+  mode: "resilience" | "genz";
+  payload: T;
+  signal_count: number;
+  is_final: boolean;
+  coverage_country_count: number;
+  source_diversity_count: number;
+  model_version: string;
+  saved_at: string;
+  expires_at: string;
+};
+
+export async function readSignalBundleCache<T>(params: {
+  cacheKey: string;
+  minSignals?: number;
+  minCoverageCountries?: number;
+}): Promise<{ data: T; savedAt: number; signalCount: number; isFinal: boolean } | null> {
+  if (!supabaseReady()) return null;
+  try {
+    const minSignals = Math.max(0, params.minSignals ?? 0);
+    const minCoverageCountries = Math.max(0, params.minCoverageCountries ?? 0);
+    const nowIso = new Date().toISOString();
+    let query = supabase
+      .from(SIGNAL_TABLE)
+      .select("cache_key,payload,signal_count,is_final,saved_at,expires_at")
+      .eq("cache_key", params.cacheKey)
+      .gt("expires_at", nowIso)
+      .gte("signal_count", minSignals)
+      .order("is_final", { ascending: false })
+      .order("saved_at", { ascending: false })
+      .limit(1);
+    if (minCoverageCountries > 0) {
+      query = query.gte("coverage_country_count", minCoverageCountries);
+    }
+    const { data, error } = await query.maybeSingle();
+    if (error || !data) return null;
+    const row = data as SignalBundleCacheRow<T>;
+    const savedAt = Date.parse(row.saved_at);
+    if (!Number.isFinite(savedAt)) return null;
+    return { data: row.payload, savedAt, signalCount: row.signal_count || 0, isFinal: !!row.is_final };
+  } catch {
+    return null;
+  }
+}
+
+export async function writeSignalBundleCache<T>(params: {
+  cacheKey: string;
+  companyId: string;
+  mode: "resilience" | "genz";
+  payload: T;
+  signalCount: number;
+  isFinal: boolean;
+  coverageCountryCount: number;
+  sourceDiversityCount: number;
+  modelVersion: string;
+  ttlHours?: number;
+}): Promise<boolean> {
+  if (!supabaseReady()) return false;
+  try {
+    const ttlHours = Math.max(1, params.ttlHours ?? 24);
+    const savedAt = new Date();
+    const expiresAt = new Date(savedAt.getTime() + ttlHours * 60 * 60 * 1000);
+    const { error } = await supabase.from(SIGNAL_TABLE).upsert(
+      {
+        cache_key: params.cacheKey,
+        company_id: params.companyId,
+        mode: params.mode,
+        payload: params.payload,
+        signal_count: params.signalCount,
+        is_final: params.isFinal,
+        coverage_country_count: params.coverageCountryCount,
+        source_diversity_count: params.sourceDiversityCount,
+        model_version: params.modelVersion,
+        saved_at: savedAt.toISOString(),
+        expires_at: expiresAt.toISOString(),
+      },
+      { onConflict: "cache_key" },
+    );
+    return !error;
+  } catch {
+    return false;
+  }
+}
+
+export async function readAiOutputCache<T>(params: {
+  cacheKey: string;
+}): Promise<{ data: T; savedAt: number } | null> {
+  if (!supabaseReady()) return null;
+  try {
+    const nowIso = new Date().toISOString();
+    const { data, error } = await supabase
+      .from(AI_TABLE)
+      .select("payload,saved_at,expires_at")
+      .eq("cache_key", params.cacheKey)
+      .gt("expires_at", nowIso)
+      .order("saved_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (error || !data) return null;
+    const savedAt = Date.parse(String((data as { saved_at?: string }).saved_at || ""));
+    if (!Number.isFinite(savedAt)) return null;
+    return { data: (data as { payload: T }).payload, savedAt };
+  } catch {
+    return null;
+  }
+}
+
+export async function writeAiOutputCache<T>(params: {
+  cacheKey: string;
+  companyId: string;
+  mode: "resilience" | "genz";
+  artifactType: string;
+  locale: string;
+  model: string;
+  promptHash: string;
+  payload: T;
+  ttlHours?: number;
+}): Promise<boolean> {
+  if (!supabaseReady()) return false;
+  try {
+    const ttlHours = Math.max(1, params.ttlHours ?? 24);
+    const savedAt = new Date();
+    const expiresAt = new Date(savedAt.getTime() + ttlHours * 60 * 60 * 1000);
+    const { error } = await supabase.from(AI_TABLE).upsert(
+      {
+        cache_key: params.cacheKey,
+        company_id: params.companyId,
+        mode: params.mode,
+        artifact_type: params.artifactType,
+        locale: params.locale,
+        model: params.model,
+        prompt_hash: params.promptHash,
+        payload: params.payload,
+        saved_at: savedAt.toISOString(),
+        expires_at: expiresAt.toISOString(),
+      },
+      { onConflict: "cache_key" },
+    );
+    return !error;
+  } catch {
+    return false;
+  }
+}
