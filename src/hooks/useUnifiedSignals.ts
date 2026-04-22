@@ -46,8 +46,6 @@ const MAX_COMPANY_SIGNALS = 500;
 const MIN_COMPANY_SIGNALS = 250;
 /** Avoid one wire dominating the map / click stack (per normalized outlet name). */
 const MAX_SIGNALS_PER_SOURCE = 25;
-/** Treat shared cache below this as partial warm-start and continue live fetch. */
-const MIN_SHARED_SIGNAL_ACCEPT_COUNT = 120;
 /** After packing, keep pushing unique countries into the bundle so the map doesn't collapse to a handful of markets. */
 const MIN_DISPLAY_COUNTRIES = 22;
 const MAX_ER_TOPIC_CHARS = 480;
@@ -1050,10 +1048,13 @@ export function useUnifiedSignals(
     }
 
     const fetchAll = async () => {
+      // Always load the latest non-expired row for this key (no min signal/country filters in SQL).
+      // Strict thresholds used to skip rows <120 signals or <18 countries, so new devices never saw
+      // partial bundles and restarted full live fetches instead.
       const sharedSupabaseEntry = await readSignalBundleCache<UnifiedSignal[]>({
         cacheKey: signalBundleCacheKey,
-        minSignals: MIN_SHARED_SIGNAL_ACCEPT_COUNT,
-        minCoverageCountries: Math.min(MIN_DISPLAY_COUNTRIES, 18),
+        minSignals: 0,
+        minCoverageCountries: 0,
       });
       let sharedWarmStart: UnifiedSignal[] = [];
       if (sharedSupabaseEntry?.data?.length) {

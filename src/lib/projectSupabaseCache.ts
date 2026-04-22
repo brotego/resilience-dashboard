@@ -51,9 +51,17 @@ export type SignalBundleCacheRow<T> = {
 
 export async function readSignalBundleCache<T>(params: {
   cacheKey: string;
+  /** Omit or set 0 to skip — any non-expired row matches (cross-device warm start). */
   minSignals?: number;
+  /** Omit or set 0 to skip — avoids rejecting rows when many dots share a few location labels. */
   minCoverageCountries?: number;
-}): Promise<{ data: T; savedAt: number; signalCount: number; isFinal: boolean } | null> {
+}): Promise<{
+  data: T;
+  savedAt: number;
+  signalCount: number;
+  isFinal: boolean;
+  coverageCountryCount: number;
+} | null> {
   if (!supabaseReady()) return null;
   try {
     const minSignals = Math.max(0, params.minSignals ?? 0);
@@ -61,13 +69,16 @@ export async function readSignalBundleCache<T>(params: {
     const nowIso = new Date().toISOString();
     let query = supabase
       .from(SIGNAL_TABLE)
-      .select("cache_key,payload,signal_count,is_final,saved_at,expires_at")
+      .select("cache_key,payload,signal_count,is_final,saved_at,expires_at,coverage_country_count")
       .eq("cache_key", params.cacheKey)
       .gt("expires_at", nowIso)
-      .gte("signal_count", minSignals)
       .order("is_final", { ascending: false })
+      .order("signal_count", { ascending: false })
       .order("saved_at", { ascending: false })
       .limit(1);
+    if (minSignals > 0) {
+      query = query.gte("signal_count", minSignals);
+    }
     if (minCoverageCountries > 0) {
       query = query.gte("coverage_country_count", minCoverageCountries);
     }
@@ -84,14 +95,23 @@ export async function readSignalBundleCache<T>(params: {
     const row = data as SignalBundleCacheRow<T>;
     const savedAt = Date.parse(row.saved_at);
     if (!Number.isFinite(savedAt)) return null;
+    const signalCount = row.signal_count || 0;
+    const coverageCountryCount = row.coverage_country_count ?? 0;
     reportSupabaseCacheDebug({
       op: "read_signal_bundle",
       ok: true,
       cacheKey: params.cacheKey,
-      signalCount: row.signal_count || 0,
+      signalCount,
+      coverageCountryCount,
       isFinal: !!row.is_final,
     });
-    return { data: row.payload, savedAt, signalCount: row.signal_count || 0, isFinal: !!row.is_final };
+    return {
+      data: row.payload,
+      savedAt,
+      signalCount,
+      isFinal: !!row.is_final,
+      coverageCountryCount,
+    };
   } catch (err) {
     reportSupabaseCacheDebug({
       op: "read_signal_bundle",
