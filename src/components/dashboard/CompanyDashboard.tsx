@@ -25,7 +25,7 @@ import {
 } from "@/lib/sentimentArticleFilters";
 import { ChevronDown, ChevronUp, ArrowRight } from "lucide-react";
 
-type TimeFilter = "24h" | "7d" | "30d";
+type TimeFilter = "6h" | "12h" | "24h" | "beyond";
 type SentimentView = "company" | "japan";
 type SentimentArticle = { id: string; title: string; source: string; description: string; date: string; url: string };
 
@@ -102,7 +102,7 @@ const CompanyDashboard = ({ selectedCompany, signals, onSignalClick }: Props) =>
   const [jpSentimentArticleMap, setJpSentimentArticleMap] = useState<
     Record<string, { title: string; description: string }>
   >({});
-  const [timeFilter, setTimeFilter] = useState<TimeFilter>("7d");
+  const [timeFilter, setTimeFilter] = useState<TimeFilter>("24h");
   const [briefOpen, setBriefOpen] = useState(false);
   const [sentimentView, setSentimentView] = useState<SentimentView>("company");
   const [sentimentLoading, setSentimentLoading] = useState(false);
@@ -136,9 +136,17 @@ const CompanyDashboard = ({ selectedCompany, signals, onSignalClick }: Props) =>
 
   const filteredSignals = useMemo(() => {
     const now = Date.now();
-    const cutoff = timeFilter === "24h" ? 86400000 : timeFilter === "7d" ? 604800000 : 2592000000;
+    const sixHours = 6 * 60 * 60 * 1000;
+    const twelveHours = 12 * 60 * 60 * 1000;
+    const day = 24 * 60 * 60 * 1000;
     return datedSignals
-      .filter(s => now - s._date.getTime() <= cutoff)
+      .filter((s) => {
+        const age = now - s._date.getTime();
+        if (timeFilter === "6h") return age <= sixHours;
+        if (timeFilter === "12h") return age <= twelveHours;
+        if (timeFilter === "24h") return age <= day;
+        return age > day;
+      })
       .sort((a, b) => {
         const urgencyOrder = { critical: 0, high: 1, medium: 2, low: 3 };
         const dateDiff = b._date.getTime() - a._date.getTime();
@@ -569,6 +577,12 @@ const CompanyDashboard = ({ selectedCompany, signals, onSignalClick }: Props) =>
     () => newsletterCandidates.map((s) => `${s.id}:${s.title}:${s.articleUrl ?? ""}`).join("|"),
     [newsletterCandidates],
   );
+  const newsletterTimeWindowLabel = useMemo(() => {
+    if (timeFilter === "6h") return lang === "jp" ? "直近6時間" : "last 6 hours";
+    if (timeFilter === "12h") return lang === "jp" ? "直近12時間" : "last 12 hours";
+    if (timeFilter === "24h") return lang === "jp" ? "直近24時間" : "last 24 hours";
+    return lang === "jp" ? "24時間超（過去アーカイブ）" : "older than 24 hours (archive)";
+  }, [timeFilter, lang]);
 
   useEffect(() => {
     let cancelled = false;
@@ -586,6 +600,7 @@ const CompanyDashboard = ({ selectedCompany, signals, onSignalClick }: Props) =>
       industry: company.sector,
       companyContext: companyAiContext,
       language: lang,
+      timeWindow: newsletterTimeWindowLabel,
       signals: newsletterCandidates,
     })
       .then((result) => {
@@ -660,7 +675,7 @@ const CompanyDashboard = ({ selectedCompany, signals, onSignalClick }: Props) =>
     return () => {
       cancelled = true;
     };
-  }, [company.id, company.name, company.sector, companyAiContext, lang, newsletterCandidatesKey, timeFilter]);
+  }, [company.id, company.name, company.sector, companyAiContext, lang, newsletterCandidatesKey, newsletterTimeWindowLabel, timeFilter]);
 
   return (
     <ScrollArea className="h-full">
@@ -697,7 +712,7 @@ const CompanyDashboard = ({ selectedCompany, signals, onSignalClick }: Props) =>
 
           {/* Time filters */}
           <div className="flex gap-1">
-            {(["24h", "7d", "30d"] as TimeFilter[]).map((tf) => (
+            {(["6h", "12h", "24h", "beyond"] as TimeFilter[]).map((tf) => (
               <button
                 key={tf}
                 onClick={() => setTimeFilter(tf)}
@@ -707,7 +722,13 @@ const CompanyDashboard = ({ selectedCompany, signals, onSignalClick }: Props) =>
                     : "bg-secondary text-muted-foreground hover:text-foreground"
                 }`}
               >
-                {tf === "24h" ? t("dashboard.time24h") : tf === "7d" ? t("dashboard.time7d") : t("dashboard.time30d")}
+                {tf === "6h"
+                  ? (lang === "jp" ? "6時間" : "6h")
+                  : tf === "12h"
+                    ? (lang === "jp" ? "12時間" : "12h")
+                    : tf === "24h"
+                      ? (lang === "jp" ? "24時間" : "24h")
+                      : (lang === "jp" ? "24時間超" : "Beyond")}
               </button>
             ))}
           </div>

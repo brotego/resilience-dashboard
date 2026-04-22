@@ -1078,6 +1078,7 @@ function newsletterCacheKey(params: {
   industry?: string;
   companyContext?: string;
   language?: string;
+  timeWindow?: string;
   signals: NewsletterSignalInput[];
 }): string {
   return JSON.stringify({
@@ -1086,6 +1087,7 @@ function newsletterCacheKey(params: {
     industry: params.industry || "",
     cc: hashCompanyContextSnippet(params.companyContext ?? ""),
     lang: params.language || "en",
+    timeWindow: params.timeWindow || "",
     signals: params.signals.map((s) => ({
       id: s.id,
       t: s.title || "",
@@ -1181,6 +1183,7 @@ export async function invokeCompanyNewsletter(params: {
   industry?: string;
   companyContext?: string;
   language?: string;
+  timeWindow?: string;
   signals: NewsletterSignalInput[];
 }): Promise<{ data: CompanyNewsletterResult | null; error: Error | null }> {
   const boundedSignals = params.signals.slice(0, 30);
@@ -1192,6 +1195,7 @@ export async function invokeCompanyNewsletter(params: {
     industry: params.industry,
     companyContext: params.companyContext,
     language: params.language,
+    timeWindow: params.timeWindow,
     signals: boundedSignals,
   });
   const cached = readNewsletterCache(cacheKey);
@@ -1237,6 +1241,7 @@ export async function invokeCompanyNewsletter(params: {
   const prompt = jp
     ? `あなたは企業向け編集責任者です。以下の候補シグナルから、${params.company}（業界: ${params.industry || "N/A"}）に最も関連性が高いものを5件選び、週次ニュースレターを作成してください。
 ${dossierJp}要件:
+- 対象時間帯: ${params.timeWindow || "current window"}
 - 関連性の高い順に5件選定
 - JSONのみを返す
 - paragraphsは3本、各2-3文
@@ -1263,6 +1268,7 @@ JSON schema:
 ${candidateLines.join("\n")}`
     : `You are an editorial strategist. From the candidate signals below, pick the 5 most relevant items for ${params.company} (industry: ${params.industry || "N/A"}) and write a weekly newsletter.
 ${dossierEn}Requirements:
+- Time window focus: ${params.timeWindow || "current window"}
 - Pick 5 most relevant items in ranked order
 - Return JSON only
 - Do not use markdown fences

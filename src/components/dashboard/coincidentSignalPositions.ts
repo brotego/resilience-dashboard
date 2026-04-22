@@ -14,10 +14,25 @@ const COUNTRY_NAME_ALIASES: Record<string, string> = {
   "u.s.a.": "united states",
   "u.s.": "united states",
   "uk": "united kingdom",
+  "russian federation": "russia",
+  "korea, republic of": "south korea",
+  "republic of korea": "south korea",
+  "viet nam": "vietnam",
+  "czechia": "czech republic",
 };
 
+function compactCountryName(name: string): string {
+  return name
+    .trim()
+    .toLowerCase()
+    .replace(/&/g, " and ")
+    .replace(/[^a-z0-9]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
 function normalizeCountryName(name: string): string {
-  const n = name.trim().toLowerCase();
+  const n = compactCountryName(name);
   return COUNTRY_NAME_ALIASES[n] || n;
 }
 
@@ -105,9 +120,28 @@ function findContainingFeature(
 
 function featureCountryName(feature: { geometry: unknown; properties?: Record<string, unknown> }): string | null {
   const p = feature.properties || {};
-  const raw = (p.name || p.NAME || p.ADMIN) as string | undefined;
+  const raw = (p.name || p.NAME || p.ADMIN || p.sovereignt) as string | undefined;
   if (!raw || typeof raw !== "string") return null;
   return normalizeCountryName(raw);
+}
+
+function featureCountryKeys(feature: { geometry: unknown; properties?: Record<string, unknown> }): string[] {
+  const p = feature.properties || {};
+  const rawCandidates = [
+    p.name,
+    p.NAME,
+    p.ADMIN,
+    p.sovereignt,
+    p.abbrev,
+    p.iso_a2,
+    p.iso_a3,
+  ].filter((v): v is string => typeof v === "string" && v.trim().length > 0);
+  const keys = new Set<string>();
+  for (const raw of rawCandidates) {
+    const n = normalizeCountryName(raw);
+    if (n) keys.add(n);
+  }
+  return [...keys];
 }
 
 function nearestFeatureByCentroid(
@@ -216,10 +250,11 @@ export function clampPositionsToContainingCountry<
   const out = new Map(spread);
   const featuresByCountry = new Map<string, { geometry: unknown; properties?: Record<string, unknown> }[]>();
   for (const f of countryFeatures) {
-    const name = featureCountryName(f);
-    if (!name) continue;
-    if (!featuresByCountry.has(name)) featuresByCountry.set(name, []);
-    featuresByCountry.get(name)!.push(f);
+    const keys = featureCountryKeys(f);
+    for (const name of keys) {
+      if (!featuresByCountry.has(name)) featuresByCountry.set(name, []);
+      featuresByCountry.get(name)!.push(f);
+    }
   }
 
   for (const signal of signals) {
@@ -233,6 +268,18 @@ export function clampPositionsToContainingCountry<
       feat =
         findContainingFeature(homeLng, homeLat, candidates) ||
         nearestFeatureByCentroid(homeLng, homeLat, candidates);
+    } else if (targetCountry) {
+      // Fuzzy fallback for label mismatches like "Cote d Ivoire" vs "Ivory Coast".
+      const fuzzyCandidates = countryFeatures.filter((f) => {
+        const name = featureCountryName(f);
+        if (!name) return false;
+        return name.includes(targetCountry) || targetCountry.includes(name);
+      });
+      if (fuzzyCandidates.length > 0) {
+        feat =
+          findContainingFeature(homeLng, homeLat, fuzzyCandidates) ||
+          nearestFeatureByCentroid(homeLng, homeLat, fuzzyCandidates);
+      }
     }
     if (!feat) {
       feat =
