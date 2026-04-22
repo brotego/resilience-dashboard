@@ -150,9 +150,14 @@ function resolveArticleDomain(company: Company | null, article: unknown): Domain
   return "work";
 }
 
-function resolveArticleCategory(company: Company | null, article: unknown): GenZCategoryId {
+function resolveArticleCategory(
+  company: Company | null,
+  article: unknown,
+  opts?: { strict?: boolean },
+): GenZCategoryId | undefined {
   const inferred = inferGenZCategoryFromArticle(article);
   if (inferred) return inferred;
+  if (opts?.strict) return undefined;
   const first = company?.relevantGenZCategories?.[0];
   if (first && ["authenticity", "worklife", "climate", "digital", "belonging"].includes(first)) {
     return first as GenZCategoryId;
@@ -371,6 +376,72 @@ function looksLikeGenZNews(signal: UnifiedSignal): boolean {
   const businessHits = businessHeavy.reduce((n, kw) => n + (text.includes(kw) ? 1 : 0), 0);
   const score = strongHits * 2 + mediumHits - businessHits;
   return score >= 1;
+}
+
+function articleText(a: any): string {
+  return `${a?.title || ""} ${a?.description || ""} ${a?.content || ""}`.toLowerCase();
+}
+
+function looksLikeStrictGenZArticle(a: any): boolean {
+  const text = articleText(a);
+  const strongGenZ = [
+    "gen z",
+    "zoomer",
+    "teen",
+    "teenager",
+    "youth culture",
+    "tiktok",
+    "creator economy",
+    "influencer",
+    "college student",
+    "campus",
+    "instagram",
+    "youtube shorts",
+    "snapchat",
+    "discord",
+    "reddit",
+  ];
+  const mediumGenZ = [
+    "youth",
+    "young people",
+    "young adults",
+    "student",
+    "social media",
+    "digital native",
+    "gaming community",
+    "viral trend",
+    "creator",
+    "online community",
+    "content creator",
+  ];
+  const businessHeavy = [
+    "interest rate",
+    "shareholder",
+    "bond",
+    "gdp",
+    "federal reserve",
+    "dividend",
+    "quarterly earnings",
+  ];
+
+  const strongHits = strongGenZ.reduce((n, kw) => n + (text.includes(kw) ? 1 : 0), 0);
+  const mediumHits = mediumGenZ.reduce((n, kw) => n + (text.includes(kw) ? 1 : 0), 0);
+  const businessHits = businessHeavy.reduce((n, kw) => n + (text.includes(kw) ? 1 : 0), 0);
+  const score = strongHits * 2 + mediumHits - businessHits;
+  return score >= 2;
+}
+
+function isArticleRelevantToCompanyIndustry(a: any, company: Company | null): boolean {
+  if (!company) return true;
+  const text = articleText(a);
+  const companyNameLower = company.name.toLowerCase();
+  if (companyNameLower && text.includes(companyNameLower)) return true;
+  if (company.keywords.some((kw) => kw.length > 2 && text.includes(kw.toLowerCase()))) return true;
+  const sectorBits = company.sector
+    .toLowerCase()
+    .split(/[^a-z0-9+]+/)
+    .filter((w) => w.length > 2 && w !== "and");
+  return sectorBits.some((w) => text.includes(w));
 }
 
 function inferDomainFromArticle(a: any): DomainId | undefined {
@@ -721,21 +792,25 @@ export function useUnifiedSignals(
       ? selectedCompanyData.keywords.map((k) => k.toLowerCase())
       : [];
     const companyNameLower = selectedCompanyData?.name.toLowerCase() || "";
+    const companySectorBits = selectedCompanyData
+      ? selectedCompanyData.sector
+          .toLowerCase()
+          .split(/[^a-z0-9+]+/)
+          .filter((w) => w.length > 2 && w !== "and")
+      : [];
     const isCompanyRelevantSignal = (s: UnifiedSignal): boolean => {
       if (s.layer !== "live-news") return true;
       if (!selectedCompanyData) return true;
-      if (mode === "genz") {
-        if (s.category) return true;
-        return looksLikeGenZNews(s) || s.resilienceScore >= 32;
-      }
       const text = `${s.title || ""} ${s.description || ""}`.toLowerCase();
-      if (companyNameLower && text.includes(companyNameLower)) return true;
-      if (companyKeywords.some((kw) => kw.length > 2 && text.includes(kw))) return true;
-      const sectorBits = selectedCompanyData.sector
-        .toLowerCase()
-        .split(/[^a-z0-9+]+/)
-        .filter((w) => w.length > 2 && w !== "and");
-      if (sectorBits.some((w) => text.includes(w))) return true;
+      const industryRelevant =
+        (companyNameLower && text.includes(companyNameLower)) ||
+        companyKeywords.some((kw) => kw.length > 2 && text.includes(kw)) ||
+        companySectorBits.some((w) => text.includes(w));
+      if (mode === "genz") {
+        if (!industryRelevant) return false;
+        return !!s.category || looksLikeGenZNews(s);
+      }
+      if (industryRelevant) return true;
       return s.resilienceScore >= 26;
     };
     const finalizeSignals = (arr: UnifiedSignal[]): UnifiedSignal[] => {
@@ -838,9 +913,15 @@ export function useUnifiedSignals(
         gotLive = true;
         countryBuiltCount += articles.length;
         results.push(
-          ...articles.map((a: any, i: number) => {
+          ...articles.flatMap((a: any, i: number) => {
+            const strictGenZMode = mode === "genz";
+            if (strictGenZMode) {
+              if (!looksLikeStrictGenZArticle(a)) return [];
+              if (!isArticleRelevantToCompanyIndustry(a, selectedCompanyData)) return [];
+            }
             const dom = resolveArticleDomain(selectedCompanyData, a);
-            const cat = resolveArticleCategory(selectedCompanyData, a);
+            const cat = resolveArticleCategory(selectedCompanyData, a, { strict: strictGenZMode });
+            if (strictGenZMode && !cat) return [];
             const articleKey = String(a?.url || a?.title || `${idStem}-${i}`);
             const score = calculateResilienceScore({
               title: a.title || "", description: a.description || "",
@@ -890,21 +971,6 @@ export function useUnifiedSignals(
         if (cancelled || providerLimited) break;
         const country = fetchCountries[idx];
 
-        let bizResult = await fetchPagedArticles("business", country, BUSINESS_ARTICLES_PER_PAGE, BUSINESS_PAGES, businessTopicQueryStrict)
-          .catch(() => ({ articles: [] as any[], providerLimited: false }));
-        if (bizResult.providerLimited) {
-          providerLimited = true;
-          break;
-        }
-        if (!bizResult.providerLimited && bizResult.articles.length < 18) {
-          const relaxedBiz = await fetchPagedArticles("business", country, BUSINESS_ARTICLES_PER_PAGE, BUSINESS_PAGES, businessTopicQueryFallback)
-            .catch(() => ({ articles: [] as any[], providerLimited: false }));
-          if (!relaxedBiz.providerLimited && relaxedBiz.articles.length > bizResult.articles.length) bizResult = relaxedBiz;
-        }
-
-        appendLiveArticles(bizResult.articles, country, "live-biz");
-        await flushPartialToUi();
-
         if (mode === "genz") {
           let gzResult = await fetchGenZArticleBuckets(country, GENZ_ARTICLES_PER_PAGE, GENZ_PAGES, selectedCompanyData)
             .catch(() => ({ articles: [] as any[], providerLimited: false }));
@@ -919,6 +985,21 @@ export function useUnifiedSignals(
           }
           appendLiveArticles(gzResult.articles, country, "live-gz");
           await flushPartialToUi();
+        } else {
+          let bizResult = await fetchPagedArticles("business", country, BUSINESS_ARTICLES_PER_PAGE, BUSINESS_PAGES, businessTopicQueryStrict)
+            .catch(() => ({ articles: [] as any[], providerLimited: false }));
+          if (bizResult.providerLimited) {
+            providerLimited = true;
+            break;
+          }
+          if (!bizResult.providerLimited && bizResult.articles.length < 18) {
+            const relaxedBiz = await fetchPagedArticles("business", country, BUSINESS_ARTICLES_PER_PAGE, BUSINESS_PAGES, businessTopicQueryFallback)
+              .catch(() => ({ articles: [] as any[], providerLimited: false }));
+            if (!relaxedBiz.providerLimited && relaxedBiz.articles.length > bizResult.articles.length) bizResult = relaxedBiz;
+          }
+
+          appendLiveArticles(bizResult.articles, country, "live-biz");
+          await flushPartialToUi();
         }
 
         if (idx % 10 === 9 && results.length > 0 && !cancelled) {
@@ -926,21 +1007,23 @@ export function useUnifiedSignals(
         }
       }
 
-      // Emergency recovery: if nothing came back, run a business sweep on top countries with the same company topic.
+      // Emergency recovery: if nothing came back, run a mode-matching sweep on top countries.
       if (finalizeSignals(results).length === 0) {
         const emergencyCountries = getFetchCountries().slice(0, 6);
         for (let ci = 0; ci < emergencyCountries.length; ci++) {
           if (cancelled) return;
           const country = emergencyCountries[ci];
-          const emergencyBiz = await fetchPagedArticles(
-            "business",
+          const emergencyType = mode === "genz" ? "genz" : "business";
+          const emergencyQuery = mode === "genz" ? genzTopicQueryFallback : businessTopicQueryStrict;
+          const emergencyRes = await fetchPagedArticles(
+            emergencyType,
             country,
             50,
             2,
-            businessTopicQueryStrict,
+            emergencyQuery,
           ).catch(() => ({ articles: [] as any[], providerLimited: false }));
-          if (emergencyBiz.articles.length === 0) continue;
-          appendLiveArticles(emergencyBiz.articles, country, "live-biz-emergency");
+          if (emergencyRes.articles.length === 0) continue;
+          appendLiveArticles(emergencyRes.articles, country, mode === "genz" ? "live-gz-emergency" : "live-biz-emergency");
           await flushPartialToUi();
         }
       }
