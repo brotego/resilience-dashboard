@@ -48,6 +48,8 @@ const MIN_COMPANY_SIGNALS = 250;
 const MAX_SIGNALS_PER_SOURCE = 25;
 /** Treat shared cache below this as partial warm-start and continue live fetch. */
 const MIN_SHARED_SIGNAL_ACCEPT_COUNT = 120;
+/** After packing, keep pushing unique countries into the bundle so the map doesn't collapse to a handful of markets. */
+const MIN_DISPLAY_COUNTRIES = 22;
 const MAX_ER_TOPIC_CHARS = 480;
 
 function dayBucketKey(): string {
@@ -241,10 +243,20 @@ const FETCH_ORDER_HEAD: readonly string[] = [
   "Spain",
 ] as const;
 
-function getFetchCountries(): typeof NEWS_COUNTRIES {
+function hashString32(input: string): number {
+  let h = 2166136261;
+  for (let i = 0; i < input.length; i++) {
+    h ^= input.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  return h >>> 0;
+}
+
+function getFetchCountries(params: { mode: DashboardMode; companyKey: string }): typeof NEWS_COUNTRIES {
   const ordered = stableCountryOrder(NEWS_COUNTRIES);
   const dayBucket = Math.floor(Date.now() / (24 * 60 * 60 * 1000));
-  const offset = ordered.length > 0 ? dayBucket % ordered.length : 0;
+  const companySalt = hashString32(`${params.mode}:${params.companyKey}`);
+  const offset = ordered.length > 0 ? (dayBucket + companySalt) % ordered.length : 0;
   const rotated = ordered.slice(offset).concat(ordered.slice(0, offset));
   const byName = new Map(rotated.map((c) => [c.name, c] as const));
   const head: typeof NEWS_COUNTRIES = [];
@@ -254,7 +266,11 @@ function getFetchCountries(): typeof NEWS_COUNTRIES {
   }
   const headNames = new Set(head.map((c) => c.name));
   const tail = rotated.filter((c) => !headNames.has(c.name));
-  return [...head, ...tail];
+  // Rotate which "tail" countries lead after the major-market head so different companies
+  // don't always bias toward the same secondary markets on partial fetches.
+  const tailOffset = tail.length > 0 ? companySalt % tail.length : 0;
+  const tailRotated = tail.slice(tailOffset).concat(tail.slice(0, tailOffset));
+  return [...head, ...tailRotated];
 }
 
 function newsApiKeyFingerprint(): string {
@@ -918,12 +934,38 @@ export function useUnifiedSignals(
           selected.push(extra);
         }
       }
-      return stratifiedSourceCapPack(
+      const packed = stratifiedSourceCapPack(
         selected,
         MAX_COMPANY_SIGNALS,
         MAX_SIGNALS_PER_SOURCE,
         MIN_COMPANY_SIGNALS,
       );
+      const countryCount = (list: UnifiedSignal[]) =>
+        new Set(list.map((s) => (s.location || "").trim().toLowerCase()).filter(Boolean)).size;
+      if (countryCount(packed) >= MIN_DISPLAY_COUNTRIES || packed.length === 0) return packed;
+
+      const taken = new Set(packed.map((s) => s.id));
+      const extras = deduped
+        .filter((s) => !taken.has(s.id))
+        .filter((s) => s.layer === "live-news" && !!(s.location || "").trim())
+        .sort((a, b) => {
+          const diff = companyRelevanceScore(b) - companyRelevanceScore(a);
+          if (diff !== 0) return diff;
+          if (b.resilienceScore !== a.resilienceScore) return b.resilienceScore - a.resilienceScore;
+          return a.id.localeCompare(b.id);
+        });
+
+      const out = [...packed];
+      for (const s of extras) {
+        if (out.length >= MAX_COMPANY_SIGNALS) break;
+        if (countryCount(out) >= MIN_DISPLAY_COUNTRIES) break;
+        const loc = (s.location || "").trim().toLowerCase();
+        if (!loc) continue;
+        if (out.some((x) => (x.location || "").trim().toLowerCase() === loc)) continue;
+        out.push(s);
+        taken.add(s.id);
+      }
+      return out;
     };
     const apiKeySuffix = apiConfigured ? newsApiKeyFingerprint() : "seed";
     const cacheKey = `unified-live-${apiConfigured ? LIVE_CACHE_VERSION : "seed"}-${apiKeySuffix}-${mode}-${companyKey}`;
@@ -1005,7 +1047,7 @@ export function useUnifiedSignals(
       const sharedSupabaseEntry = await readSignalBundleCache<UnifiedSignal[]>({
         cacheKey: signalBundleCacheKey,
         minSignals: MIN_SHARED_SIGNAL_ACCEPT_COUNT,
-        minCoverageCountries: 8,
+        minCoverageCountries: Math.min(MIN_DISPLAY_COUNTRIES, 18),
       });
       let sharedWarmStart: UnifiedSignal[] = [];
       if (sharedSupabaseEntry?.data?.length) {
@@ -1119,10 +1161,10 @@ export function useUnifiedSignals(
       };
 
       // One country at a time: each completion updates the map (removed duplicate global bootstrap that blocked UI for minutes).
-      const fetchCountries = getFetchCountries();
-      for (let idx = 0; idx < fetchCountries.length; idx++) {
+      const fetchCountryPlan = getFetchCountries({ mode, companyKey });
+      for (let idx = 0; idx < fetchCountryPlan.length; idx++) {
         if (cancelled) break;
-        const country = fetchCountries[idx];
+        const country = fetchCountryPlan[idx];
 
         if (mode === "genz") {
           let gzResult = await fetchGenZArticleBuckets(country, GENZ_ARTICLES_PER_PAGE, GENZ_PAGES, selectedCompanyData)
@@ -1162,7 +1204,7 @@ export function useUnifiedSignals(
 
       // Emergency recovery: if nothing came back, run a mode-matching sweep on top countries.
       if (finalizeSignals(results).length === 0) {
-        const emergencyCountries = getFetchCountries().slice(0, 6);
+        const emergencyCountries = fetchCountryPlan.slice(0, 6);
         for (let ci = 0; ci < emergencyCountries.length; ci++) {
           if (cancelled) return;
           const country = emergencyCountries[ci];
@@ -1183,7 +1225,7 @@ export function useUnifiedSignals(
 
       // Gen Z top-up: if still below minimum density, run broader youth passes across priority countries.
       if (mode === "genz" && finalizeSignals(results).length < MIN_COMPANY_SIGNALS) {
-        const topUpCountries = getFetchCountries().slice(0, 20);
+        const topUpCountries = fetchCountryPlan.slice(0, 20);
         const broadQueries = [
           `Gen Z youth social media students young adults creator economy ${genzTopicQueryFallback}`.trim(),
           `Gen Z culture digital behavior young consumers platform trends ${genzTopicQueryFallback}`.trim(),
@@ -1208,7 +1250,7 @@ export function useUnifiedSignals(
 
       // Global top-up (both modes): keep sweeping countries until we hit minimum density.
       if (finalizeSignals(results).length < MIN_COMPANY_SIGNALS) {
-        const fillCountries = getFetchCountries();
+        const fillCountries = fetchCountryPlan;
         for (let i = 0; i < fillCountries.length; i++) {
           if (cancelled) break;
           if (finalizeSignals(results).length >= MIN_COMPANY_SIGNALS) break;
@@ -1230,7 +1272,7 @@ export function useUnifiedSignals(
         (window as any).__rrNewsDebug = {
           at: new Date().toISOString(),
           apiConfigured: isNewsApiAiConfigured(),
-          fetchedCountries: getFetchCountries().map((c) => c.name),
+          fetchedCountries: fetchCountryPlan.map((c) => c.name),
           countryBuiltCount,
           rawResultsCount: results.length,
           mergedCount: finalMerged.length,

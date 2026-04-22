@@ -586,8 +586,9 @@ const GlobeMap = memo(
   const spreadPositions = useMemo(() => {
     const raw = spreadCoincidentSignalPositions(signals, {
       proximityMeters: 1_600,
-      ringStepDeg: 0.014,
+      ringStepDeg: 0.008,
       altitudeStep: 0.004,
+      countryFeatures: countries,
     });
     return clampPositionsToContainingCountry(signals, raw, countries);
   }, [signals, countries]);

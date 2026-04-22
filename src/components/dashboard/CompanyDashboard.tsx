@@ -560,8 +560,54 @@ const CompanyDashboard = ({ selectedCompany, signals, onSignalClick }: Props) =>
   }, [company.id, companyAiContext, lang]);
 
   const newsletterCandidates = useMemo(
-    () =>
-      filteredSignals.slice(0, 30).map((s) => ({
+    () => {
+      const companyName = company.name.toLowerCase();
+      const brandMarkers = (company.sentimentBrandMarkers ?? [])
+        .map((m) => m.toLowerCase())
+        .filter((m) => m.length >= 4);
+      const keywordSet = company.keywords
+        .map((k) => k.toLowerCase())
+        .filter((k) => k.length >= 4);
+      const sectorBits = company.sector
+        .toLowerCase()
+        .split(/[^a-z0-9+]+/)
+        .filter((w) => w.length >= 4 && !["group", "services", "industry", "industries"].includes(w));
+
+      const scoreSignalRelevance = (s: UnifiedSignal & { _date: Date }) => {
+        const text = `${s.title || ""} ${s.description || ""}`.toLowerCase();
+        let score = 0;
+        if (companyName && text.includes(companyName)) score += 12;
+        for (const marker of brandMarkers) {
+          if (text.includes(marker)) score += 8;
+        }
+        let kwHits = 0;
+        for (const kw of keywordSet) {
+          if (text.includes(kw)) kwHits += 1;
+        }
+        score += Math.min(5, kwHits) * 3;
+        for (const bit of sectorBits) {
+          if (text.includes(bit)) score += 1;
+        }
+        if (s.articleUrl && s.articleUrl !== "#") score += 1;
+        return score;
+      };
+
+      const base = filteredSignals
+        .filter((s) => s.layer === "live-news")
+        .map((s) => ({ s, relevance: scoreSignalRelevance(s) }))
+        .sort((a, b) => {
+          if (b.relevance !== a.relevance) return b.relevance - a.relevance;
+          const d = b.s._date.getTime() - a.s._date.getTime();
+          if (d !== 0) return d;
+          return b.s.resilienceScore - a.s.resilienceScore;
+        });
+
+      // Absolute relevance gate first; relax slightly only if we don't have enough article candidates.
+      const strict = base.filter((row) => row.relevance >= 8);
+      const medium = base.filter((row) => row.relevance >= 4);
+      const chosen = strict.length >= 12 ? strict : medium.length >= 8 ? medium : base;
+
+      return chosen.slice(0, 30).map(({ s }) => ({
         id: s.id,
         title: s.title,
         description: s.description,
@@ -570,8 +616,9 @@ const CompanyDashboard = ({ selectedCompany, signals, onSignalClick }: Props) =>
         urgency: s.urgency,
         domain: s.domain || s.category,
         articleUrl: s.articleUrl,
-      })),
-    [filteredSignals],
+      }));
+    },
+    [filteredSignals, company.name, company.sector, company.keywords, company.sentimentBrandMarkers],
   );
   const newsletterCandidatesKey = useMemo(
     () => newsletterCandidates.map((s) => `${s.id}:${s.title}:${s.articleUrl ?? ""}`).join("|"),

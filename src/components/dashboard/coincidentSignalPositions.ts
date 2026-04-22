@@ -168,6 +168,43 @@ function nearestFeatureByCentroid(
   return best;
 }
 
+function snapLngLatToPolygon(
+  feature: { geometry: unknown } | null,
+  lng: number,
+  lat: number,
+  anchorLng: number,
+  anchorLat: number,
+): { lng: number; lat: number } {
+  if (!feature) return { lng, lat };
+  try {
+    if (geoContains(feature as GeoJSON.GeoJSON, [lng, lat])) return { lng, lat };
+  } catch {
+    /* ignore */
+  }
+
+  const interior = findInteriorPoint(feature);
+  const il = interior?.[0] ?? anchorLng;
+  const ia = interior?.[1] ?? anchorLat;
+
+  let best = { lng: il, lat: ia };
+  let found = false;
+  for (let t = 1; t >= 0; t -= 0.05) {
+    const nl = anchorLng + (lng - anchorLng) * t;
+    const na = anchorLat + (lat - anchorLat) * t;
+    try {
+      if (geoContains(feature as GeoJSON.GeoJSON, [nl, na])) {
+        best = { lng: nl, lat: na };
+        found = true;
+        break;
+      }
+    } catch {
+      /* ignore */
+    }
+  }
+  if (!found && interior) best = { lng: interior[0], lat: interior[1] };
+  return best;
+}
+
 function isInsideFeature(
   feature: { geometry: unknown } | null,
   lng: number,
@@ -337,36 +374,88 @@ export function clampPositionsToContainingCountry<
  * Groups signals that are within `proximityMeters` of each other (not just identical coordinates),
  * spreads them on a ring, and assigns a small altitude offset for the globe to avoid z-fighting.
  */
-export function spreadCoincidentSignalPositions<T extends { id: string; coordinates: [number, number] }>(
+export function spreadCoincidentSignalPositions<T extends { id: string; coordinates: [number, number]; location?: string }>(
   items: T[],
-  options?: { proximityMeters?: number; ringStepDeg?: number; altitudeStep?: number },
+  options?: {
+    proximityMeters?: number;
+    ringStepDeg?: number;
+    altitudeStep?: number;
+    countryFeatures?: { geometry: unknown; properties?: Record<string, unknown> }[];
+  },
 ): Map<string, SignalDisplayPosition> {
   const proximityMeters = options?.proximityMeters ?? 1_600;
-  const ringStepDeg = options?.ringStepDeg ?? 0.014;
+  const ringStepDeg = options?.ringStepDeg ?? 0.008;
   const altitudeStep = options?.altitudeStep ?? 0.004;
+  const countryFeatures = options?.countryFeatures ?? [];
 
   const out = new Map<string, SignalDisplayPosition>();
   const clusters = clusterByProximity(items, proximityMeters);
 
+  const featuresByCountry = new Map<string, { geometry: unknown; properties?: Record<string, unknown> }[]>();
+  for (const f of countryFeatures) {
+    const keys = featureCountryKeys(f);
+    for (const name of keys) {
+      if (!featuresByCountry.has(name)) featuresByCountry.set(name, []);
+      featuresByCountry.get(name)!.push(f);
+    }
+  }
+
+  const resolveFeatureForSignal = (signal: T): { geometry: unknown; properties?: Record<string, unknown> } | null => {
+    if (!countryFeatures.length) return null;
+    const [homeLng, homeLat] = signal.coordinates;
+    const targetCountry = signal.location ? normalizeCountryName(signal.location) : "";
+    let feat: { geometry: unknown; properties?: Record<string, unknown> } | null = null;
+    if (targetCountry && featuresByCountry.has(targetCountry)) {
+      const candidates = featuresByCountry.get(targetCountry)!;
+      feat =
+        findContainingFeature(homeLng, homeLat, candidates) ||
+        nearestFeatureByCentroid(homeLng, homeLat, candidates);
+    } else if (targetCountry) {
+      const fuzzyCandidates = countryFeatures.filter((f) => {
+        const name = featureCountryName(f);
+        if (!name) return false;
+        return name.includes(targetCountry) || targetCountry.includes(name);
+      });
+      if (fuzzyCandidates.length > 0) {
+        feat =
+          findContainingFeature(homeLng, homeLat, fuzzyCandidates) ||
+          nearestFeatureByCentroid(homeLng, homeLat, fuzzyCandidates);
+      }
+    }
+    if (!feat) {
+      feat =
+        findContainingFeature(homeLng, homeLat, countryFeatures) ||
+        nearestFeatureByCentroid(homeLng, homeLat, countryFeatures);
+    }
+    return feat;
+  };
+
   for (const group of clusters) {
     if (group.length === 1) {
       const [lng, lat] = group[0].coordinates;
-      out.set(group[0].id, { lng, lat, altitudeExtra: 0 });
+      const feat = resolveFeatureForSignal(group[0]);
+      const snapped = snapLngLatToPolygon(feat, lng, lat, lng, lat);
+      out.set(group[0].id, { lng: snapped.lng, lat: snapped.lat, altitudeExtra: 0 });
       continue;
     }
     const sorted = [...group].sort((a, b) => a.id.localeCompare(b.id));
     const n = sorted.length;
     const lng0 = sorted.reduce((s, p) => s + p.coordinates[0], 0) / n;
     const lat0 = sorted.reduce((s, p) => s + p.coordinates[1], 0) / n;
+    const feat = resolveFeatureForSignal(sorted[0]);
+    const anchor = snapLngLatToPolygon(feat, lng0, lat0, lng0, lat0);
     const r = ringStepDeg * Math.sqrt(Math.max(1, n / 2));
     sorted.forEach((p, i) => {
       const theta = (2 * Math.PI * i) / n - Math.PI / 2;
-      const latRad = lat0 * (Math.PI / 180);
+      const latRad = anchor.lat * (Math.PI / 180);
       const dLat = r * Math.sin(theta);
       const dLng = (r * Math.cos(theta)) / Math.max(0.35, Math.cos(latRad));
+      const rawLng = anchor.lng + dLng;
+      const rawLat = anchor.lat + dLat;
+      const snapped = snapLngLatToPolygon(feat, rawLng, rawLat, anchor.lng, anchor.lat);
       out.set(p.id, {
-        lng: lng0 + dLng,
-        lat: lat0 + dLat,
+        lng: snapped.lng,
+        lat: snapped.lat,
         altitudeExtra: i * altitudeStep,
       });
     });

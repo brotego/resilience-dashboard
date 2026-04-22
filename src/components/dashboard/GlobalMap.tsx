@@ -302,7 +302,12 @@ const GlobalMap = memo(({
   const currentZoom = liveZoom;
 
   const spreadPositions = useMemo(() => {
-    const raw = spreadCoincidentSignalPositions(signals);
+    const raw = spreadCoincidentSignalPositions(signals, {
+      proximityMeters: 1_600,
+      ringStepDeg: 0.008,
+      altitudeStep: 0.004,
+      countryFeatures: countries as { geometry: unknown; properties?: Record<string, unknown> }[],
+    });
     return clampPositionsToContainingCountry(signals, raw, countries as { geometry: unknown }[]);
   }, [signals, countries]);
 
