@@ -17,7 +17,7 @@ interface CacheEntry {
   timestamp: number;
 }
 
-const CACHE_DURATION = 60 * 60 * 1000; // 1 hour
+const CACHE_DURATION = 24 * 60 * 60 * 1000; // 24 hours (aligned with live map bundle refresh)
 const cache = new Map<string, CacheEntry>();
 
 // Country name to ISO 2-letter locale code (UI / legacy mapping).

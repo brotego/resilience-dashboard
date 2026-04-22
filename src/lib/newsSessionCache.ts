@@ -4,7 +4,8 @@
  */
 
 const PREFIX = "rr.news.v1.";
-const MAX_AGE_MS = 60 * 60 * 1000;
+/** Match persistent live-bundle TTL so a refresh does not refetch the whole globe the same day. */
+const MAX_AGE_MS = 24 * 60 * 60 * 1000;
 
 function safeParse<T>(raw: string): { data: T; savedAt: number } | null {
   try {

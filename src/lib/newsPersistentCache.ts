@@ -4,7 +4,8 @@
  */
 
 const PREFIX = "rr.news.persist.v1.";
-const MAX_AGE_MS = 12 * 60 * 60 * 1000;
+/** Live article bundles refresh at most once per day (aligned with product refresh cadence). */
+const MAX_AGE_MS = 24 * 60 * 60 * 1000;
 
 function safeParse<T>(raw: string): { data: T; savedAt: number } | null {
   try {

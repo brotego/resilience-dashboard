@@ -100,6 +100,9 @@ const COUNTRY_LOCATION_URI: Record<string, string> = {
   Bangladesh: "http://en.wikipedia.org/wiki/Bangladesh",
   China: "http://en.wikipedia.org/wiki/China",
   Russia: "http://en.wikipedia.org/wiki/Russia",
+  Ethiopia: "http://en.wikipedia.org/wiki/Ethiopia",
+  Nepal: "http://en.wikipedia.org/wiki/Nepal",
+  Cambodia: "http://en.wikipedia.org/wiki/Cambodia",
 };
 
 function countryLocationUri(countryName?: string): string | undefined {

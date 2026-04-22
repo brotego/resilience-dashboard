@@ -1,4 +1,4 @@
-import { geoContains, geoCentroid } from "d3-geo";
+import { geoBounds, geoContains, geoCentroid } from "d3-geo";
 
 export type SignalDisplayPosition = {
   lng: number;
@@ -134,6 +134,61 @@ function nearestFeatureByCentroid(
   return best;
 }
 
+const interiorPointCache = new WeakMap<object, [number, number] | null>();
+
+function findInteriorPoint(feature: { geometry: unknown }): [number, number] | null {
+  const key = feature as unknown as object;
+  if (interiorPointCache.has(key)) {
+    return interiorPointCache.get(key) ?? null;
+  }
+
+  let result: [number, number] | null = null;
+  try {
+    const center = geoCentroid(feature as GeoJSON.GeoJSON) as [number, number];
+    if (
+      Number.isFinite(center[0]) &&
+      Number.isFinite(center[1]) &&
+      geoContains(feature as GeoJSON.GeoJSON, center)
+    ) {
+      result = center;
+    } else {
+      const bounds = geoBounds(feature as GeoJSON.GeoJSON);
+      const [minLng, minLat] = bounds[0];
+      const [maxLng, maxLat] = bounds[1];
+      const cols = 12;
+      const rows = 12;
+      for (let ring = 0; ring < Math.max(cols, rows); ring++) {
+        for (let yi = 0; yi <= ring; yi++) {
+          const xi = ring - yi;
+          const checks: [number, number][] = [
+            [xi, yi],
+            [cols - xi, yi],
+            [xi, rows - yi],
+            [cols - xi, rows - yi],
+          ];
+          for (const [cx, cy] of checks) {
+            const tLng = cols === 0 ? 0.5 : cx / cols;
+            const tLat = rows === 0 ? 0.5 : cy / rows;
+            const lng = minLng + (maxLng - minLng) * tLng;
+            const lat = minLat + (maxLat - minLat) * tLat;
+            if (geoContains(feature as GeoJSON.GeoJSON, [lng, lat])) {
+              result = [lng, lat];
+              break;
+            }
+          }
+          if (result) break;
+        }
+        if (result) break;
+      }
+    }
+  } catch {
+    result = null;
+  }
+
+  interiorPointCache.set(key, result);
+  return result;
+}
+
 /**
  * If a spread position left the country polygon that contains the original signal, pull it back toward home.
  */
@@ -184,7 +239,7 @@ export function clampPositionsToContainingCountry<
 
     let best = { lng: homeLng, lat: homeLat };
     let found = false;
-    for (let t = 0.45; t >= 0.05; t -= 0.1) {
+    for (let t = 1; t >= 0; t -= 0.05) {
       const nl = homeLng + (lng - homeLng) * t;
       const na = homeLat + (lat - homeLat) * t;
       try {
@@ -198,14 +253,8 @@ export function clampPositionsToContainingCountry<
       }
     }
     if (!found) {
-      try {
-        const c = geoCentroid(feat as GeoJSON.GeoJSON) as [number, number];
-        if (Number.isFinite(c[0]) && Number.isFinite(c[1])) {
-          best = { lng: c[0], lat: c[1] };
-        }
-      } catch {
-        /* ignore */
-      }
+      const interior = findInteriorPoint(feat);
+      if (interior) best = { lng: interior[0], lat: interior[1] };
     }
     out.set(signal.id, { ...cur, lng: best.lng, lat: best.lat });
   }
