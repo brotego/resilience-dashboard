@@ -40,7 +40,7 @@ function slimUnifiedSignalsForCache(signals: UnifiedSignal[]): UnifiedSignal[] {
 /** In-memory mirror of persistent TTL: refresh article bundles daily. */
 const CACHE_DURATION = 24 * 60 * 60 * 1000;
 const cache = new Map<string, CacheEntry>();
-const LIVE_CACHE_VERSION = "api-v14-industry-news-anchors";
+const LIVE_CACHE_VERSION = "api-v15-atomic-bundle-ui";
 const LEGACY_LIVE_CACHE_VERSIONS: string[] = ["api-v10-country-high-volume", "api-v11-company-scoped-24h"];
 const BUSINESS_ARTICLES_PER_PAGE = 100;
 const BUSINESS_PAGES = 2;
@@ -1092,13 +1092,15 @@ export function useUnifiedSignals(
         minCoverageCountries: 0,
       });
 
-    const applySharedBundleToCaches = (entry: SharedBundleRow): boolean => {
+    /** Writes local caches always; paints the map only when `paintUi` (full final bundle or explicit). */
+    const applySharedBundleToCaches = (entry: SharedBundleRow, opts?: { paintUi?: boolean }): boolean => {
       const filtered = finalizeSignals(entry.data);
       if (!filtered.length) return false;
       cache.set(cacheKey, { signals: filtered, timestamp: entry.savedAt });
       writeSessionCache(cacheKey, slimUnifiedSignalsForCache(filtered));
       writePersistentCache(cacheKey, slimUnifiedSignalsForCache(filtered));
-      if (!cancelled) {
+      const paintUi = opts?.paintUi !== false;
+      if (paintUi && !cancelled) {
         setLiveSignals(filtered);
         setIsLive(true);
         setLoading(false);
@@ -1151,10 +1153,6 @@ export function useUnifiedSignals(
       }
 
       const results: UnifiedSignal[] = [...sharedWarmStart];
-      let lastSharedWriteAt = 0;
-      let lastSharedWriteCount = 0;
-      const SHARED_WRITE_INTERVAL_MS = 3000;
-      const SHARED_WRITE_MIN_GROWTH = 12;
       let gotLive = false;
       let countryBuiltCount = 0;
       let providerLimited = false;
@@ -1223,31 +1221,7 @@ export function useUnifiedSignals(
         );
       };
 
-      /** Push current `results` to React so dots appear country-by-country (not after the full globe pass). */
-      const flushPartialToUi = async () => {
-        if (cancelled) return;
-        setLoading(false);
-        if (results.length > 0) {
-          const partial = finalizeSignals(results);
-          setLiveSignals(partial);
-          setIsLive(true);
-          const now = Date.now();
-          const grewEnough = partial.length >= lastSharedWriteCount + SHARED_WRITE_MIN_GROWTH;
-          if (grewEnough || now - lastSharedWriteAt >= SHARED_WRITE_INTERVAL_MS) {
-            lastSharedWriteAt = now;
-            lastSharedWriteCount = partial.length;
-            const slim = slimUnifiedSignalsForCache(partial);
-            writeSessionCache(cacheKey, slim);
-            writePersistentCache(cacheKey, slim);
-            writeSignalBundle(partial, false);
-          }
-        }
-        await new Promise<void>((resolve) => {
-          requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
-        });
-      };
-
-      // One country at a time: each completion updates the map (removed duplicate global bootstrap that blocked UI for minutes).
+      // One country at a time (sequential) to respect provider rate limits; UI updates once after the full pass.
       const fetchCountryPlan = getFetchCountries({ mode, companyKey });
       for (let idx = 0; idx < fetchCountryPlan.length; idx++) {
         if (cancelled) break;
@@ -1266,7 +1240,6 @@ export function useUnifiedSignals(
             if (!relaxedGz.providerLimited && relaxedGz.articles.length > gzResult.articles.length) gzResult = relaxedGz;
           }
           appendLiveArticles(gzResult.articles, country, "live-gz");
-          await flushPartialToUi();
         } else {
           let bizResult = await fetchPagedArticles("business", country, BUSINESS_ARTICLES_PER_PAGE, BUSINESS_PAGES, businessTopicQueryStrict)
             .catch(() => ({ articles: [] as any[], providerLimited: false }));
@@ -1281,7 +1254,6 @@ export function useUnifiedSignals(
           }
 
           appendLiveArticles(bizResult.articles, country, "live-biz");
-          await flushPartialToUi();
         }
 
         if (idx % 10 === 9 && results.length > 0 && !cancelled) {
@@ -1306,7 +1278,6 @@ export function useUnifiedSignals(
           ).catch(() => ({ articles: [] as any[], providerLimited: false }));
           if (emergencyRes.articles.length === 0) continue;
           appendLiveArticles(emergencyRes.articles, country, mode === "genz" ? "live-gz-emergency" : "live-biz-emergency");
-          await flushPartialToUi();
         }
       }
 
@@ -1328,7 +1299,6 @@ export function useUnifiedSignals(
               continue;
             }
             appendLiveArticles(res.articles, country, "live-gz-topup");
-            await flushPartialToUi();
             if (finalizeSignals(results).length >= MIN_COMPANY_SIGNALS) break;
           }
           if (finalizeSignals(results).length >= MIN_COMPANY_SIGNALS) break;
@@ -1349,7 +1319,6 @@ export function useUnifiedSignals(
           const fillRes = await fetchPagedArticles(type, country, 80, 1, query)
             .catch(() => ({ articles: [] as any[], providerLimited: false }));
           appendLiveArticles(fillRes.articles, country, mode === "genz" ? "live-gz-fill" : "live-biz-fill");
-          await flushPartialToUi();
         }
       }
 
@@ -1375,7 +1344,6 @@ export function useUnifiedSignals(
         writeSessionCache(cacheKey, forCache);
         writePersistentCache(cacheKey, forCache);
         writePersistentCache(durableKey, forCache);
-        lastSharedWriteCount = finalMerged.length;
         writeSignalBundle(finalMerged, true);
         setLiveSignals(finalMerged);
         setIsLive(true);
@@ -1456,10 +1424,12 @@ export function useUnifiedSignals(
         primed = await readSharedBundleFromSupabase();
       }
 
+      const sharedBundleComplete =
+        !!primed?.data?.length && !!primed.isFinal && primed.signalCount >= MAX_COMPANY_SIGNALS;
       let hydratedFromShared = false;
-      if (primed?.data?.length && applySharedBundleToCaches(primed)) {
+      if (primed?.data?.length && applySharedBundleToCaches(primed, { paintUi: sharedBundleComplete })) {
         hydratedFromShared = true;
-        if (primed.isFinal && primed.signalCount >= MAX_COMPANY_SIGNALS) {
+        if (sharedBundleComplete) {
           if (!cancelled) setLoading(false);
           return;
         }
