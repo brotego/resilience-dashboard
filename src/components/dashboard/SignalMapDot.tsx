@@ -38,7 +38,9 @@ const SignalMapDot = memo(
     const isHigh = score >= 7 && !isCritical;
 
     const vb = r * 4.5;
-    const px = Math.max(14, Math.min(72, r * 7.5));
+    // No large pixel floor: ZoomableGroup / globe HTML scaling already enlarges dots when zoomed in;
+    // a 14px minimum made dots stop shrinking at tight zoom.
+    const px = Math.max(3, Math.min(80, r * 7.5));
 
     const handleMainEnter = useCallback(
       (e: React.MouseEvent<SVGCircleElement>) => {

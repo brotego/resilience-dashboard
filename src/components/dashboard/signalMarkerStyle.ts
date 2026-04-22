@@ -18,9 +18,10 @@ export function getSignalBaseR(relevant: boolean): number {
  */
 export function map2dDotScaleFromZoom(zoom: number): number {
   const z = Math.max(0.85, Math.min(22, zoom));
-  const exp = 1.18;
+  // Screen size ~ r*z with r ∝ dotScale ⇒ need exp > 1; push higher so max zoom stays visibly small.
+  const exp = 1.52;
   const raw = 1 / Math.pow(z, exp);
-  return Math.max(0.014, Math.min(1.05, raw));
+  return Math.max(0.0045, Math.min(1.05, raw));
 }
 
 /**
@@ -30,9 +31,10 @@ export function map2dDotScaleFromZoom(zoom: number): number {
 export function globeDotScaleFromCameraAltitude(cameraAltitude: number): number {
   const refAlt = 2.5;
   const refLiveZoom = 1.5;
-  const a = Math.max(cameraAltitude, 0.35);
-  const raw = (a / refAlt) * (1 / refLiveZoom);
-  return Math.max(0.045, Math.min(1.35, raw));
+  const a = Math.max(cameraAltitude, 0.28);
+  // Steeper than linear so “zoomed all the way in” (very low altitude) keeps shrinking.
+  const raw = (Math.pow(a / refAlt, 1.35) / refLiveZoom) * 1.05;
+  return Math.max(0.018, Math.min(1.45, raw));
 }
 
 /**
@@ -49,7 +51,10 @@ export function globeSignalRadiusDeg(o: {
   const r = baseR * globeDotScaleFromCameraAltitude(o.cameraAltitude);
   const deg = r * 0.028;
   const selectedBoost = o.isSelected ? 1.15 : 1;
-  return Math.min(0.52, Math.max(0.065, deg * selectedBoost));
+  // Floor scales up with camera distance so close-in views are not clamped to a huge minimum.
+  const alt = Math.max(0.28, o.cameraAltitude);
+  const floorDeg = 0.011 + 0.055 * Math.min(1, (alt - 0.28) / 2.35);
+  return Math.min(0.48, Math.max(floorDeg, deg * selectedBoost));
 }
 
 /** Same opacity rules as GlobalMap signal circles. */

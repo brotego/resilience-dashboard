@@ -700,7 +700,7 @@ const GlobeMap = memo(
         cameraAltitude: globeCameraAltitude,
         isSelected,
       });
-      const pickRadius = Math.min(0.55, Math.max(0.12, baseR * 2.2));
+      const pickRadius = Math.min(0.55, Math.max(0.045, baseR * 2.2));
       const pos = spreadPositions.get(signal.id)!;
       return {
         ...signal,
