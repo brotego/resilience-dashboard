@@ -874,7 +874,9 @@ const CompanyDashboard = ({ selectedCompany, signals, signalsLoading = false, on
                       {t("header.searchingArticles")}
                     </p>
                   )}
-                  <p className="text-[11px] text-muted-foreground font-mono">{t("dashboard.noSignalsPeriod")}</p>
+                  {!signalsLoading && (
+                    <p className="text-[11px] text-muted-foreground font-mono">{t("dashboard.noSignalsPeriod")}</p>
+                  )}
                 </div>
               )}
             </div>
@@ -902,7 +904,9 @@ const CompanyDashboard = ({ selectedCompany, signals, signalsLoading = false, on
                       {t("header.searchingArticles")}
                     </p>
                   )}
-                  <p className="text-[11px] text-muted-foreground font-mono">{t("dashboard.noSignalsPeriod")}</p>
+                  {!signalsLoading && (
+                    <p className="text-[11px] text-muted-foreground font-mono">{t("dashboard.noSignalsPeriod")}</p>
+                  )}
                 </div>
               ) : newsletterCandidates.length === 0 ? (
                 <div className="py-6 text-center space-y-2">

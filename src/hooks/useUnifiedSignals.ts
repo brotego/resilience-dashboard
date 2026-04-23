@@ -1292,7 +1292,21 @@ export function useUnifiedSignals(
         );
       };
 
-      // One country at a time (sequential) to respect provider rate limits; UI updates once after the full pass.
+      const flushPartialToUi = () => {
+        if (cancelled || results.length === 0) return;
+        const partial = finalizeSignals(results);
+        if (!partial.length) return;
+        const now = Date.now();
+        const slim = slimUnifiedSignalsForCache(partial);
+        cache.set(signalBundleCacheKey, { signals: slim, timestamp: now });
+        writeSessionCache(signalBundleCacheKey, slim);
+        writePersistentCache(signalBundleCacheKey, slim);
+        setLiveSignals(partial);
+        setIsLive(true);
+        setLoading(false);
+      };
+
+      // One country at a time (sequential) to respect provider rate limits; progressively update UI.
       const fetchCountryPlan = getFetchCountries({ mode, companyKey });
       for (let idx = 0; idx < fetchCountryPlan.length; idx++) {
         if (cancelled) break;
@@ -1327,6 +1341,9 @@ export function useUnifiedSignals(
           appendLiveArticles(bizResult.articles, country, "live-biz");
         }
 
+        // Progressive hydration: show what's available rather than waiting for the full world sweep.
+        flushPartialToUi();
+
         if (idx % 10 === 9 && results.length > 0 && !cancelled) {
           writeSessionCache(signalBundleCacheKey, slimUnifiedSignalsForCache(finalizeSignals(results)));
         }
@@ -1349,6 +1366,7 @@ export function useUnifiedSignals(
           ).catch(() => ({ articles: [] as any[], providerLimited: false }));
           if (emergencyRes.articles.length === 0) continue;
           appendLiveArticles(emergencyRes.articles, country, mode === "genz" ? "live-gz-emergency" : "live-biz-emergency");
+          flushPartialToUi();
         }
       }
 
@@ -1370,6 +1388,7 @@ export function useUnifiedSignals(
               continue;
             }
             appendLiveArticles(res.articles, country, "live-gz-topup");
+            flushPartialToUi();
             if (finalizeSignals(results).length >= MIN_COMPANY_SIGNALS) break;
           }
           if (finalizeSignals(results).length >= MIN_COMPANY_SIGNALS) break;
@@ -1390,6 +1409,7 @@ export function useUnifiedSignals(
           const fillRes = await fetchPagedArticles(type, country, 80, 1, query)
             .catch(() => ({ articles: [] as any[], providerLimited: false }));
           appendLiveArticles(fillRes.articles, country, mode === "genz" ? "live-gz-fill" : "live-biz-fill");
+          flushPartialToUi();
         }
       }
 
