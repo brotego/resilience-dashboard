@@ -61,6 +61,34 @@ function dayBucketKey(): string {
   const day = String(d.getUTCDate()).padStart(2, "0");
   return `${y}-${m}-${day}`;
 }
+
+function prevUtcDayBucketKey(): string {
+  const d = new Date();
+  d.setUTCDate(d.getUTCDate() - 1);
+  const y = d.getUTCFullYear();
+  const m = String(d.getUTCMonth() + 1).padStart(2, "0");
+  const day = String(d.getUTCDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+
+/** Supabase jsonb sometimes arrives stringified or wrapped; normalize before finalize. */
+function coerceUnifiedBundlePayload(raw: unknown): UnifiedSignal[] {
+  if (Array.isArray(raw)) return raw as UnifiedSignal[];
+  if (raw == null) return [];
+  if (typeof raw === "string") {
+    try {
+      const p = JSON.parse(raw) as unknown;
+      return Array.isArray(p) ? (p as UnifiedSignal[]) : [];
+    } catch {
+      return [];
+    }
+  }
+  if (typeof raw === "object" && raw !== null && "signals" in (raw as object)) {
+    const s = (raw as { signals?: unknown }).signals;
+    return Array.isArray(s) ? (s as UnifiedSignal[]) : [];
+  }
+  return [];
+}
 const COUNTRY_CODES: Record<string, string> = {
   "United States of America": "us",
   "United Kingdom": "gb",
@@ -942,12 +970,18 @@ export function useUnifiedSignals(
         companySectorBits.some((w) => text.includes(w))
       );
     };
-    const finalizeSignals = (arr: UnifiedSignal[]): UnifiedSignal[] => {
-      const deduped = dedupeSignalsByArticleUrl(arr);
+    type FinalizeOpts = { trustPreCuratedBundle?: boolean };
+
+    const finalizeSignals = (arr: UnifiedSignal[], opts?: FinalizeOpts): UnifiedSignal[] => {
+      const deduped = dedupeSignalsByArticleUrl(Array.isArray(arr) ? arr : []);
       deduped.sort((a, b) => {
         if (b.resilienceScore !== a.resilienceScore) return b.resilienceScore - a.resilienceScore;
         return a.id.localeCompare(b.id);
       });
+      if (opts?.trustPreCuratedBundle) {
+        const floor = Math.min(MIN_COMPANY_SIGNALS, Math.max(1, deduped.length));
+        return stratifiedSourceCapPack(deduped, MAX_COMPANY_SIGNALS, MAX_SIGNALS_PER_SOURCE, floor);
+      }
       const companyFiltered = deduped.filter(isCompanyRelevantSignal);
       let selected = companyFiltered.length > 0 ? companyFiltered : deduped;
       // Adaptive widening for low-coverage companies:
@@ -1088,17 +1122,42 @@ export function useUnifiedSignals(
 
     type SharedBundleRow = NonNullable<Awaited<ReturnType<typeof readSignalBundleCache<UnifiedSignal[]>>>>;
 
-    const readSharedBundleFromSupabase = () =>
-      readSignalBundleCache<UnifiedSignal[]>({
-        cacheKey: signalBundleCacheKey,
-        // Do not filter rows out in SQL: partial bundles must still hydrate other machines.
-        minSignals: 0,
-        minCoverageCountries: 0,
-      });
+    const readSharedBundleFromSupabase = async (): Promise<SharedBundleRow | null> => {
+      const todayKey = dayBucketKey();
+      const cacheKeysTried = Array.from(
+        new Set([
+          signalBundleCacheKey,
+          `signals:bundle:${mode}:${companyKey}`,
+          `signals:bundle:${mode}:${companyKey}:${prevUtcDayBucketKey()}`,
+        ]),
+      );
+      if (typeof window !== "undefined") {
+        (window as unknown as { __rrSignalBundleKeysTried?: string[] }).__rrSignalBundleKeysTried = cacheKeysTried;
+        (window as unknown as { __rrSignalBundlePrimaryKey?: string }).__rrSignalBundlePrimaryKey =
+          signalBundleCacheKey;
+      }
+      for (const cacheKey of cacheKeysTried) {
+        const row = await readSignalBundleCache<UnifiedSignal[]>({
+          cacheKey,
+          minSignals: 0,
+          minCoverageCountries: 0,
+        });
+        const n = coerceUnifiedBundlePayload(row?.data).length;
+        if (row && n > 0) {
+          if (import.meta.env.DEV && cacheKey !== signalBundleCacheKey) {
+            console.debug("[rr] Supabase bundle matched alternate cache_key:", cacheKey, "today was", todayKey);
+          }
+          return row;
+        }
+      }
+      return null;
+    };
 
     /** Writes local caches always; paints the map only when `paintUi` (full final bundle or explicit). */
     const applySharedBundleToCaches = (entry: SharedBundleRow, opts?: { paintUi?: boolean }): boolean => {
-      const filtered = finalizeSignals(entry.data);
+      const filtered = finalizeSignals(coerceUnifiedBundlePayload(entry.data), {
+        trustPreCuratedBundle: true,
+      });
       if (!filtered.length) return false;
       cache.set(signalBundleCacheKey, { signals: filtered, timestamp: entry.savedAt });
       writeSessionCache(signalBundleCacheKey, slimUnifiedSignalsForCache(filtered));
@@ -1141,8 +1200,10 @@ export function useUnifiedSignals(
             : null
           : preloadedShared;
       let sharedWarmStart: UnifiedSignal[] = [];
-      if (sharedSupabaseEntry?.data?.length) {
-        const filtered = finalizeSignals(sharedSupabaseEntry.data);
+      if (sharedSupabaseEntry && coerceUnifiedBundlePayload(sharedSupabaseEntry.data).length) {
+        const filtered = finalizeSignals(coerceUnifiedBundlePayload(sharedSupabaseEntry.data), {
+          trustPreCuratedBundle: true,
+        });
         if (filtered.length) {
           sharedWarmStart = filtered;
           if (!skipInitialSharedDiskWrite) {
@@ -1156,10 +1217,8 @@ export function useUnifiedSignals(
             }
           }
         }
-        // Fully-filled final bundles can short-circuit. Otherwise continue fetching and
-        // refresh the shared cache upward toward 500 using the latest logic.
-        // Treat ≥ MIN as "good enough" to skip a full globe refetch (saved rows are often 250–499, not always 500).
-        if (sharedSupabaseEntry.signalCount >= MIN_COMPANY_SIGNALS) {
+        // Skip refetch when the hydrated bundle is already dense (DB signal_count can disagree with payload).
+        if (filtered.length >= MIN_COMPANY_SIGNALS) {
           return;
         }
       }
@@ -1439,10 +1498,11 @@ export function useUnifiedSignals(
         primed = await readSharedBundleFromSupabase();
       }
 
+      const primedLen = primed ? coerceUnifiedBundlePayload(primed.data).length : 0;
       const sharedBundleComplete =
-        !!primed?.data?.length && primed.signalCount >= MIN_COMPANY_SIGNALS;
+        primedLen > 0 && Math.max(primedLen, primed?.signalCount ?? 0) >= MIN_COMPANY_SIGNALS;
       let hydratedFromShared = false;
-      if (primed?.data?.length && applySharedBundleToCaches(primed, { paintUi: true })) {
+      if (primed && primedLen > 0 && applySharedBundleToCaches(primed, { paintUi: true })) {
         hydratedFromShared = true;
         if (sharedBundleComplete) {
           if (!cancelled) setLoading(false);
