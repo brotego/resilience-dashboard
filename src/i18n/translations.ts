@@ -2,7 +2,7 @@ export type Lang = "en" | "jp";
 
 const t = {
   // Header
-  "app.title": { en: "Flourishing Through Resilience", jp: "レジリエンスを通じた繁栄" },
+  "app.title": { en: "Weak Signal Radar", jp: "ウィークシグナルレーダー" },
   "app.subtitle": { en: "Anchorstar × Mori Building", jp: "アンカースター × 森ビル" },
   "header.activeSignals": { en: "active signals", jp: "件のアクティブシグナル" },
   "header.live": { en: "LIVE", jp: "ライブ" },

@@ -128,6 +128,7 @@ export async function writeSignalBundleCache<T>(params: {
     const ttlHours = Math.max(1, params.ttlHours ?? 24);
     const savedAt = new Date();
     const expiresAt = new Date(savedAt.getTime() + ttlHours * 60 * 60 * 1000);
+    // Requires UNIQUE(cache_key) on public.signal_bundle_cache — see supabase/migrations/*signal_bundle_cache*.
     const { error } = await supabase.from(SIGNAL_TABLE).upsert(
       {
         cache_key: params.cacheKey,
@@ -142,7 +143,7 @@ export async function writeSignalBundleCache<T>(params: {
         saved_at: savedAt.toISOString(),
         expires_at: expiresAt.toISOString(),
       },
-      { onConflict: "cache_key" },
+      { onConflict: "cache_key", ignoreDuplicates: false },
     );
     if (error) {
       reportSupabaseCacheDebug({

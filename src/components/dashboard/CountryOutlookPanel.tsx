@@ -238,13 +238,30 @@ const CountryOutlookPanel = ({ countryName, mode, selectedCompany, signals, onCl
   const matchNames = findAllMatchingCountryNames(countryName);
   const matchSignal = (location: string) => matchNames.some((name) => matchesCountry(location, name));
 
-  const allSignals = signals.filter((s) => {
-    if (!matchSignal(s.location)) return false;
-    if (mode === "resilience") return s.layer === "resilience" || s.layer === "live-news";
-    return s.layer === "genz" || s.layer === "live-news";
-  });
+  const allSignals = useMemo(
+    () =>
+      signals.filter((s) => {
+        if (!matchSignal(s.location)) return false;
+        if (mode === "resilience") return s.layer === "resilience" || s.layer === "live-news";
+        return s.layer === "genz" || s.layer === "live-news";
+      }),
+    [signals, countryName, mode],
+  );
 
-  const score = RESILIENCE_SCORES[countryName] ?? Math.floor(Math.random() * 40 + 30);
+  /** 0–100 bar: from live signals when present; else static table; else stable hash (never Math.random). */
+  const score = useMemo(() => {
+    if (allSignals.length > 0) {
+      const avg = allSignals.reduce((sum, s) => sum + s.resilienceScore, 0) / allSignals.length;
+      return Math.min(98, Math.max(12, Math.round(avg * 10)));
+    }
+    const aliasNames = findAllMatchingCountryNames(countryName);
+    const staticScore =
+      RESILIENCE_SCORES[countryName] ?? aliasNames.map((n) => RESILIENCE_SCORES[n]).find((v) => v !== undefined);
+    if (staticScore !== undefined) return staticScore;
+    let h = 0;
+    for (let i = 0; i < countryName.length; i++) h = (h * 31 + countryName.charCodeAt(i)) | 0;
+    return 35 + (Math.abs(h) % 31);
+  }, [allSignals, countryName]);
   const region = lang === "jp" ? (COUNTRY_REGIONS_JP[countryName] || COUNTRY_REGIONS[countryName] || "グローバル") : (COUNTRY_REGIONS[countryName] || "Global");
   const japanPerception = lang === "jp" ? (JAPAN_PERCEPTION_JP[countryName] || JAPAN_PERCEPTION[countryName] || `${COUNTRY_NAMES_JP[countryName] || countryName}は日本のブランドと文化への認知が高まっており、戦略的な文化交流とビジネスパートナーシップを通じたより深いエンゲージメントの機会があります。`) : (JAPAN_PERCEPTION[countryName] || `${countryName} has growing awareness of Japanese brands and culture, with opportunities for deeper engagement through strategic cultural exchange and business partnerships.`);
   const companyInsight = companyInsightText || getCompanyCountryInsight(selectedCompany, countryName, lang);

@@ -1054,7 +1054,8 @@ export function useUnifiedSignals(
     };
     const apiKeySuffix = apiConfigured ? newsApiKeyFingerprint() : "seed";
     const cacheKey = `unified-live-${apiConfigured ? LIVE_CACHE_VERSION : "seed"}-${apiKeySuffix}-${mode}-${companyKey}`;
-    const signalBundleCacheKey = `signals:${LIVE_CACHE_VERSION}:${mode}:${companyKey}:${dayBucketKey()}`;
+    /** Stable per company/mode/UTC-day so Supabase upsert updates one row (model_version stores pipeline rev). */
+    const signalBundleCacheKey = `signals:bundle:${mode}:${companyKey}:${dayBucketKey()}`;
     const durableKey = durablePersistentKey(mode, companyKey);
     const legacyCacheKeys = getLegacyCacheKeys(apiKeySuffix);
     const LEGACY_DURABLE_SHARED = "unified-live-durable-shared";

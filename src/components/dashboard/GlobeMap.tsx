@@ -452,7 +452,17 @@ const GlobeMap = memo(
   useEffect(() => {
     const el = containerRef.current;
     if (!el) return;
-    const onWheel = () => {
+
+    /** Safari / trackpad: stop page pinch-zoom; Chrome: ctrl/meta+wheel page zoom. */
+    const preventGesture = (e: Event) => {
+      e.preventDefault();
+      e.stopPropagation();
+    };
+
+    const onWheel = (e: WheelEvent) => {
+      if (e.ctrlKey || e.metaKey) {
+        e.preventDefault();
+      }
       labelsSuppressedRef.current = true;
       setLabelsSuppressed(true);
       pendingLabelRef.current = null;
@@ -466,9 +476,16 @@ const GlobeMap = memo(
         finishWheelZoomLabels();
       }, WHEEL_LABEL_IDLE_MS);
     };
-    el.addEventListener("wheel", onWheel, { passive: true, capture: true });
+
+    el.addEventListener("wheel", onWheel, { passive: false, capture: true });
+    el.addEventListener("gesturestart", preventGesture);
+    el.addEventListener("gesturechange", preventGesture);
+    el.addEventListener("gestureend", preventGesture);
     return () => {
       el.removeEventListener("wheel", onWheel, { capture: true });
+      el.removeEventListener("gesturestart", preventGesture);
+      el.removeEventListener("gesturechange", preventGesture);
+      el.removeEventListener("gestureend", preventGesture);
       if (wheelIdleTimerRef.current != null) clearTimeout(wheelIdleTimerRef.current);
     };
   }, [finishWheelZoomLabels]);
@@ -509,6 +526,12 @@ const GlobeMap = memo(
   const labelSizeAccessor = useCallback((d: object) => (d as CountryLabel).size, []);
 
   const onGlobeReady = useCallback(() => {
+    try {
+      const ctrl = globeRef.current?.controls?.() as { zoomSpeed?: number } | undefined;
+      if (ctrl) ctrl.zoomSpeed = 1.55;
+    } catch {
+      /* ignore */
+    }
     const pov = globeRef.current?.pointOfView?.();
     if (pov && Number.isFinite(pov.altitude)) {
       syncLabelStateFromAltitude(pov.altitude);
@@ -744,7 +767,10 @@ const GlobeMap = memo(
   }, []);
 
   return (
-    <div ref={containerRef} className="w-full h-full bg-background relative overflow-hidden">
+    <div
+      ref={containerRef}
+      className="w-full h-full touch-none bg-background relative overflow-hidden"
+    >
       <Globe
         ref={globeRef}
         width={viewport.width}
