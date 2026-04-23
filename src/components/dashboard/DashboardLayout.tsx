@@ -292,6 +292,7 @@ const DashboardLayout = () => {
           <CompanyDashboard
             selectedCompany={selectedCompany}
             signals={visibleSignals}
+            signalsLoading={loading}
             onSignalClick={handleDashboardSignalClick}
           />
         </div>

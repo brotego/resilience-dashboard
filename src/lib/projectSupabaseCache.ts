@@ -64,44 +64,84 @@ export async function readSignalBundleCache<T>(params: {
     const minSignals = Math.max(0, params.minSignals ?? 0);
     const minCoverageCountries = Math.max(0, params.minCoverageCountries ?? 0);
     const nowIso = new Date().toISOString();
-    let query = supabase
-      .from(SIGNAL_TABLE)
-      .select("cache_key,payload,signal_count,is_final,saved_at,expires_at")
-      .eq("cache_key", params.cacheKey)
-      .gt("expires_at", nowIso)
-      .order("is_final", { ascending: false })
-      .order("saved_at", { ascending: false })
-      .limit(1);
-    // Optional SQL floors: omit so new visitors still get *any* non-expired row for this key.
-    if (minSignals > 0) {
-      query = query.gte("signal_count", minSignals);
-    }
-    if (minCoverageCountries > 0) {
-      query = query.gte("coverage_country_count", minCoverageCountries);
-    }
+
+    const buildQuery = (requireFreshTtl: boolean) => {
+      let q = supabase
+        .from(SIGNAL_TABLE)
+        .select("cache_key,payload,signal_count,is_final,saved_at,expires_at")
+        .eq("cache_key", params.cacheKey)
+        .order("is_final", { ascending: false })
+        .order("saved_at", { ascending: false })
+        .limit(1);
+      if (requireFreshTtl) {
+        q = q.gt("expires_at", nowIso);
+      }
+      if (minSignals > 0) {
+        q = q.gte("signal_count", minSignals);
+      }
+      if (minCoverageCountries > 0) {
+        q = q.gte("coverage_country_count", minCoverageCountries);
+      }
+      return q;
+    };
+
+    const pickRow = (rows: SignalBundleCacheRow<T>[], staleTtl: boolean) => {
+      const row = rows[0];
+      if (!row) return null;
+      const savedAt = Date.parse(row.saved_at);
+      if (!Number.isFinite(savedAt)) return null;
+      reportSupabaseCacheDebug({
+        op: "read_signal_bundle",
+        ok: true,
+        cacheKey: params.cacheKey,
+        signalCount: row.signal_count || 0,
+        isFinal: !!row.is_final,
+        staleTtl,
+      });
+      return { data: row.payload, savedAt, signalCount: row.signal_count || 0, isFinal: !!row.is_final };
+    };
+
     // Avoid maybeSingle(): duplicate cache_key rows (before UNIQUE migration) make PostgREST error and skip cache.
-    const { data, error } = await query;
-    const rows = (data ?? []) as SignalBundleCacheRow<T>[];
-    const row = rows[0];
-    if (error || !row) {
+    const { data, error } = await buildQuery(true);
+    if (!error) {
+      const freshRow = pickRow((data ?? []) as SignalBundleCacheRow<T>[], false);
+      if (freshRow) return freshRow;
+    } else {
       reportSupabaseCacheDebug({
         op: "read_signal_bundle",
         ok: false,
         cacheKey: params.cacheKey,
-        error: error?.message || "no_row",
+        error: error.message,
+        phase: "fresh_query",
+      });
+    }
+
+    // Same cache_key but TTL passed — still hydrate so manual / older rows are usable; refetch can refresh TTL.
+    const { data: staleData, error: staleErr } = await buildQuery(false);
+    if (staleErr) {
+      reportSupabaseCacheDebug({
+        op: "read_signal_bundle",
+        ok: false,
+        cacheKey: params.cacheKey,
+        error: staleErr.message,
+        phase: "stale_fallback",
       });
       return null;
     }
-    const savedAt = Date.parse(row.saved_at);
-    if (!Number.isFinite(savedAt)) return null;
-    reportSupabaseCacheDebug({
-      op: "read_signal_bundle",
-      ok: true,
-      cacheKey: params.cacheKey,
-      signalCount: row.signal_count || 0,
-      isFinal: !!row.is_final,
-    });
-    return { data: row.payload, savedAt, signalCount: row.signal_count || 0, isFinal: !!row.is_final };
+    const staleRows = (staleData ?? []) as SignalBundleCacheRow<T>[];
+    const staleRow = staleRows[0];
+    if (!staleRow) {
+      reportSupabaseCacheDebug({
+        op: "read_signal_bundle",
+        ok: false,
+        cacheKey: params.cacheKey,
+        error: "no_row",
+      });
+      return null;
+    }
+    const exp = Date.parse(staleRow.expires_at);
+    const staleTtl = !Number.isFinite(exp) || exp <= Date.now();
+    return pickRow(staleRows, staleTtl);
   } catch (err) {
     reportSupabaseCacheDebug({
       op: "read_signal_bundle",

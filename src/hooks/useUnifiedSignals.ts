@@ -1158,7 +1158,8 @@ export function useUnifiedSignals(
         }
         // Fully-filled final bundles can short-circuit. Otherwise continue fetching and
         // refresh the shared cache upward toward 500 using the latest logic.
-        if (sharedSupabaseEntry.isFinal && sharedSupabaseEntry.signalCount >= MAX_COMPANY_SIGNALS) {
+        // Treat ≥ MIN as "good enough" to skip a full globe refetch (saved rows are often 250–499, not always 500).
+        if (sharedSupabaseEntry.signalCount >= MIN_COMPANY_SIGNALS) {
           return;
         }
       }
@@ -1439,9 +1440,9 @@ export function useUnifiedSignals(
       }
 
       const sharedBundleComplete =
-        !!primed?.data?.length && !!primed.isFinal && primed.signalCount >= MAX_COMPANY_SIGNALS;
+        !!primed?.data?.length && primed.signalCount >= MIN_COMPANY_SIGNALS;
       let hydratedFromShared = false;
-      if (primed?.data?.length && applySharedBundleToCaches(primed, { paintUi: sharedBundleComplete })) {
+      if (primed?.data?.length && applySharedBundleToCaches(primed, { paintUi: true })) {
         hydratedFromShared = true;
         if (sharedBundleComplete) {
           if (!cancelled) setLoading(false);

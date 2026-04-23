@@ -156,6 +156,18 @@ const t = {
   "dashboard.activeSignals": { en: "Active signals", jp: "アクティブシグナル" },
   "dashboard.noSignalsPeriod": { en: "No signals in this time period", jp: "この期間のシグナルはありません" },
   "dashboard.newsletterSummary": { en: "Newsletter summary", jp: "ニュースレター要約" },
+  "dashboard.generatingNewsletter": {
+    en: "Generating newsletter…",
+    jp: "ニュースレターを生成中…",
+  },
+  "dashboard.newsletterNeedsLiveSignals": {
+    en: "Newsletter roundup uses live news for this company. Widen the time filter or wait for the live feed to finish loading.",
+    jp: "ニュースレターのラウンドアップはこの企業のライブニュースを使います。時間窓を広げるか、ライブフィードの読み込み完了をお待ちください。",
+  },
+  "dashboard.generatingSentimentCoverage": {
+    en: "Gathering sentiment coverage…",
+    jp: "センチメント用の報道を集めています…",
+  },
   "dashboard.aiCurated": { en: "AI curated", jp: "AI選定" },
   "dashboard.risingRisks": { en: "Rising risks", jp: "高まるリスク" },
   "dashboard.risingOpportunities": { en: "Rising opportunities", jp: "高まる機会" },

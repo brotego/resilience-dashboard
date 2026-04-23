@@ -59,6 +59,8 @@ type NewsletterBlock = {
 interface Props {
   selectedCompany: CompanyId | null;
   signals: UnifiedSignal[];
+  /** Live bundle fetch in progress (maps / header use the same flag). */
+  signalsLoading?: boolean;
   onSignalClick: (signal: UnifiedSignal) => void;
 }
 
@@ -101,7 +103,7 @@ function sentimentToneLabel(tone: ArticleSentiment, t: (key: TranslationKey) => 
   return t(`sentiment.${tone}` as TranslationKey);
 }
 
-const CompanyDashboard = ({ selectedCompany, signals, onSignalClick }: Props) => {
+const CompanyDashboard = ({ selectedCompany, signals, signalsLoading = false, onSignalClick }: Props) => {
   const navigate = useNavigate();
   const { lang, t } = useLang();
   const { getSignalDisplay } = useJpUi();
@@ -131,6 +133,7 @@ const CompanyDashboard = ({ selectedCompany, signals, onSignalClick }: Props) =>
   const [sentimentSummaryLoading, setSentimentSummaryLoading] = useState(false);
   const [aiNewsletter, setAiNewsletter] = useState<NewsletterBlock | null>(null);
   const [aiNewsletterActive, setAiNewsletterActive] = useState(false);
+  const [newsletterAiLoading, setNewsletterAiLoading] = useState(false);
 
   const companyId = selectedCompany || "mori_building";
   const company = COMPANIES.find(c => c.id === companyId)!;
@@ -648,6 +651,9 @@ const CompanyDashboard = ({ selectedCompany, signals, onSignalClick }: Props) =>
     return lang === "jp" ? "24時間超（過去アーカイブ）" : "older than 24 hours (archive)";
   }, [timeFilter, lang]);
 
+  const isNewsletterBlockLoading =
+    newsletterAiLoading || (signalsLoading && newsletterCandidates.length === 0);
+
   useEffect(() => {
     let cancelled = false;
     // Prevent stale newsletter carry-over when changing company/time window.
@@ -656,8 +662,10 @@ const CompanyDashboard = ({ selectedCompany, signals, onSignalClick }: Props) =>
     if (newsletterCandidates.length === 0) {
       setAiNewsletter(null);
       setAiNewsletterActive(false);
+      setNewsletterAiLoading(false);
       return;
     }
+    setNewsletterAiLoading(true);
     invokeCompanyNewsletter({
       companyId: company.id,
       company: company.name,
@@ -735,6 +743,9 @@ const CompanyDashboard = ({ selectedCompany, signals, onSignalClick }: Props) =>
         if (cancelled) return;
         setAiNewsletter(null);
         setAiNewsletterActive(false);
+      })
+      .finally(() => {
+        if (!cancelled) setNewsletterAiLoading(false);
       });
     return () => {
       cancelled = true;
@@ -857,8 +868,13 @@ const CompanyDashboard = ({ selectedCompany, signals, onSignalClick }: Props) =>
                 );
               })}
               {filteredSignals.length === 0 && (
-                <div className="py-8 text-center text-[11px] text-muted-foreground font-mono">
-                  {t("dashboard.noSignalsPeriod")}
+                <div className="py-8 text-center space-y-2">
+                  {signalsLoading && (
+                    <p className="text-[9px] font-mono font-semibold text-amber-300 uppercase tracking-wider animate-pulse">
+                      {t("header.searchingArticles")}
+                    </p>
+                  )}
+                  <p className="text-[11px] text-muted-foreground font-mono">{t("dashboard.noSignalsPeriod")}</p>
                 </div>
               )}
             </div>
@@ -870,59 +886,99 @@ const CompanyDashboard = ({ selectedCompany, signals, onSignalClick }: Props) =>
               <h3 className="text-[10px] font-mono font-semibold uppercase tracking-widest text-primary mb-2">
                 {t("dashboard.newsletterSummary")}
               </h3>
-              {aiNewsletterActive && (
-                <p className="text-[9px] font-mono uppercase tracking-wider text-emerald-300 mb-1">
-                  {t("dashboard.aiCurated")}
-                </p>
-              )}
-              <h4 className="text-[12px] font-semibold text-foreground mb-1">{newsletter.title}</h4>
-              <p className="text-[10px] text-muted-foreground mb-2 leading-snug">{newsletter.dek}</p>
-              <div className="mt-2 space-y-2">
-                {newsletter.paragraphs.map((paragraph, i) => (
-                  <p key={i} className="text-[11px] text-foreground/80 leading-relaxed">
-                    {paragraph}
+              {isNewsletterBlockLoading ? (
+                <div className="min-h-[100px] flex flex-col items-center justify-center gap-2.5 py-6 px-2">
+                  <p className="text-[9px] font-mono font-semibold text-amber-300 uppercase tracking-wider animate-pulse text-center">
+                    {t("dashboard.generatingNewsletter")}
                   </p>
-                ))}
-              </div>
-
-              <div className="mt-3 pt-3 border-t border-border/70">
-                <h5 className="text-[10px] font-mono font-semibold uppercase tracking-widest text-accent mb-2">
-                  {newsletter.roundupTitle}
-                </h5>
-                <div className="space-y-2">
-                  {newsletter.articleRoundup.map((article) => {
-                    const hint = t("dashboard.openArticlePage");
-                    return (
-                      <button
-                        key={article.index}
-                        type="button"
-                        onClick={() => openRoundupEntry(article)}
-                        title={hint}
-                        className="w-full text-left border border-border/70 rounded-sm p-2 bg-background/40 hover:bg-background/70 hover:border-primary/40 transition-colors cursor-pointer group"
-                      >
-                        <div className="flex items-start justify-between gap-2">
-                          <p className="text-[11px] text-foreground leading-snug group-hover:text-primary">
-                            {article.index}. {article.title}
-                          </p>
-                          <span
-                            className={`shrink-0 px-1.5 py-0.5 rounded-sm border text-[8px] font-mono font-semibold uppercase tracking-wider ${newsletterToneClasses[article.sentiment as "positive" | "mixed" | "negative"]}`}
-                          >
-                            {sentimentToneLabel(article.sentiment as ArticleSentiment, t)}
-                          </span>
-                        </div>
-                        <p className="text-[9px] font-mono text-muted-foreground mt-1 uppercase tracking-wider">
-                          {article.source} · {article.location}
-                        </p>
-                        <p className="text-[10px] text-foreground/70 mt-1 leading-snug">{article.summary}</p>
-                        <p className="text-[9px] font-mono text-muted-foreground/80 mt-1.5 uppercase tracking-wider">
-                          {hint}
-                          <ArrowRight className="inline h-3 w-3 ml-1 align-text-bottom opacity-60 group-hover:opacity-100 group-hover:text-primary transition-opacity" />
-                        </p>
-                      </button>
-                    );
-                  })}
+                  <p className="text-[9px] font-mono font-semibold text-amber-200/85 uppercase tracking-wider animate-pulse text-center">
+                    {t("header.searchingArticles")}
+                  </p>
                 </div>
-              </div>
+              ) : filteredSignals.length === 0 ? (
+                <div className="py-6 text-center space-y-2">
+                  {signalsLoading && (
+                    <p className="text-[9px] font-mono font-semibold text-amber-300 uppercase tracking-wider animate-pulse">
+                      {t("header.searchingArticles")}
+                    </p>
+                  )}
+                  <p className="text-[11px] text-muted-foreground font-mono">{t("dashboard.noSignalsPeriod")}</p>
+                </div>
+              ) : newsletterCandidates.length === 0 ? (
+                <div className="py-6 text-center space-y-2">
+                  {signalsLoading && (
+                    <p className="text-[9px] font-mono font-semibold text-amber-300 uppercase tracking-wider animate-pulse">
+                      {t("header.searchingArticles")}
+                    </p>
+                  )}
+                  <p className="text-[11px] text-muted-foreground leading-snug px-1">{t("dashboard.newsletterNeedsLiveSignals")}</p>
+                </div>
+              ) : (
+                <>
+                  {aiNewsletterActive && (
+                    <p className="text-[9px] font-mono uppercase tracking-wider text-emerald-300 mb-1">
+                      {t("dashboard.aiCurated")}
+                    </p>
+                  )}
+                  <h4 className="text-[12px] font-semibold text-foreground mb-1">{newsletter.title}</h4>
+                  <p className="text-[10px] text-muted-foreground mb-2 leading-snug">{newsletter.dek}</p>
+                  <div className="mt-2 space-y-2">
+                    {newsletter.paragraphs.map((paragraph, i) => (
+                      <p key={i} className="text-[11px] text-foreground/80 leading-relaxed">
+                        {paragraph}
+                      </p>
+                    ))}
+                  </div>
+
+                  <div className="mt-3 pt-3 border-t border-border/70">
+                    <h5 className="text-[10px] font-mono font-semibold uppercase tracking-widest text-accent mb-2">
+                      {newsletter.roundupTitle}
+                    </h5>
+                    <div className="space-y-2">
+                      {newsletter.articleRoundup.length === 0 ? (
+                        <div className="py-4 text-center space-y-2">
+                          <p className="text-[9px] font-mono font-semibold text-amber-300 uppercase tracking-wider animate-pulse">
+                            {t("header.searchingArticles")}
+                          </p>
+                          <p className="text-[10px] text-muted-foreground">{t("dashboard.generatingNewsletter")}</p>
+                        </div>
+                      ) : (
+                        newsletter.articleRoundup.map((article) => {
+                          const hint = t("dashboard.openArticlePage");
+                          return (
+                            <button
+                              key={article.index}
+                              type="button"
+                              onClick={() => openRoundupEntry(article)}
+                              title={hint}
+                              className="w-full text-left border border-border/70 rounded-sm p-2 bg-background/40 hover:bg-background/70 hover:border-primary/40 transition-colors cursor-pointer group"
+                            >
+                              <div className="flex items-start justify-between gap-2">
+                                <p className="text-[11px] text-foreground leading-snug group-hover:text-primary">
+                                  {article.index}. {article.title}
+                                </p>
+                                <span
+                                  className={`shrink-0 px-1.5 py-0.5 rounded-sm border text-[8px] font-mono font-semibold uppercase tracking-wider ${newsletterToneClasses[article.sentiment as "positive" | "mixed" | "negative"]}`}
+                                >
+                                  {sentimentToneLabel(article.sentiment as ArticleSentiment, t)}
+                                </span>
+                              </div>
+                              <p className="text-[9px] font-mono text-muted-foreground mt-1 uppercase tracking-wider">
+                                {article.source} · {article.location}
+                              </p>
+                              <p className="text-[10px] text-foreground/70 mt-1 leading-snug">{article.summary}</p>
+                              <p className="text-[9px] font-mono text-muted-foreground/80 mt-1.5 uppercase tracking-wider">
+                                {hint}
+                                <ArrowRight className="inline h-3 w-3 ml-1 align-text-bottom opacity-60 group-hover:opacity-100 group-hover:text-primary transition-opacity" />
+                              </p>
+                            </button>
+                          );
+                        })
+                      )}
+                    </div>
+                  </div>
+                </>
+              )}
             </div>
 
             <div className="border border-border rounded-sm bg-card/60 p-3">
@@ -954,8 +1010,17 @@ const CompanyDashboard = ({ selectedCompany, signals, onSignalClick }: Props) =>
                 <p className="text-[9px] font-mono uppercase tracking-widest text-muted-foreground mb-1">
                   {t("dashboard.sentimentAiOverviewLabel")}
                 </p>
-                {sentimentSummaryLoading && !sentimentAiSummary[sentimentView] ? (
-                  <p className="text-[11px] text-muted-foreground leading-snug">{t("dashboard.generatingSentimentOverview")}</p>
+                {sentimentLoading ? (
+                  <div className="space-y-2">
+                    <p className="text-[9px] font-mono font-semibold text-amber-300 uppercase tracking-wider animate-pulse">
+                      {t("header.searchingArticles")}
+                    </p>
+                    <p className="text-[11px] text-muted-foreground leading-snug">{t("dashboard.generatingSentimentCoverage")}</p>
+                  </div>
+                ) : sentimentSummaryLoading && !sentimentAiSummary[sentimentView] ? (
+                  <p className="text-[11px] text-muted-foreground leading-snug animate-pulse">
+                    {t("dashboard.generatingSentimentOverview")}
+                  </p>
                 ) : sentimentAiSummary[sentimentView] ? (
                   <p className="text-[11px] text-foreground/85 leading-snug">{sentimentAiSummary[sentimentView]}</p>
                 ) : (
@@ -965,8 +1030,11 @@ const CompanyDashboard = ({ selectedCompany, signals, onSignalClick }: Props) =>
 
               <div className="divide-y divide-border border border-border rounded-sm overflow-hidden">
                 {sentimentLoading ? (
-                  <div className="px-3 py-2.5 text-[10px] text-muted-foreground">
-                    {t("dashboard.loadingCoverage")}
+                  <div className="px-3 py-2.5 space-y-2">
+                    <p className="text-[9px] font-mono font-semibold text-amber-300 uppercase tracking-wider animate-pulse">
+                      {t("header.searchingArticles")}
+                    </p>
+                    <p className="text-[10px] text-muted-foreground leading-snug">{t("dashboard.loadingCoverage")}</p>
                   </div>
                 ) : activeSentimentArticles.length > 0 ? (
                   activeSentimentArticles.map((article, idx) => {
