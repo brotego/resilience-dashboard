@@ -79,8 +79,11 @@ export async function readSignalBundleCache<T>(params: {
     if (minCoverageCountries > 0) {
       query = query.gte("coverage_country_count", minCoverageCountries);
     }
-    const { data, error } = await query.maybeSingle();
-    if (error || !data) {
+    // Avoid maybeSingle(): duplicate cache_key rows (before UNIQUE migration) make PostgREST error and skip cache.
+    const { data, error } = await query;
+    const rows = (data ?? []) as SignalBundleCacheRow<T>[];
+    const row = rows[0];
+    if (error || !row) {
       reportSupabaseCacheDebug({
         op: "read_signal_bundle",
         ok: false,
@@ -89,7 +92,6 @@ export async function readSignalBundleCache<T>(params: {
       });
       return null;
     }
-    const row = data as SignalBundleCacheRow<T>;
     const savedAt = Date.parse(row.saved_at);
     if (!Number.isFinite(savedAt)) return null;
     reportSupabaseCacheDebug({

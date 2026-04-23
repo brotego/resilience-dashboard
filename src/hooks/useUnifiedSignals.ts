@@ -786,9 +786,11 @@ function stratifiedSourceCapPack(
   return out;
 }
 
-function getLegacyCacheKeys(apiKeySuffix: string): string[] {
+function getLegacyCacheKeys(apiKeySuffix: string, mode: DashboardMode, companyKey: string): string[] {
   if (LEGACY_LIVE_CACHE_VERSIONS.length === 0) return [];
-  return LEGACY_LIVE_CACHE_VERSIONS.map((version) => `unified-live-${version}-${apiKeySuffix}`);
+  return LEGACY_LIVE_CACHE_VERSIONS.map(
+    (version) => `unified-live-${version}-${apiKeySuffix}-${mode}-${companyKey}`,
+  );
 }
 
 /**
@@ -1053,11 +1055,12 @@ export function useUnifiedSignals(
       return out;
     };
     const apiKeySuffix = apiConfigured ? newsApiKeyFingerprint() : "seed";
-    const cacheKey = `unified-live-${apiConfigured ? LIVE_CACHE_VERSION : "seed"}-${apiKeySuffix}-${mode}-${companyKey}`;
-    /** Stable per company/mode/UTC-day so Supabase upsert updates one row (model_version stores pipeline rev). */
+    /** Legacy local keys (version + API fingerprint); still read for migration, no longer primary writes. */
+    const versionedLiveKey = `unified-live-${apiConfigured ? LIVE_CACHE_VERSION : "seed"}-${apiKeySuffix}-${mode}-${companyKey}`;
+    /** Same string as Supabase cache_key: one slot per company/mode/UTC day (upsert updates in place). */
     const signalBundleCacheKey = `signals:bundle:${mode}:${companyKey}:${dayBucketKey()}`;
     const durableKey = durablePersistentKey(mode, companyKey);
-    const legacyCacheKeys = getLegacyCacheKeys(apiKeySuffix);
+    const legacyCacheKeys = getLegacyCacheKeys(apiKeySuffix, mode, companyKey);
     const LEGACY_DURABLE_SHARED = "unified-live-durable-shared";
     const bundleStats = (signals: UnifiedSignal[]) => {
       const countries = new Set(signals.map((s) => (s.location || "").trim().toLowerCase()).filter(Boolean));
@@ -1097,9 +1100,9 @@ export function useUnifiedSignals(
     const applySharedBundleToCaches = (entry: SharedBundleRow, opts?: { paintUi?: boolean }): boolean => {
       const filtered = finalizeSignals(entry.data);
       if (!filtered.length) return false;
-      cache.set(cacheKey, { signals: filtered, timestamp: entry.savedAt });
-      writeSessionCache(cacheKey, slimUnifiedSignalsForCache(filtered));
-      writePersistentCache(cacheKey, slimUnifiedSignalsForCache(filtered));
+      cache.set(signalBundleCacheKey, { signals: filtered, timestamp: entry.savedAt });
+      writeSessionCache(signalBundleCacheKey, slimUnifiedSignalsForCache(filtered));
+      writePersistentCache(signalBundleCacheKey, slimUnifiedSignalsForCache(filtered));
       const paintUi = opts?.paintUi !== false;
       if (paintUi && !cancelled) {
         setLiveSignals(filtered);
@@ -1109,9 +1112,16 @@ export function useUnifiedSignals(
       return true;
     };
 
-    const cached = cache.get(cacheKey);
-    if (cached && Date.now() - cached.timestamp < CACHE_DURATION) {
-      const filtered = finalizeSignals(cached.signals);
+    let memoryHit = cache.get(signalBundleCacheKey);
+    if (!memoryHit || Date.now() - memoryHit.timestamp >= CACHE_DURATION) {
+      const legacyMem = cache.get(versionedLiveKey);
+      if (legacyMem && Date.now() - legacyMem.timestamp < CACHE_DURATION) {
+        memoryHit = legacyMem;
+        cache.set(signalBundleCacheKey, legacyMem);
+      }
+    }
+    if (memoryHit && Date.now() - memoryHit.timestamp < CACHE_DURATION) {
+      const filtered = finalizeSignals(memoryHit.signals);
       if (!cancelled) {
         setLiveSignals(filtered);
         setIsLive(true);
@@ -1136,9 +1146,9 @@ export function useUnifiedSignals(
         if (filtered.length) {
           sharedWarmStart = filtered;
           if (!skipInitialSharedDiskWrite) {
-            cache.set(cacheKey, { signals: filtered, timestamp: sharedSupabaseEntry.savedAt });
-            writeSessionCache(cacheKey, slimUnifiedSignalsForCache(filtered));
-            writePersistentCache(cacheKey, slimUnifiedSignalsForCache(filtered));
+            cache.set(signalBundleCacheKey, { signals: filtered, timestamp: sharedSupabaseEntry.savedAt });
+            writeSessionCache(signalBundleCacheKey, slimUnifiedSignalsForCache(filtered));
+            writePersistentCache(signalBundleCacheKey, slimUnifiedSignalsForCache(filtered));
             if (!cancelled) {
               setLiveSignals(filtered);
               setIsLive(true);
@@ -1258,7 +1268,7 @@ export function useUnifiedSignals(
         }
 
         if (idx % 10 === 9 && results.length > 0 && !cancelled) {
-          writeSessionCache(cacheKey, slimUnifiedSignalsForCache(finalizeSignals(results)));
+          writeSessionCache(signalBundleCacheKey, slimUnifiedSignalsForCache(finalizeSignals(results)));
         }
       }
 
@@ -1341,28 +1351,31 @@ export function useUnifiedSignals(
       if (gotLive && finalMerged.length > 0 && !cancelled) {
         const now = Date.now();
         const forCache = slimUnifiedSignalsForCache(finalMerged);
-        cache.set(cacheKey, { signals: forCache, timestamp: now });
-        writeSessionCache(cacheKey, forCache);
-        writePersistentCache(cacheKey, forCache);
-        writePersistentCache(durableKey, forCache);
+        cache.set(signalBundleCacheKey, { signals: forCache, timestamp: now });
+        writeSessionCache(signalBundleCacheKey, forCache);
+        writePersistentCache(signalBundleCacheKey, forCache);
         writeSignalBundle(finalMerged, true);
         setLiveSignals(finalMerged);
         setIsLive(true);
       } else if (apiConfigured) {
         let restored = false;
-        const persistentFallback = readPersistentCache<UnifiedSignal[]>(cacheKey);
+        const persistentFallback =
+          readPersistentCache<UnifiedSignal[]>(signalBundleCacheKey) ??
+          readPersistentCache<UnifiedSignal[]>(versionedLiveKey);
         if (persistentFallback?.data?.length && !cancelled) {
           setLiveSignals(persistentFallback.data);
           setIsLive(true);
           restored = true;
         } else {
-          const sessionFallback = readSessionCache<UnifiedSignal[]>(cacheKey);
+          const sessionFallback =
+            readSessionCache<UnifiedSignal[]>(signalBundleCacheKey) ??
+            readSessionCache<UnifiedSignal[]>(versionedLiveKey);
           if (sessionFallback?.data?.length && !cancelled) {
             setLiveSignals(sessionFallback.data);
             setIsLive(true);
             restored = true;
           } else {
-            const snap = cache.get(cacheKey);
+            const snap = cache.get(signalBundleCacheKey) ?? cache.get(versionedLiveKey);
             if (snap?.signals?.length && !cancelled) {
               setLiveSignals(snap.signals);
               setIsLive(true);
@@ -1437,10 +1450,12 @@ export function useUnifiedSignals(
       }
 
       if (!hydratedFromShared) {
-        const sessionEntryEarly = readSessionCache<UnifiedSignal[]>(cacheKey);
+        const sessionEntryEarly =
+          readSessionCache<UnifiedSignal[]>(signalBundleCacheKey) ??
+          readSessionCache<UnifiedSignal[]>(versionedLiveKey);
         if (sessionEntryEarly?.data?.length) {
           const filtered = finalizeSignals(sessionEntryEarly.data);
-          cache.set(cacheKey, { signals: filtered, timestamp: sessionEntryEarly.savedAt });
+          cache.set(signalBundleCacheKey, { signals: filtered, timestamp: sessionEntryEarly.savedAt });
           if (!cancelled) {
             setLiveSignals(filtered);
             setIsLive(true);
@@ -1449,10 +1464,12 @@ export function useUnifiedSignals(
           if (canShortCircuitFromLocalCache) return;
         }
 
-        const persistentEntry = readPersistentCache<UnifiedSignal[]>(cacheKey);
+        const persistentEntry =
+          readPersistentCache<UnifiedSignal[]>(signalBundleCacheKey) ??
+          readPersistentCache<UnifiedSignal[]>(versionedLiveKey);
         if (persistentEntry?.data?.length) {
           const filtered = finalizeSignals(persistentEntry.data);
-          cache.set(cacheKey, { signals: filtered, timestamp: persistentEntry.savedAt });
+          cache.set(signalBundleCacheKey, { signals: filtered, timestamp: persistentEntry.savedAt });
           if (!cancelled) {
             setLiveSignals(filtered);
             setIsLive(true);
@@ -1463,7 +1480,7 @@ export function useUnifiedSignals(
         const durableSharedEntry = readPersistentCache<UnifiedSignal[]>(durableKey);
         if (durableSharedEntry?.data?.length) {
           const filtered = finalizeSignals(durableSharedEntry.data);
-          cache.set(cacheKey, { signals: filtered, timestamp: durableSharedEntry.savedAt });
+          cache.set(signalBundleCacheKey, { signals: filtered, timestamp: durableSharedEntry.savedAt });
           if (!cancelled) {
             setLiveSignals(filtered);
             setIsLive(true);
