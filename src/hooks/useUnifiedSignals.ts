@@ -913,6 +913,15 @@ export function useUnifiedSignals(
     const companyKeywords = selectedCompanyData
       ? selectedCompanyData.keywords.map((k) => k.toLowerCase())
       : [];
+    const companyBrandMarkers = selectedCompanyData
+      ? Array.from(
+          new Set([
+            selectedCompanyData.name.toLowerCase(),
+            ...selectedCompanyData.keywords.map((k) => k.toLowerCase()),
+            ...(selectedCompanyData.sentimentBrandMarkers ?? []).map((m) => m.toLowerCase()),
+          ]),
+        ).filter((m) => m.length >= 5)
+      : [];
     const companyNameLower = selectedCompanyData?.name.toLowerCase() || "";
     const companySectorBits = selectedCompanyData
       ? selectedCompanyData.sector
@@ -920,11 +929,40 @@ export function useUnifiedSignals(
           .split(/[^a-z0-9+]+/)
           .filter((w) => w.length > 2 && w !== "and")
       : [];
+    const hasCompanyBrandHit = (text: string): boolean => {
+      if (!selectedCompanyData) return false;
+      return companyBrandMarkers.some((m) => text.includes(m));
+    };
+    const hasStrictIndustryHit = (text: string): boolean => {
+      if (!selectedCompanyData) return false;
+      if (selectedCompanyData.id === "kodansha") {
+        return /\b(publishing|publisher|manga|magazine|book(s|store)?|comic(s)?|editorial|ip licensing|media rights)\b/i.test(
+          text,
+        );
+      }
+      if (selectedCompanyData.id === "mori_building") {
+        return /\b(commercial real estate|office leasing|office vacancy|office rent|grade a office|property developer|urban redevelopment|mixed-use development|corporate landlord|real estate investment)\b/i.test(
+          text,
+        );
+      }
+      return companyIndustryAnchorsLower(selectedCompanyData)
+        .filter((t) => t.length >= 7)
+        .some((t) => text.includes(t));
+    };
+    const strictIndustryRelevant = (title: string, description: string): boolean => {
+      if (!selectedCompanyData) return true;
+      const text = `${title || ""} ${description || ""}`.toLowerCase();
+      const industry = liveNewsTextMatchesCompanyIndustry(title, description, selectedCompanyData);
+      if (!industry) return false;
+      return hasCompanyBrandHit(text) || hasStrictIndustryHit(text);
+    };
+
     const companyRelevanceScore = (s: UnifiedSignal): number => {
       if (!selectedCompanyData) return 0;
       const text = `${s.title || ""} ${s.description || ""}`.toLowerCase();
       let score = 0;
       if (companyNameLower && text.includes(companyNameLower)) score += 10;
+      if (hasCompanyBrandHit(text)) score += 8;
       if (selectedCompanyData.industryNewsTerms.length > 0) {
         for (const t of companyIndustryAnchorsLower(selectedCompanyData)) {
           if (t.length >= 4 && text.includes(t)) score += 5;
@@ -962,7 +1000,7 @@ export function useUnifiedSignals(
         return looksLikeGenZNews(s) && (industryRelevant || companyRelevanceScore(s) >= 1);
       }
       if (selectedCompanyData.industryNewsTerms.length > 0) {
-        return liveNewsTextMatchesCompanyIndustry(title, description, selectedCompanyData);
+        return strictIndustryRelevant(title, description);
       }
       return (
         (companyNameLower && text.includes(companyNameLower)) ||
@@ -997,8 +1035,8 @@ export function useUnifiedSignals(
             const sd = s.description || "";
             if (selectedCompanyData.industryNewsTerms.length > 0) {
               return (
-                liveNewsTextMatchesCompanyIndustry(st, sd, selectedCompanyData) ||
-                companyRelevanceScore(s) >= 6
+                strictIndustryRelevant(st, sd) ||
+                companyRelevanceScore(s) >= 10
               );
             }
             const text = `${st} ${sd}`.toLowerCase();
@@ -1039,8 +1077,8 @@ export function useUnifiedSignals(
           if (
             mode !== "genz" &&
             selectedCompanyData?.industryNewsTerms.length &&
-            !liveNewsTextMatchesCompanyIndustry(extra.title || "", extra.description || "", selectedCompanyData) &&
-            companyRelevanceScore(extra) < 8
+            !strictIndustryRelevant(extra.title || "", extra.description || "") &&
+            companyRelevanceScore(extra) < 12
           ) {
             continue;
           }
@@ -1079,7 +1117,7 @@ export function useUnifiedSignals(
         if (
           mode !== "genz" &&
           selectedCompanyData?.industryNewsTerms.length &&
-          !liveNewsTextMatchesCompanyIndustry(s.title || "", s.description || "", selectedCompanyData)
+          !strictIndustryRelevant(s.title || "", s.description || "")
         ) {
           continue;
         }
@@ -1217,8 +1255,8 @@ export function useUnifiedSignals(
             }
           }
         }
-        // Skip refetch when the hydrated bundle is already dense (DB signal_count can disagree with payload).
-        if (filtered.length >= MIN_COMPANY_SIGNALS) {
+        // Prefer cached Supabase payload immediately; background refresh happens on next normal reload cycle.
+        if (filtered.length > 0) {
           return;
         }
       }
@@ -1257,7 +1295,7 @@ export function useUnifiedSignals(
             if (mode === "resilience" && selectedCompanyData?.industryNewsTerms.length) {
               const at = String(a?.title || "");
               const ad = String(a?.description || "");
-              if (!liveNewsTextMatchesCompanyIndustry(at, ad, selectedCompanyData)) return [];
+              if (!strictIndustryRelevant(at, ad)) return [];
             }
             const dom = resolveArticleDomain(selectedCompanyData, a);
             // Avoid starving Gen Z map when inference is uncertain:
