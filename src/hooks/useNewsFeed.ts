@@ -6,6 +6,7 @@ import {
 } from "@/api/newsFeed";
 import { isNewsApiAiConfigured } from "@/lib/newsApiConfigured";
 import { readSessionCache, writeSessionCache } from "@/lib/newsSessionCache";
+import { readPersistentCache, writePersistentCache } from "@/lib/newsPersistentCache";
 
 export interface NewsArticle {
   title: string;
@@ -290,6 +291,23 @@ function isUsableFeedCache(articles: NewsArticle[] | null | undefined): articles
   return Array.isArray(articles) && articles.length >= MIN_COUNTRY_FEED_ARTICLES;
 }
 
+function hasAnyFeedCache(articles: NewsArticle[] | null | undefined): articles is NewsArticle[] {
+  return Array.isArray(articles) && articles.length > 0;
+}
+
+function pickNewestFeedCache(
+  ...entries: ({ data: NewsArticle[]; savedAt: number } | null | undefined)[]
+): { articles: NewsArticle[]; savedAt: number } | null {
+  let best: { articles: NewsArticle[]; savedAt: number } | null = null;
+  for (const entry of entries) {
+    if (!entry?.data?.length) continue;
+    if (!best || entry.savedAt > best.savedAt) {
+      best = { articles: entry.data, savedAt: entry.savedAt };
+    }
+  }
+  return best;
+}
+
 export function useNewsFeed(countryName: string, type: "business" | "genz", topicQuery?: string) {
   const [articles, setArticles] = useState<NewsArticle[]>([]);
   const [loading, setLoading] = useState(true);
@@ -304,20 +322,29 @@ export function useNewsFeed(countryName: string, type: "business" | "genz", topi
     const topicScope = (topicQuery || "").trim().toLowerCase();
     const cacheKey = `${FEED_CACHE_VERSION}:${configured ? "api" : "seed"}:${type}:${countryName}:${topicScope}`;
     const cached = cache.get(cacheKey);
+    const sessionEntry = readSessionCache<NewsArticle[]>(cacheKey);
+    const persistentEntry = readPersistentCache<NewsArticle[]>(cacheKey);
+    const restored = pickNewestFeedCache(
+      cached && isUsableFeedCache(cached.articles)
+        ? { data: cached.articles, savedAt: cached.timestamp }
+        : cached && hasAnyFeedCache(cached.articles)
+          ? { data: cached.articles, savedAt: cached.timestamp }
+          : null,
+      hasAnyFeedCache(sessionEntry?.data) ? sessionEntry : null,
+      hasAnyFeedCache(persistentEntry?.data) ? persistentEntry : null,
+    );
 
-    if (cached && Date.now() - cached.timestamp < CACHE_DURATION && isUsableFeedCache(cached.articles)) {
-      setArticles(cached.articles);
+    if (restored && Date.now() - restored.savedAt < CACHE_DURATION) {
+      setArticles(restored.articles);
       setLoading(false);
       setIsFallback(false);
       setFetchError(null);
+      cache.set(cacheKey, { articles: restored.articles, timestamp: restored.savedAt });
       return;
     }
 
-    const sessionEntry = readSessionCache<NewsArticle[]>(cacheKey);
-    const fromSession = isUsableFeedCache(sessionEntry?.data) ? sessionEntry.data : null;
-    if (fromSession) {
-      cache.set(cacheKey, { articles: fromSession, timestamp: sessionEntry.savedAt });
-      setArticles(fromSession);
+    if (restored) {
+      setArticles(restored.articles);
       setIsFallback(false);
       setFetchError(null);
       setLoading(false);
@@ -415,10 +442,11 @@ export function useNewsFeed(countryName: string, type: "business" | "genz", topi
         setArticles(resolvedArticles);
         setIsFallback(false);
         setFetchError(null);
-        if (isUsableFeedCache(resolvedArticles)) {
+        if (isUsableFeedCache(resolvedArticles) || (configured && resolvedArticles.length > 0)) {
           const now = Date.now();
           cache.set(cacheKey, { articles: resolvedArticles, timestamp: now });
           writeSessionCache(cacheKey, resolvedArticles);
+          writePersistentCache(cacheKey, resolvedArticles);
         }
         setLoading(false);
       } catch {

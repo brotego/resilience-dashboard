@@ -18,10 +18,18 @@ import {
 } from "@/lib/projectSupabaseCache";
 import { DashboardMode } from "@/components/dashboard/DashboardLayout";
 import { matchesCompanyIndustryNews } from "@/lib/companyArticleRelevance";
+import {
+  buildGenZMapSearchBuckets,
+  buildGenZMapTopUpQueries,
+  looksLikeBusinessGenZNews,
+  passesGenZMapArticleGate,
+} from "@/lib/genzBusinessRelevance";
 
 interface CacheEntry {
   signals: UnifiedSignal[];
   timestamp: number;
+  /** When true, bundle was fully persisted (Supabase/local) — do not re-fetch Event Registry same day. */
+  isFinal?: boolean;
 }
 
 /** Event Registry article bodies are huge; persisting them blows localStorage quota and fails silently. */
@@ -428,49 +436,11 @@ function inferArticleGeo(article: any, index: number): { location: string; coord
 }
 
 function looksLikeGenZNews(signal: UnifiedSignal): boolean {
-  const text = `${signal.title || ""} ${signal.description || ""}`.toLowerCase();
-  const strongGenZ = [
-    "gen z",
-    "zoomer",
-    "teen",
-    "teenager",
-    "youth culture",
-    "tiktok",
-    "creator economy",
-    "influencer",
-    "college student",
-    "campus",
-  ];
-  const mediumGenZ = [
-    "youth",
-    "young people",
-    "young adults",
-    "student",
-    "social media",
-    "digital native",
-    "gaming community",
-    "viral trend",
-    "creator",
-  ];
-  const businessHeavy = [
-    "stocks",
-    "bond",
-    "interest rate",
-    "earnings",
-    "merger",
-    "acquisition",
-    "gdp",
-    "central bank",
-    "trade deficit",
-    "oil prices",
-    "shareholder",
-  ];
-
-  const strongHits = strongGenZ.reduce((n, kw) => n + (text.includes(kw) ? 1 : 0), 0);
-  const mediumHits = mediumGenZ.reduce((n, kw) => n + (text.includes(kw) ? 1 : 0), 0);
-  const businessHits = businessHeavy.reduce((n, kw) => n + (text.includes(kw) ? 1 : 0), 0);
-  const score = strongHits * 2 + mediumHits - businessHits;
-  return score >= 1;
+  return looksLikeBusinessGenZNews(
+    signal.title || "",
+    signal.description || "",
+    signal.articleContent,
+  );
 }
 
 function articleText(a: any): string {
@@ -478,52 +448,11 @@ function articleText(a: any): string {
 }
 
 function looksLikeStrictGenZArticle(a: any): boolean {
-  const text = articleText(a);
-  const strongGenZ = [
-    "gen z",
-    "zoomer",
-    "teen",
-    "teenager",
-    "youth culture",
-    "tiktok",
-    "creator economy",
-    "influencer",
-    "college student",
-    "campus",
-    "instagram",
-    "youtube shorts",
-    "snapchat",
-    "discord",
-    "reddit",
-  ];
-  const mediumGenZ = [
-    "youth",
-    "young people",
-    "young adults",
-    "student",
-    "social media",
-    "digital native",
-    "gaming community",
-    "viral trend",
-    "creator",
-    "online community",
-    "content creator",
-  ];
-  const businessHeavy = [
-    "interest rate",
-    "shareholder",
-    "bond",
-    "gdp",
-    "federal reserve",
-    "dividend",
-    "quarterly earnings",
-  ];
-
-  const strongHits = strongGenZ.reduce((n, kw) => n + (text.includes(kw) ? 1 : 0), 0);
-  const mediumHits = mediumGenZ.reduce((n, kw) => n + (text.includes(kw) ? 1 : 0), 0);
-  const businessHits = businessHeavy.reduce((n, kw) => n + (text.includes(kw) ? 1 : 0), 0);
-  const score = strongHits * 2 + mediumHits - businessHits;
-  return score >= 1;
+  return passesGenZMapArticleGate(
+    String(a?.title || ""),
+    String(a?.description || ""),
+    String(a?.content || ""),
+  );
 }
 
 function isArticleRelevantToCompanyIndustry(a: any, company: Company | null): boolean {
@@ -602,24 +531,24 @@ function inferGenZCategoryFromArticle(a: any): GenZCategoryId | undefined {
   };
   const categoryScores: Record<GenZCategoryId, number> = {
     authenticity: score(
-      ["brand trust", "authenticity", "purpose-driven brand"],
-      ["authentic", "values", "purpose", "trust", "ethical brand"],
+      ["brand trust", "brand authenticity", "purpose-driven brand", "ethical brand", "greenwashing"],
+      ["authentic", "values", "purpose", "trust", "transparency", "ethical sourcing", "brand loyalty"],
     ),
     worklife: score(
-      ["work-life balance", "hybrid work", "burnout", "gig economy"],
-      ["worklife", "career", "remote work", "flexible work", "side hustle"],
+      ["work-life balance", "hybrid work", "burnout", "gig economy", "side hustle", "employer brand"],
+      ["worklife", "career", "remote work", "flexible work", "hiring", "talent", "workforce", "salary"],
     ),
     climate: score(
-      ["climate action", "climate protest", "net zero", "decarbonization"],
-      ["climate", "sustainability", "green", "carbon", "environment"],
+      ["climate action", "climate-conscious", "net zero", "decarbonization", "circular fashion"],
+      ["climate", "sustainability", "green", "carbon", "environment", "resale", "secondhand"],
     ),
     digital: score(
-      ["tiktok", "creator economy", "social platform", "digital identity"],
-      ["social media", "creator", "platform", "ai", "digital", "app", "viral"],
+      ["tiktok", "creator economy", "social platform", "digital identity", "influencer marketing"],
+      ["social media", "creator", "platform", "ai", "digital", "app", "viral", "content creator"],
     ),
     belonging: score(
-      ["social cohesion", "community belonging", "inclusive community"],
-      ["community", "belonging", "identity", "culture", "inclusion", "social"],
+      ["social cohesion", "community belonging", "inclusive community", "loneliness economy"],
+      ["community", "belonging", "identity", "culture", "inclusion", "social", "mental health"],
     ),
   };
   const ranked = (Object.entries(categoryScores) as [GenZCategoryId, number][])
@@ -687,13 +616,8 @@ async function fetchGenZArticleBuckets(
   pages: number,
   company: Company | null,
 ): Promise<{ articles: any[]; providerLimited: boolean }> {
-  const hint = company ? ` ${buildCompanyGenZContextHint(company)}` : "";
-  const buckets = [
-    `Gen Z youth culture social media TikTok creator economy${hint}`.trim(),
-    `Gen Z worklife burnout career remote work gig economy${hint}`.trim(),
-    `young adults students university campus digital behavior social apps${hint}`.trim(),
-    `Gen Z spending trends brand loyalty creator content video platforms${hint}`.trim(),
-  ];
+  const hint = company ? buildCompanyGenZContextHint(company) : "";
+  const buckets = buildGenZMapSearchBuckets(hint);
   const seen = new Set<string>();
   const merged: any[] = [];
   let limited = false;
@@ -894,11 +818,6 @@ export function useUnifiedSignals(
   // Fetch live news and convert to UnifiedSignal
   useEffect(() => {
     let cancelled = false;
-    // Prevent cross-contamination flashes when switching company/mode:
-    // clear previous bundle immediately before loading the next cache/fetch cycle.
-    setLiveSignals([]);
-    setIsLive(false);
-    setLoading(true);
     if (retryTimerRef.current) {
       window.clearTimeout(retryTimerRef.current);
       retryTimerRef.current = null;
@@ -1158,10 +1077,17 @@ export function useUnifiedSignals(
         ttlHours: 24,
       });
     };
-    const canShortCircuitFromLocalCache = (signals: UnifiedSignal[], savedAt: number): boolean => {
-      if (signals.length < MIN_COMPANY_SIGNALS) return false;
+    const canShortCircuitFromLocalCache = (
+      signals: UnifiedSignal[],
+      savedAt: number,
+      isFinal?: boolean,
+    ): boolean => {
       if (Date.now() - savedAt >= CACHE_DURATION) return false;
-      return true;
+      if (isFinal && signals.length > 0) return true;
+      if (signals.length >= MIN_COMPANY_SIGNALS) return true;
+      // Same-day partial bundle: keep what we have instead of re-sweeping the globe.
+      if (signals.length > 0) return true;
+      return false;
     };
 
     type SharedBundleRow = NonNullable<Awaited<ReturnType<typeof readSignalBundleCache<UnifiedSignal[]>>>>;
@@ -1203,7 +1129,11 @@ export function useUnifiedSignals(
         trustPreCuratedBundle: true,
       });
       if (!filtered.length) return false;
-      cache.set(signalBundleCacheKey, { signals: filtered, timestamp: entry.savedAt });
+      cache.set(signalBundleCacheKey, {
+        signals: filtered,
+        timestamp: entry.savedAt,
+        isFinal: entry.isFinal,
+      });
       writeSessionCache(signalBundleCacheKey, slimUnifiedSignalsForCache(filtered));
       writePersistentCache(signalBundleCacheKey, slimUnifiedSignalsForCache(filtered));
       const paintUi = opts?.paintUi !== false;
@@ -1230,7 +1160,11 @@ export function useUnifiedSignals(
         setIsLive(true);
         setLoading(false);
       }
-      if (canShortCircuitFromLocalCache(filtered, memoryHit.timestamp)) return;
+      if (canShortCircuitFromLocalCache(filtered, memoryHit.timestamp, memoryHit.isFinal)) return;
+    } else if (!cancelled) {
+      setLiveSignals([]);
+      setIsLive(false);
+      setLoading(true);
     }
 
     const fetchAll = async (
@@ -1261,7 +1195,17 @@ export function useUnifiedSignals(
             }
           }
         }
+        if (sharedSupabaseEntry.isFinal && filtered.length > 0) {
+          return;
+        }
         if (filtered.length >= MIN_COMPANY_SIGNALS) {
+          return;
+        }
+        // Same-day Supabase row with articles: hydrate UI only, skip expensive country sweep.
+        if (
+          filtered.length > 0 &&
+          Date.now() - sharedSupabaseEntry.savedAt < CACHE_DURATION
+        ) {
           return;
         }
       }
@@ -1336,7 +1280,7 @@ export function useUnifiedSignals(
         if (!partial.length) return;
         const now = Date.now();
         const slim = slimUnifiedSignalsForCache(partial);
-        cache.set(signalBundleCacheKey, { signals: slim, timestamp: now });
+        cache.set(signalBundleCacheKey, { signals: slim, timestamp: now, isFinal: false });
         writeSessionCache(signalBundleCacheKey, slim);
         writePersistentCache(signalBundleCacheKey, slim);
         setLiveSignals(partial);
@@ -1420,10 +1364,7 @@ export function useUnifiedSignals(
       // Gen Z top-up: if still below minimum density, run broader youth passes across priority countries.
       if (mode === "genz" && finalizeSignals(results).length < MIN_COMPANY_SIGNALS) {
         const topUpCountries = fetchCountryPlan.slice(0, 20);
-        const broadQueries = [
-          `Gen Z youth social media students young adults creator economy ${genzTopicQueryFallback}`.trim(),
-          `Gen Z culture digital behavior young consumers platform trends ${genzTopicQueryFallback}`.trim(),
-        ];
+        const broadQueries = buildGenZMapTopUpQueries(genzTopicQueryFallback);
         for (let ci = 0; ci < topUpCountries.length; ci++) {
           if (cancelled) break;
           const country = topUpCountries[ci];
@@ -1451,7 +1392,7 @@ export function useUnifiedSignals(
           const country = fillCountries[i];
           const type = mode === "genz" ? "genz" : "business";
           const query = mode === "genz"
-            ? `Gen Z youth social media young adults ${genzTopicQueryFallback}`.trim()
+            ? buildGenZMapTopUpQueries(genzTopicQueryFallback)[0]
             : `${businessTopicQueryStrict} ${businessTopicQueryFallback}`.trim();
           const fillRes = await fetchPagedArticles(type, country, 100, 2, query)
             .catch(() => ({ articles: [] as any[], providerLimited: false }));
@@ -1478,7 +1419,7 @@ export function useUnifiedSignals(
       if (gotLive && finalMerged.length > 0 && !cancelled) {
         const now = Date.now();
         const forCache = slimUnifiedSignalsForCache(finalMerged);
-        cache.set(signalBundleCacheKey, { signals: forCache, timestamp: now });
+        cache.set(signalBundleCacheKey, { signals: forCache, timestamp: now, isFinal: true });
         writeSessionCache(signalBundleCacheKey, forCache);
         writePersistentCache(signalBundleCacheKey, forCache);
         writeSignalBundle(finalMerged, true);
@@ -1548,12 +1489,15 @@ export function useUnifiedSignals(
           }
         }
 
-        // Keep trying periodically in API mode if we still have no live/cached signals.
+        // Keep trying periodically only when we still have zero cached/live signals.
         if (!restored && !cancelled) {
-          if (retryTimerRef.current) window.clearTimeout(retryTimerRef.current);
-          retryTimerRef.current = window.setTimeout(() => {
-            void fetchAll(undefined, false);
-          }, 30_000);
+          const snap = cache.get(signalBundleCacheKey) ?? cache.get(versionedLiveKey);
+          if (!snap?.signals?.length) {
+            if (retryTimerRef.current) window.clearTimeout(retryTimerRef.current);
+            retryTimerRef.current = window.setTimeout(() => {
+              void fetchAll(undefined, false);
+            }, 30_000);
+          }
         }
       }
       if (!cancelled) setLoading(false);
@@ -1567,11 +1511,14 @@ export function useUnifiedSignals(
 
       const primedLen = primed ? coerceUnifiedBundlePayload(primed.data).length : 0;
       const sharedBundleComplete =
-        primedLen > 0 && Math.max(primedLen, primed?.signalCount ?? 0) >= MIN_COMPANY_SIGNALS;
+        (primed?.isFinal && primedLen > 0) ||
+        (primedLen > 0 && Math.max(primedLen, primed?.signalCount ?? 0) >= MIN_COMPANY_SIGNALS);
+      const sharedBundleFreshSameDay =
+        primedLen > 0 && primed != null && Date.now() - primed.savedAt < CACHE_DURATION;
       let hydratedFromShared = false;
       if (primed && primedLen > 0 && applySharedBundleToCaches(primed, { paintUi: true })) {
         hydratedFromShared = true;
-        if (sharedBundleComplete) {
+        if (sharedBundleComplete || sharedBundleFreshSameDay) {
           if (!cancelled) setLoading(false);
           return;
         }
@@ -1583,13 +1530,17 @@ export function useUnifiedSignals(
           readSessionCache<UnifiedSignal[]>(versionedLiveKey);
         if (sessionEntryEarly?.data?.length) {
           const filtered = finalizeSignals(sessionEntryEarly.data);
-          cache.set(signalBundleCacheKey, { signals: filtered, timestamp: sessionEntryEarly.savedAt });
+          cache.set(signalBundleCacheKey, {
+            signals: filtered,
+            timestamp: sessionEntryEarly.savedAt,
+            isFinal: true,
+          });
           if (!cancelled) {
             setLiveSignals(filtered);
             setIsLive(true);
             setLoading(false);
           }
-          if (canShortCircuitFromLocalCache(filtered, sessionEntryEarly.savedAt)) return;
+          if (canShortCircuitFromLocalCache(filtered, sessionEntryEarly.savedAt, true)) return;
         }
 
         const persistentEntry =
@@ -1597,24 +1548,32 @@ export function useUnifiedSignals(
           readPersistentCache<UnifiedSignal[]>(versionedLiveKey);
         if (persistentEntry?.data?.length) {
           const filtered = finalizeSignals(persistentEntry.data);
-          cache.set(signalBundleCacheKey, { signals: filtered, timestamp: persistentEntry.savedAt });
+          cache.set(signalBundleCacheKey, {
+            signals: filtered,
+            timestamp: persistentEntry.savedAt,
+            isFinal: true,
+          });
           if (!cancelled) {
             setLiveSignals(filtered);
             setIsLive(true);
             setLoading(false);
           }
-          if (canShortCircuitFromLocalCache(filtered, persistentEntry.savedAt)) return;
+          if (canShortCircuitFromLocalCache(filtered, persistentEntry.savedAt, true)) return;
         }
         const durableSharedEntry = readPersistentCache<UnifiedSignal[]>(durableKey);
         if (durableSharedEntry?.data?.length) {
           const filtered = finalizeSignals(durableSharedEntry.data);
-          cache.set(signalBundleCacheKey, { signals: filtered, timestamp: durableSharedEntry.savedAt });
+          cache.set(signalBundleCacheKey, {
+            signals: filtered,
+            timestamp: durableSharedEntry.savedAt,
+            isFinal: true,
+          });
           if (!cancelled) {
             setLiveSignals(filtered);
             setIsLive(true);
             setLoading(false);
           }
-          if (canShortCircuitFromLocalCache(filtered, durableSharedEntry.savedAt)) return;
+          if (canShortCircuitFromLocalCache(filtered, durableSharedEntry.savedAt, true)) return;
         }
       }
 

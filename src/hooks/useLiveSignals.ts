@@ -69,6 +69,7 @@ export function useLiveSignals(activeDomains: DomainId[]) {
       setSignals(sessionEntry.data);
       setIsLive(true);
       setLoading(false);
+      return;
     }
 
     // If domains haven't changed and we already have live data, skip

@@ -1,6 +1,7 @@
 /**
  * News feed via NewsAPI.ai (Event Registry). Key: VITE_NEWSAPI_AI_KEY — see .env.example.
  */
+import { GENZ_NEWS_API_BASE_KEYWORD } from "@/lib/genzBusinessRelevance";
 
 /** Stored on signals; cap avoids huge session payloads (ER body can be very long). */
 const MAX_ARTICLE_BODY_STORE_CHARS = 150_000;
@@ -511,8 +512,7 @@ export async function invokeNewsFeed(body: NewsFeedRequestBody): Promise<{ data:
         sourceLocationUri: locUri,
       }, bodyLen);
     } else if (type === "genz") {
-      const base = "Gen Z TikTok viral youth culture sustainability";
-      const keyword = topicQuery ? `${base} ${topicQuery}` : base;
+      const keyword = topicQuery ? `${GENZ_NEWS_API_BASE_KEYWORD} ${topicQuery}` : GENZ_NEWS_API_BASE_KEYWORD;
       payload = eventRegistryArticlePayload(apiKey, currentPage, size, {
         keyword,
         sourceLocationUri: locUri,
