@@ -97,7 +97,8 @@ export function useLiveSignals(activeDomains: DomainId[]) {
               domain,
               countryCode: country.code,
               countryName: country.name,
-              pageSize: 3,
+              pageSize: 10,
+              priority: "background",
             });
 
             if (data?.articles && !data?.fallback && data.articles.length > 0) {

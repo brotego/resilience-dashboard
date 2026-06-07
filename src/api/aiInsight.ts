@@ -1301,6 +1301,8 @@ export async function invokeCompanyNewsletter(params: {
     ? `あなたは企業向け編集責任者です。以下の候補シグナルから、${params.company}（業界: ${params.industry || "N/A"}）に最も関連性が高いものを5件選び、週次ニュースレターを作成してください。
 ${dossierJp}要件:
 - 対象時間帯: ${params.timeWindow || "current window"}
+- ${params.company}は編集の視点です。社名が出ていなくても、業界（商業不動産・オフィス市場・不動産経済・都市開発・マクロ）に効く記事を優先してください。
+- 住宅売買、娯楽・ゴシップ、スポーツ、ゲーム、無関係なポッドキャストは除外してください。
 - 関連性の高い順に5件選定
 - JSONのみを返す
 - paragraphsは3本、各2-3文
@@ -1327,6 +1329,8 @@ ${candidateLines.join("\n")}`
     : `You are an editorial strategist. From the candidate signals below, pick the 5 most relevant items for ${params.company} (industry: ${params.industry || "N/A"}) and write a weekly newsletter.
 ${dossierEn}Requirements:
 - Time window focus: ${params.timeWindow || "current window"}
+- ${params.company} is the editorial lens — stories do NOT need to mention the company by name. Prioritize industry-relevant coverage (e.g. commercial real estate, office markets, property economics, urban development, macro trends affecting the sector).
+- Reject residential home listings, entertainment/gossip, sports, video games, unrelated podcasts, and generic tech profiles unless they clearly affect the company's industry.
 - Pick 5 most relevant items in ranked order
 - Return JSON only
 - Do not use markdown fences

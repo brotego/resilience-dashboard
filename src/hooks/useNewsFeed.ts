@@ -1,5 +1,9 @@
 import { useState, useEffect, useRef } from "react";
-import { invokeNewsFeed } from "@/api/newsFeed";
+import {
+  fetchCountryBusinessNewsFeed,
+  fetchPagedNewsFeed,
+  MIN_COUNTRY_FEED_ARTICLES,
+} from "@/api/newsFeed";
 import { isNewsApiAiConfigured } from "@/lib/newsApiConfigured";
 import { readSessionCache, writeSessionCache } from "@/lib/newsSessionCache";
 
@@ -277,7 +281,14 @@ const GENZ_SEED: Record<string, NewsArticle[]> = {
   ],
 };
 
-const FEED_TIMEOUT_MS = 12000;
+const FEED_CACHE_VERSION = "v5-consistent";
+const FEED_PAGE_SIZE = 100;
+const FEED_PAGES = 2;
+const FEED_TIMEOUT_MS = 45000;
+
+function isUsableFeedCache(articles: NewsArticle[] | null | undefined): articles is NewsArticle[] {
+  return Array.isArray(articles) && articles.length >= MIN_COUNTRY_FEED_ARTICLES;
+}
 
 export function useNewsFeed(countryName: string, type: "business" | "genz", topicQuery?: string) {
   const [articles, setArticles] = useState<NewsArticle[]>([]);
@@ -291,10 +302,10 @@ export function useNewsFeed(countryName: string, type: "business" | "genz", topi
   useEffect(() => {
     const configured = isNewsApiAiConfigured();
     const topicScope = (topicQuery || "").trim().toLowerCase();
-    const cacheKey = `${configured ? "api" : "seed"}:${type}:${countryName}:${topicScope}`;
+    const cacheKey = `${FEED_CACHE_VERSION}:${configured ? "api" : "seed"}:${type}:${countryName}:${topicScope}`;
     const cached = cache.get(cacheKey);
 
-    if (cached && Date.now() - cached.timestamp < CACHE_DURATION) {
+    if (cached && Date.now() - cached.timestamp < CACHE_DURATION && isUsableFeedCache(cached.articles)) {
       setArticles(cached.articles);
       setLoading(false);
       setIsFallback(false);
@@ -303,8 +314,7 @@ export function useNewsFeed(countryName: string, type: "business" | "genz", topi
     }
 
     const sessionEntry = readSessionCache<NewsArticle[]>(cacheKey);
-    const fromSession =
-      sessionEntry?.data && sessionEntry.data.length > 0 ? sessionEntry.data : null;
+    const fromSession = isUsableFeedCache(sessionEntry?.data) ? sessionEntry.data : null;
     if (fromSession) {
       cache.set(cacheKey, { articles: fromSession, timestamp: sessionEntry.savedAt });
       setArticles(fromSession);
@@ -345,54 +355,51 @@ export function useNewsFeed(countryName: string, type: "business" | "genz", topi
 
     (async () => {
       try {
+        let streamed: NewsArticle[] = [];
+        const paintStream = (pageArticles: NewsArticle[]) => {
+          if (controller.signal.aborted) return;
+          const seen = new Set(streamed.map((a) => a.url || a.title));
+          for (const a of pageArticles) {
+            const key = a.url || a.title;
+            if (seen.has(key)) continue;
+            seen.add(key);
+            streamed.push(a);
+          }
+          if (streamed.length > 0) {
+            setArticles(streamed);
+            setLoading(false);
+            setIsFallback(false);
+            setFetchError(null);
+          }
+        };
+
         const primary = await withTimeout(
-          invokeNewsFeed({ type, countryCode, countryName, topicQuery }),
+          type === "business"
+            ? fetchCountryBusinessNewsFeed(
+                { countryCode, countryName, topicQuery },
+                { pageSize: FEED_PAGE_SIZE, pages: FEED_PAGES, onPage: paintStream },
+              )
+            : fetchPagedNewsFeed(
+                { type, countryCode, countryName, topicQuery, priority: "interactive" },
+                { pageSize: FEED_PAGE_SIZE, pages: FEED_PAGES, onPage: paintStream },
+              ),
           FEED_TIMEOUT_MS,
           { data: { articles: [], fallback: true, error: "Request timeout" }, error: null },
         );
         if (controller.signal.aborted) return;
 
         const configured = isNewsApiAiConfigured();
-        const primaryFailed = !!(primary.error || primary.data?.fallback || !primary.data);
         const primaryArticles = Array.isArray(primary.data?.articles) ? primary.data!.articles : [];
-        const needsBroadBusinessFallback = type === "business" && (!!topicQuery) && (primaryFailed || primaryArticles.length === 0);
+        const resolvedArticles =
+          primaryArticles.length > 0 ? primaryArticles : streamed.length > 0 ? streamed : [];
+        const fetchFailed = resolvedArticles.length === 0;
 
-        if (needsBroadBusinessFallback) {
-          const broad = await withTimeout(
-            invokeNewsFeed({ type, countryCode, countryName }),
-            FEED_TIMEOUT_MS,
-            { data: { articles: [], fallback: true, error: "Request timeout" }, error: null },
-          );
-          if (controller.signal.aborted) return;
-          const broadFailed = !!(broad.error || broad.data?.fallback || !broad.data);
-          const broadArticles = Array.isArray(broad.data?.articles) ? broad.data!.articles : [];
-
-          if (!broadFailed && broadArticles.length > 0) {
-            setArticles(broadArticles);
-            setIsFallback(false);
-            setFetchError(null);
-            const now = Date.now();
-            cache.set(cacheKey, { articles: broadArticles, timestamp: now });
-            writeSessionCache(cacheKey, broadArticles);
-            setLoading(false);
-            return;
-          }
-        }
-
-        if (primaryFailed) {
+        if (fetchFailed) {
           if (configured) {
             if (!keepCachedArticlesOnFailure()) {
-              // Final safety net: keep business panel populated even when provider fails.
-              if (type === "business") {
-                const seed = BUSINESS_SEED[countryName] || BUSINESS_SEED.default || [];
-                setArticles(seed);
-                setIsFallback(true);
-                setFetchError(null);
-              } else {
-                setArticles([]);
-                setIsFallback(false);
-                setFetchError(primary.data?.error || primary.error?.message || "News request failed");
-              }
+              setArticles([]);
+              setIsFallback(false);
+              setFetchError(primary.data?.error || primary.error?.message || "News request failed");
             }
           } else {
             const seed = type === "business" ? BUSINESS_SEED : GENZ_SEED;
@@ -405,29 +412,22 @@ export function useNewsFeed(countryName: string, type: "business" | "genz", topi
           return;
         }
 
-        setArticles(primaryArticles);
+        setArticles(resolvedArticles);
         setIsFallback(false);
         setFetchError(null);
-        if (primaryArticles.length > 0) {
+        if (isUsableFeedCache(resolvedArticles)) {
           const now = Date.now();
-          cache.set(cacheKey, { articles: primaryArticles, timestamp: now });
-          writeSessionCache(cacheKey, primaryArticles);
+          cache.set(cacheKey, { articles: resolvedArticles, timestamp: now });
+          writeSessionCache(cacheKey, resolvedArticles);
         }
         setLoading(false);
       } catch {
         if (controller.signal.aborted) return;
         if (isNewsApiAiConfigured()) {
           if (!keepCachedArticlesOnFailure()) {
-            if (type === "business") {
-              const seed = BUSINESS_SEED[countryName] || BUSINESS_SEED.default || [];
-              setArticles(seed);
-              setIsFallback(true);
-              setFetchError(null);
-            } else {
-              setArticles([]);
-              setIsFallback(false);
-              setFetchError("Network error");
-            }
+            setArticles([]);
+            setIsFallback(false);
+            setFetchError("Network error");
           }
         } else {
           const seed = type === "business" ? BUSINESS_SEED : GENZ_SEED;

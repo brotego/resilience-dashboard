@@ -13,7 +13,7 @@ import { useJpUi } from "@/i18n/jpUiContext";
 import { getCompanyDisplayName } from "@/i18n/companyLocale";
 import { translateJapaneseArticleRows } from "@/api/translateJapaneseUi";
 import { tr, type Lang, type TranslationKey } from "@/i18n/translations";
-import { invokeNewsFeed } from "@/api/newsFeed";
+import { fetchPagedNewsFeed } from "@/api/newsFeed";
 import { invokeArticleSentimentBatch, invokeSentimentFallbackOpinion, invokeCountryCompanyInsight, ArticleSentiment } from "@/api/aiInsight";
 import { articleStrictlyAboutCompany, isJapanInternationalCoverageArticle } from "@/lib/sentimentArticleFilters";
 
@@ -268,9 +268,9 @@ const CountryOutlookPanel = ({ countryName, mode, selectedCompany, signals, onCl
   const company = selectedCompany ? COMPANIES.find(c => c.id === selectedCompany) : null;
   const businessIndustryQuery = company
     ? [
+        ...company.industryNewsTerms.slice(0, 8),
         company.sector,
-        ...company.keywords.slice(0, 4),
-        ...company.relevantDomains,
+        "commercial real estate economics property market",
       ]
         .filter(Boolean)
         .join(" ")
@@ -351,26 +351,26 @@ const CountryOutlookPanel = ({ countryName, mode, selectedCompany, signals, onCl
     Promise.all([
       withTimeout(
         companyQuery
-          ? invokeNewsFeed({
+          ? fetchPagedNewsFeed({
               type: "sentiment",
               countryCode,
               countryName,
               topicQuery: companyQuery,
-              pageSize: 36,
-            })
+              priority: "interactive",
+            }, { pageSize: 50, pages: 1 })
           : Promise.resolve({ data: { articles: [] }, error: null }),
-        12000,
+        15000,
         { data: { articles: [] }, error: new Error("timeout") },
       ),
       withTimeout(
-        invokeNewsFeed({
+        fetchPagedNewsFeed({
           type: "sentiment",
           countryCode,
           countryName,
           topicQuery: japanQuery,
-          pageSize: 36,
-        }),
-        12000,
+          priority: "interactive",
+        }, { pageSize: 50, pages: 1 }),
+        15000,
         { data: { articles: [] }, error: new Error("timeout") },
       ),
     ]).then(async ([companyData, japanData]) => {
@@ -382,10 +382,10 @@ const CountryOutlookPanel = ({ countryName, mode, selectedCompany, signals, onCl
 
       const companyArticles = rawCompanyArticles
         .filter((a) => !company || articleStrictlyAboutCompany(a, company))
-        .slice(0, 6);
+        .slice(0, 20);
       const japanArticles = rawJapanArticles
         .filter((a) => isJapanInternationalCoverageArticle(a))
-        .slice(0, 6);
+        .slice(0, 20);
 
       const [companySentiment, japanSentiment, companyOpinion, japanOpinion] = await Promise.all([
         withTimeout(

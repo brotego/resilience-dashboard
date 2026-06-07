@@ -17,6 +17,7 @@ import {
   writeSignalBundleCache,
 } from "@/lib/projectSupabaseCache";
 import { DashboardMode } from "@/components/dashboard/DashboardLayout";
+import { matchesCompanyIndustryNews } from "@/lib/companyArticleRelevance";
 
 interface CacheEntry {
   signals: UnifiedSignal[];
@@ -40,14 +41,14 @@ function slimUnifiedSignalsForCache(signals: UnifiedSignal[]): UnifiedSignal[] {
 /** In-memory mirror of persistent TTL: refresh article bundles daily. */
 const CACHE_DURATION = 24 * 60 * 60 * 1000;
 const cache = new Map<string, CacheEntry>();
-const LIVE_CACHE_VERSION = "api-v15-atomic-bundle-ui";
+const LIVE_CACHE_VERSION = "api-v19-map-density";
 const LEGACY_LIVE_CACHE_VERSIONS: string[] = ["api-v10-country-high-volume", "api-v11-company-scoped-24h"];
 const BUSINESS_ARTICLES_PER_PAGE = 100;
 const BUSINESS_PAGES = 2;
 const GENZ_ARTICLES_PER_PAGE = 80;
-const GENZ_PAGES = 3;
+const GENZ_PAGES = 2;
 const MAX_COMPANY_SIGNALS = 500;
-const MIN_COMPANY_SIGNALS = 250;
+const MIN_COMPANY_SIGNALS = 200;
 /** Avoid one wire dominating the map / click stack (per normalized outlet name). */
 const MAX_SIGNALS_PER_SOURCE = 25;
 /** After packing, keep pushing unique countries into the bundle so the map doesn't collapse to a handful of markets. */
@@ -174,14 +175,13 @@ function liveNewsTextMatchesCompanyIndustry(title: string, description: string, 
  * Avoids long intel/brand lists that pull unrelated culture, VC, or city-generic news.
  */
 function buildResilienceMapBusinessTopicQuery(company: Company): string {
-  const desc = (company.description || "").trim();
   const parts = [
-    `"${company.name.replace(/"/g, " ").trim()}"`,
+    ...company.industryNewsTerms.slice(0, 10),
     company.sector,
-    ...company.industryNewsTerms,
-    desc.length > 140 ? `${desc.slice(0, 140)}…` : desc,
+    "commercial real estate economics property market",
+    `"${company.name.replace(/"/g, " ").trim()}"`,
   ];
-  let q = parts.join(" ").replace(/\s+/g, " ").trim();
+  let q = [...new Set(parts.filter(Boolean))].join(" ").replace(/\s+/g, " ").trim();
   if (q.length > MAX_ER_TOPIC_CHARS) q = q.slice(0, MAX_ER_TOPIC_CHARS);
   return q;
 }
@@ -665,6 +665,7 @@ async function fetchPagedArticles(
       pageSize,
       page: pageIndex + 1,
       topicQuery,
+      priority: "background",
     });
     if (isProviderLimitedResponse(data)) {
       return { articles, providerLimited: true };
@@ -690,10 +691,8 @@ async function fetchGenZArticleBuckets(
   const buckets = [
     `Gen Z youth culture social media TikTok creator economy${hint}`.trim(),
     `Gen Z worklife burnout career remote work gig economy${hint}`.trim(),
-    `Gen Z climate activism sustainability community belonging${hint}`.trim(),
     `young adults students university campus digital behavior social apps${hint}`.trim(),
     `Gen Z spending trends brand loyalty creator content video platforms${hint}`.trim(),
-    `youth employment internships side hustle creator monetization${hint}`.trim(),
   ];
   const seen = new Set<string>();
   const merged: any[] = [];
@@ -1000,7 +999,10 @@ export function useUnifiedSignals(
         return looksLikeGenZNews(s) && (industryRelevant || companyRelevanceScore(s) >= 1);
       }
       if (selectedCompanyData.industryNewsTerms.length > 0) {
-        return strictIndustryRelevant(title, description);
+        return (
+          matchesCompanyIndustryNews(selectedCompanyData, title, description) ||
+          companyRelevanceScore(s) >= 2
+        );
       }
       return (
         (companyNameLower && text.includes(companyNameLower)) ||
@@ -1035,8 +1037,8 @@ export function useUnifiedSignals(
             const sd = s.description || "";
             if (selectedCompanyData.industryNewsTerms.length > 0) {
               return (
-                strictIndustryRelevant(st, sd) ||
-                companyRelevanceScore(s) >= 10
+                matchesCompanyIndustryNews(selectedCompanyData, st, sd) ||
+                companyRelevanceScore(s) >= 4
               );
             }
             const text = `${st} ${sd}`.toLowerCase();
@@ -1077,8 +1079,8 @@ export function useUnifiedSignals(
           if (
             mode !== "genz" &&
             selectedCompanyData?.industryNewsTerms.length &&
-            !strictIndustryRelevant(extra.title || "", extra.description || "") &&
-            companyRelevanceScore(extra) < 12
+            !matchesCompanyIndustryNews(selectedCompanyData, extra.title || "", extra.description || "") &&
+            companyRelevanceScore(extra) < 8
           ) {
             continue;
           }
@@ -1117,7 +1119,8 @@ export function useUnifiedSignals(
         if (
           mode !== "genz" &&
           selectedCompanyData?.industryNewsTerms.length &&
-          !strictIndustryRelevant(s.title || "", s.description || "")
+          !matchesCompanyIndustryNews(selectedCompanyData, s.title || "", s.description || "") &&
+          companyRelevanceScore(s) < 4
         ) {
           continue;
         }
@@ -1155,8 +1158,11 @@ export function useUnifiedSignals(
         ttlHours: 24,
       });
     };
-    /** In API mode we still warm the UI from local cache, but continue fetch to refresh shared source-of-truth. */
-    const canShortCircuitFromLocalCache = !apiConfigured;
+    const canShortCircuitFromLocalCache = (signals: UnifiedSignal[], savedAt: number): boolean => {
+      if (signals.length < MIN_COMPANY_SIGNALS) return false;
+      if (Date.now() - savedAt >= CACHE_DURATION) return false;
+      return true;
+    };
 
     type SharedBundleRow = NonNullable<Awaited<ReturnType<typeof readSignalBundleCache<UnifiedSignal[]>>>>;
 
@@ -1224,7 +1230,7 @@ export function useUnifiedSignals(
         setIsLive(true);
         setLoading(false);
       }
-      if (canShortCircuitFromLocalCache) return;
+      if (canShortCircuitFromLocalCache(filtered, memoryHit.timestamp)) return;
     }
 
     const fetchAll = async (
@@ -1255,8 +1261,7 @@ export function useUnifiedSignals(
             }
           }
         }
-        // Prefer cached Supabase payload immediately; background refresh happens on next normal reload cycle.
-        if (filtered.length > 0) {
+        if (filtered.length >= MIN_COMPANY_SIGNALS) {
           return;
         }
       }
@@ -1291,11 +1296,6 @@ export function useUnifiedSignals(
               // Early in the run we allow youth-relevant but weakly branded items so
               // smaller company profiles can still fill density targets.
               if (!industryRelevant && results.length >= 140) return [];
-            }
-            if (mode === "resilience" && selectedCompanyData?.industryNewsTerms.length) {
-              const at = String(a?.title || "");
-              const ad = String(a?.description || "");
-              if (!strictIndustryRelevant(at, ad)) return [];
             }
             const dom = resolveArticleDomain(selectedCompanyData, a);
             // Avoid starving Gen Z map when inference is uncertain:
@@ -1370,9 +1370,16 @@ export function useUnifiedSignals(
             providerLimited = true;
             continue;
           }
-          if (!bizResult.providerLimited && bizResult.articles.length < 18) {
-            const relaxedBiz = await fetchPagedArticles("business", country, BUSINESS_ARTICLES_PER_PAGE, BUSINESS_PAGES, businessTopicQueryFallback)
-              .catch(() => ({ articles: [] as any[], providerLimited: false }));
+          if (!bizResult.providerLimited && bizResult.articles.length < 40) {
+            const broadBizQuery =
+              "business finance economy commercial real estate office market property economics urban development";
+            const relaxedBiz = await fetchPagedArticles(
+              "business",
+              country,
+              BUSINESS_ARTICLES_PER_PAGE,
+              BUSINESS_PAGES,
+              broadBizQuery,
+            ).catch(() => ({ articles: [] as any[], providerLimited: false }));
             if (!relaxedBiz.providerLimited && relaxedBiz.articles.length > bizResult.articles.length) bizResult = relaxedBiz;
           }
 
@@ -1381,6 +1388,8 @@ export function useUnifiedSignals(
 
         // Progressive hydration: show what's available rather than waiting for the full world sweep.
         flushPartialToUi();
+
+        if (finalizeSignals(results).length >= MIN_COMPANY_SIGNALS) break;
 
         if (idx % 10 === 9 && results.length > 0 && !cancelled) {
           writeSessionCache(signalBundleCacheKey, slimUnifiedSignalsForCache(finalizeSignals(results)));
@@ -1444,7 +1453,7 @@ export function useUnifiedSignals(
           const query = mode === "genz"
             ? `Gen Z youth social media young adults ${genzTopicQueryFallback}`.trim()
             : `${businessTopicQueryStrict} ${businessTopicQueryFallback}`.trim();
-          const fillRes = await fetchPagedArticles(type, country, 80, 1, query)
+          const fillRes = await fetchPagedArticles(type, country, 100, 2, query)
             .catch(() => ({ articles: [] as any[], providerLimited: false }));
           appendLiveArticles(fillRes.articles, country, mode === "genz" ? "live-gz-fill" : "live-biz-fill");
           flushPartialToUi();
@@ -1580,7 +1589,7 @@ export function useUnifiedSignals(
             setIsLive(true);
             setLoading(false);
           }
-          if (canShortCircuitFromLocalCache) return;
+          if (canShortCircuitFromLocalCache(filtered, sessionEntryEarly.savedAt)) return;
         }
 
         const persistentEntry =
@@ -1594,7 +1603,7 @@ export function useUnifiedSignals(
             setIsLive(true);
             setLoading(false);
           }
-          if (canShortCircuitFromLocalCache) return;
+          if (canShortCircuitFromLocalCache(filtered, persistentEntry.savedAt)) return;
         }
         const durableSharedEntry = readPersistentCache<UnifiedSignal[]>(durableKey);
         if (durableSharedEntry?.data?.length) {
@@ -1605,7 +1614,7 @@ export function useUnifiedSignals(
             setIsLive(true);
             setLoading(false);
           }
-          if (canShortCircuitFromLocalCache) return;
+          if (canShortCircuitFromLocalCache(filtered, durableSharedEntry.savedAt)) return;
         }
       }
 

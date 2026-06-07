@@ -6,13 +6,61 @@
 const MAX_ARTICLE_BODY_STORE_CHARS = 150_000;
 
 const STANDARD_PLAN_MAX_LIMIT = 100;
-const DEFAULT_ARTICLE_LIMIT = 5;
+const DEFAULT_ARTICLE_LIMIT = 40;
 const DEFAULT_EVENT_REGISTRY_ORIGIN = "https://eventregistry.org";
 const PROVIDER_COOLDOWN_MS = 8 * 1000;
-const MIN_REQUEST_SPACING_MS = 350;
+const MIN_REQUEST_SPACING_MS = 150;
+const LIST_ARTICLE_BODY_LEN = 600;
+const MAX_CONCURRENT_REQUESTS = 2;
 let providerCooldownUntil = 0;
 let lastRequestAt = 0;
-let requestGate: Promise<void> = Promise.resolve();
+let activeRequests = 0;
+
+type RequestPriority = "interactive" | "background";
+type QueuedRequest = {
+  priority: RequestPriority;
+  run: () => Promise<void>;
+};
+const requestQueue: QueuedRequest[] = [];
+let drainingQueue = false;
+
+function enqueueRequest<T>(priority: RequestPriority, work: () => Promise<T>): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    requestQueue.push({
+      priority,
+      run: async () => {
+        try {
+          resolve(await work());
+        } catch (err) {
+          reject(err);
+        }
+      },
+    });
+    requestQueue.sort((a, b) => {
+      if (a.priority === b.priority) return 0;
+      return a.priority === "interactive" ? -1 : 1;
+    });
+    void drainRequestQueue();
+  });
+}
+
+async function drainRequestQueue(): Promise<void> {
+  if (drainingQueue) return;
+  drainingQueue = true;
+  try {
+    while (requestQueue.length > 0 && activeRequests < MAX_CONCURRENT_REQUESTS) {
+      const job = requestQueue.shift();
+      if (!job) break;
+      activeRequests++;
+      void job.run().finally(() => {
+        activeRequests--;
+        void drainRequestQueue();
+      });
+    }
+  } finally {
+    drainingQueue = false;
+  }
+}
 
 function isProviderLimitedMessage(msg: string): boolean {
   return /429|403|forbidden|rate|too many|quota|limit exceeded|throttl/i.test(msg);
@@ -118,6 +166,10 @@ export type NewsFeedRequestBody = {
   pageSize?: number;
   page?: number;
   topicQuery?: string;
+  /** Panel/country requests jump ahead of background map hydration. */
+  priority?: RequestPriority;
+  /** Skip full article bodies for list views (full text loads on article open). */
+  articleBodyLen?: number;
 };
 
 export type NewsFeedArticle = {
@@ -189,14 +241,14 @@ function eventRegistryArticlePayload(
   page: number,
   count: number,
   query: Record<string, unknown>,
+  articleBodyLen: number,
 ): Record<string, unknown> {
   return {
     action: "getArticles",
     apiKey,
     forceMaxDataTimeWindow: 31,
     resultType: ["articles"],
-    /** Full article body; without this, Event Registry often returns a short excerpt only. */
-    articlesArticleBodyLen: -1,
+    articlesArticleBodyLen: articleBodyLen,
     articlesPage: page,
     articlesCount: Math.min(Math.max(count, 1), 100),
     articlesSortBy: "date",
@@ -207,98 +259,196 @@ function eventRegistryArticlePayload(
   };
 }
 
-async function postEventRegistry(
+async function executeEventRegistryRequest(
   payload: Record<string, unknown>,
+  priority: RequestPriority,
 ): Promise<{ data: NewsFeedData | null; error: Error | null }> {
-  // Global gate: serialize provider calls so we don't burst multiple requests at once.
-  const prior = requestGate;
-  let release!: () => void;
-  requestGate = new Promise<void>((resolve) => {
-    release = resolve;
-  });
-  await prior;
-
-  const sinceLast = Date.now() - lastRequestAt;
-  if (sinceLast < MIN_REQUEST_SPACING_MS) {
-    await new Promise((r) => setTimeout(r, MIN_REQUEST_SPACING_MS - sinceLast));
+  if (priority === "background") {
+    const sinceLast = Date.now() - lastRequestAt;
+    if (sinceLast < MIN_REQUEST_SPACING_MS) {
+      await new Promise((r) => setTimeout(r, MIN_REQUEST_SPACING_MS - sinceLast));
+    }
   }
 
   if (Date.now() < providerCooldownUntil) {
-    // Soft cooldown: pause briefly, then probe again so requests/logs don't go silent.
-    const waitMs = Math.min(providerCooldownUntil - Date.now(), 2000);
+    const waitMs = Math.min(providerCooldownUntil - Date.now(), priority === "interactive" ? 500 : 2000);
     if (waitMs > 0) {
       await new Promise((r) => setTimeout(r, waitMs));
     }
   }
 
-  try {
-    lastRequestAt = Date.now();
-    const url = getEventRegistryArticleUrl();
-    const response = await fetch(url, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
-    });
+  lastRequestAt = Date.now();
+  const url = getEventRegistryArticleUrl();
+  const response = await fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
 
-    const text = await response.text();
-    let json: Record<string, unknown> | null = null;
-    if (text) {
-      try {
-        json = JSON.parse(text) as Record<string, unknown>;
-      } catch {
-        json = null;
-      }
+  const text = await response.text();
+  let json: Record<string, unknown> | null = null;
+  if (text) {
+    try {
+      json = JSON.parse(text) as Record<string, unknown>;
+    } catch {
+      json = null;
     }
+  }
 
-    if (!response.ok) {
-      const retryAfterMs = parseRetryAfterMs(response.headers.get("retry-after"));
-      if (response.status === 429 || response.status === 403) {
-        providerCooldownUntil = Date.now() + (retryAfterMs ?? PROVIDER_COOLDOWN_MS);
-      }
-      let msg: string;
-      if (json && json.error !== undefined) {
-        msg = typeof json.error === "string" ? json.error : JSON.stringify(json.error);
-      } else {
-        msg = text?.trim() || `HTTP ${response.status}`;
-      }
-      return {
-        data: {
-          articles: [],
-          fallback: true,
-          error: `NewsAPI.ai: ${msg}`,
-        },
-        error: null,
-      };
+  if (!response.ok) {
+    const retryAfterMs = parseRetryAfterMs(response.headers.get("retry-after"));
+    if (response.status === 429 || response.status === 403) {
+      providerCooldownUntil = Date.now() + (retryAfterMs ?? PROVIDER_COOLDOWN_MS);
     }
-
-    if (!json) {
-      return {
-        data: { articles: [], fallback: true, error: "NewsAPI.ai: empty or non-JSON response" },
-        error: null,
-      };
+    let msg: string;
+    if (json && json.error !== undefined) {
+      msg = typeof json.error === "string" ? json.error : JSON.stringify(json.error);
+    } else {
+      msg = text?.trim() || `HTTP ${response.status}`;
     }
-
-    if (json.error !== undefined) {
-      const msg =
-        typeof json.error === "string" ? json.error : JSON.stringify(json.error);
-      if (isProviderLimitedMessage(msg)) {
-        providerCooldownUntil = Date.now() + PROVIDER_COOLDOWN_MS;
-      }
-      return { data: { articles: [], fallback: true, error: msg }, error: null };
-    }
-
-    const results =
-      json.articles && typeof json.articles === "object"
-        ? (json.articles as { results?: unknown }).results
-        : undefined;
-
     return {
-      data: { articles: normalizeErArticles(results), meta: json },
+      data: {
+        articles: [],
+        fallback: true,
+        error: `NewsAPI.ai: ${msg}`,
+      },
       error: null,
     };
-  } finally {
-    release();
   }
+
+  if (!json) {
+    return {
+      data: { articles: [], fallback: true, error: "NewsAPI.ai: empty or non-JSON response" },
+      error: null,
+    };
+  }
+
+  if (json.error !== undefined) {
+    const msg =
+      typeof json.error === "string" ? json.error : JSON.stringify(json.error);
+    if (isProviderLimitedMessage(msg)) {
+      providerCooldownUntil = Date.now() + PROVIDER_COOLDOWN_MS;
+    }
+    return { data: { articles: [], fallback: true, error: msg }, error: null };
+  }
+
+  const results =
+    json.articles && typeof json.articles === "object"
+      ? (json.articles as { results?: unknown }).results
+      : undefined;
+
+  return {
+    data: { articles: normalizeErArticles(results), meta: json },
+    error: null,
+  };
+}
+
+async function postEventRegistry(
+  payload: Record<string, unknown>,
+  priority: RequestPriority,
+): Promise<{ data: NewsFeedData | null; error: Error | null }> {
+  // Panel/country requests must not wait behind the map hydration queue.
+  if (priority === "interactive") {
+    return executeEventRegistryRequest(payload, priority);
+  }
+  return enqueueRequest(priority, () => executeEventRegistryRequest(payload, priority));
+}
+
+function mergeFeedArticles(primary: NewsFeedArticle[], secondary: NewsFeedArticle[]): NewsFeedArticle[] {
+  const seen = new Set<string>();
+  const merged: NewsFeedArticle[] = [];
+  for (const article of [...primary, ...secondary]) {
+    const key = article.url || `${article.title}-${article.date}-${article.source}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    merged.push(article);
+  }
+  return merged;
+}
+
+/** Minimum articles before we treat a country feed as successfully hydrated. */
+export const MIN_COUNTRY_FEED_ARTICLES = 25;
+
+/** One country business pull: targeted + broad queries in parallel (multi-page), merged. */
+export async function fetchCountryBusinessNewsFeed(
+  body: Pick<NewsFeedRequestBody, "countryCode" | "countryName" | "topicQuery">,
+  options?: { pageSize?: number; pages?: number; onPage?: (articles: NewsFeedArticle[]) => void },
+): Promise<{ data: NewsFeedData | null; error: Error | null }> {
+  const pageSize = Math.min(Math.max(options?.pageSize ?? 100, 1), STANDARD_PLAN_MAX_LIMIT);
+  const pages = Math.max(options?.pages ?? 2, 1);
+  const base = {
+    type: "business" as const,
+    countryCode: body.countryCode,
+    countryName: body.countryName,
+    priority: "interactive" as const,
+  };
+  const topicQuery = (body.topicQuery || "").trim();
+  const broadQuery =
+    "business finance economy commercial real estate office market property economics urban development";
+
+  const pull = (query: string) =>
+    fetchPagedNewsFeed({ ...base, topicQuery: query }, { pageSize, pages, onPage: options?.onPage });
+
+  const responses = await Promise.all([
+    topicQuery ? pull(topicQuery) : Promise.resolve({ data: { articles: [] as NewsFeedArticle[] }, error: null }),
+    pull(broadQuery),
+  ]);
+
+  const targeted = responses[0].data?.articles ?? [];
+  const broad = responses[1].data?.articles ?? [];
+  const articles = topicQuery ? mergeFeedArticles(targeted, broad) : mergeFeedArticles([], broad);
+
+  const errors = responses.map((res) => res.data?.error).filter(Boolean);
+  return {
+    data: {
+      articles,
+      fallback: articles.length === 0,
+      error: articles.length === 0 ? (errors[0] as string | undefined) : undefined,
+    },
+    error: responses.find((res) => res.error)?.error ?? null,
+  };
+}
+
+/** Fetch multiple pages, dedupe by URL/title, and merge into one feed response. */
+export async function fetchPagedNewsFeed(
+  body: NewsFeedRequestBody,
+  options?: { pageSize?: number; pages?: number; onPage?: (articles: NewsFeedArticle[]) => void },
+): Promise<{ data: NewsFeedData | null; error: Error | null }> {
+  const pageSize = Math.min(Math.max(options?.pageSize ?? 40, 1), STANDARD_PLAN_MAX_LIMIT);
+  const pages = Math.max(options?.pages ?? 1, 1);
+  const seen = new Set<string>();
+  const articles: NewsFeedArticle[] = [];
+  let lastError: string | undefined;
+  let hadFallback = false;
+
+  for (let page = 1; page <= pages; page++) {
+    const res = await invokeNewsFeed({ ...body, pageSize, page });
+    if (res.error) return res;
+    const data = res.data;
+    if (!data) continue;
+    if (data.fallback) hadFallback = true;
+    if (data.error) lastError = data.error;
+    if (!Array.isArray(data.articles)) continue;
+    const pageBatch: NewsFeedArticle[] = [];
+    for (const article of data.articles) {
+      const key = article.url || `${article.title}-${article.date}-${article.source}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      articles.push(article);
+      pageBatch.push(article);
+    }
+    if (pageBatch.length > 0) options?.onPage?.(pageBatch);
+    if (data.articles.length < pageSize) break;
+  }
+
+  return {
+    data: {
+      articles,
+      fallback: hadFallback && articles.length === 0,
+      error: articles.length === 0 ? lastError : undefined,
+    },
+    error: null,
+  };
 }
 
 /**
@@ -326,7 +476,14 @@ export async function invokeNewsFeed(body: NewsFeedRequestBody): Promise<{ data:
       pageSize,
       page,
       topicQuery,
+      priority,
+      articleBodyLen,
     } = body;
+    const requestPriority: RequestPriority = priority ?? "interactive";
+    const bodyLen =
+      typeof articleBodyLen === "number" && Number.isFinite(articleBodyLen)
+        ? Math.trunc(articleBodyLen)
+        : LIST_ARTICLE_BODY_LEN;
 
     if (!type) {
       return { data: { articles: [], error: "Missing type param" }, error: null };
@@ -352,14 +509,14 @@ export async function invokeNewsFeed(body: NewsFeedRequestBody): Promise<{ data:
       payload = eventRegistryArticlePayload(apiKey, currentPage, size, {
         keyword,
         sourceLocationUri: locUri,
-      });
+      }, bodyLen);
     } else if (type === "genz") {
       const base = "Gen Z TikTok viral youth culture sustainability";
       const keyword = topicQuery ? `${base} ${topicQuery}` : base;
       payload = eventRegistryArticlePayload(apiKey, currentPage, size, {
         keyword,
         sourceLocationUri: locUri,
-      });
+      }, bodyLen);
     } else if (type === "domain") {
       const text = domain ? DOMAIN_KEYWORDS_ER[domain] : undefined;
       if (!text) {
@@ -368,7 +525,7 @@ export async function invokeNewsFeed(body: NewsFeedRequestBody): Promise<{ data:
       const keywordStr = countryName ? `${text} ${countryName}` : text;
       payload = eventRegistryArticlePayload(apiKey, currentPage, size, {
         keyword: keywordStr,
-      });
+      }, bodyLen);
     } else if (type === "sentiment") {
       if (!topicQuery || typeof topicQuery !== "string") {
         return { data: { articles: [], error: "Missing topicQuery" }, error: null };
@@ -379,12 +536,12 @@ export async function invokeNewsFeed(body: NewsFeedRequestBody): Promise<{ data:
       };
       // Country panel sentiment should reflect that country's media perspective.
       if (locUri) sentimentQuery.sourceLocationUri = locUri;
-      payload = eventRegistryArticlePayload(apiKey, currentPage, size, sentimentQuery);
+      payload = eventRegistryArticlePayload(apiKey, currentPage, size, sentimentQuery, bodyLen);
     } else {
       return { data: { articles: [], error: "Invalid type" }, error: null };
     }
 
-    return await postEventRegistry(payload);
+    return await postEventRegistry(payload, requestPriority);
   } catch (err) {
     return {
       data: { articles: [], fallback: true, error: err instanceof Error ? err.message : "Network error" },

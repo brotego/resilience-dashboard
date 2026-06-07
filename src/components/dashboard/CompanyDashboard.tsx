@@ -10,7 +10,7 @@ import { calculateResilienceScore } from "@/lib/resilienceScore";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { useLang } from "@/i18n/LanguageContext";
 import type { TranslationKey } from "@/i18n/translations";
-import { invokeNewsFeed } from "@/api/newsFeed";
+import { fetchPagedNewsFeed } from "@/api/newsFeed";
 import {
   invokeArticleSentimentBatch,
   invokeSentimentFallbackOpinion,
@@ -23,6 +23,10 @@ import {
   articleStrictlyAboutCompany,
   isJapanInternationalCoverageArticle,
 } from "@/lib/sentimentArticleFilters";
+import {
+  passesCompanyNewsletterGate,
+  scoreCompanyNewsRelevance,
+} from "@/lib/companyArticleRelevance";
 import { ChevronDown, ChevronUp, ArrowRight } from "lucide-react";
 
 function clipNewsletterText(s: string, max: number): string {
@@ -173,8 +177,45 @@ const CompanyDashboard = ({ selectedCompany, signals, signalsLoading = false, on
 
   const scoreTrend = overallScore > 65 ? "up" : overallScore < 50 ? "down" : "stable";
 
+  const newsletterCandidates = useMemo(
+    () => {
+      const scored = filteredSignals
+        .filter((s) => s.layer === "live-news")
+        .map((s) => ({
+          s,
+          relevance: scoreCompanyNewsRelevance(company, s.title || "", s.description || ""),
+        }))
+        .filter((row) => row.relevance > 0)
+        .sort((a, b) => {
+          if (b.relevance !== a.relevance) return b.relevance - a.relevance;
+          const d = b.s._date.getTime() - a.s._date.getTime();
+          if (d !== 0) return d;
+          return b.s.resilienceScore - a.resilienceScore;
+        });
+
+      const strict = scored.filter((row) =>
+        passesCompanyNewsletterGate(company, row.s.title || "", row.s.description || ""),
+      );
+      const relaxed = scored.filter((row) => row.relevance >= 6);
+      const chosen =
+        strict.length >= 5 ? strict : relaxed.length >= 5 ? relaxed : strict.length > 0 ? strict : relaxed;
+
+      return chosen.slice(0, 30).map(({ s }) => ({
+        id: s.id,
+        title: s.title,
+        description: s.description,
+        source: s.source,
+        location: s.location,
+        urgency: s.urgency,
+        domain: s.domain || s.category,
+        articleUrl: s.articleUrl,
+      }));
+    },
+    [filteredSignals, company],
+  );
+
   const fallbackNewsletter = useMemo(() => {
-    const top = filteredSignals.slice(0, 5);
+    const top = newsletterCandidates.slice(0, 5);
     const positives = top.filter((s) => s.urgency === "low" || s.urgency === "medium");
     const negatives = top.filter((s) => s.urgency === "high" || s.urgency === "critical");
     const hotspots = Array.from(new Set(top.map((s) => s.location))).slice(0, 3);
@@ -266,7 +307,7 @@ const CompanyDashboard = ({ selectedCompany, signals, signalsLoading = false, on
       risingRisks,
       risingOpportunities,
     };
-  }, [filteredSignals, company.name, lang, t]);
+  }, [newsletterCandidates, company.name, lang, t]);
   const newsletter: NewsletterBlock = aiNewsletter || fallbackNewsletter;
 
   const openRoundupEntry = useCallback(
@@ -392,13 +433,19 @@ const CompanyDashboard = ({ selectedCompany, signals, signalsLoading = false, on
 
     Promise.all([
       withTimeout(
-        invokeNewsFeed({ type: "sentiment", topicQuery: companyQuery, pageSize: 45 }),
-        12000,
+        fetchPagedNewsFeed(
+          { type: "sentiment", topicQuery: companyQuery, priority: "interactive" },
+          { pageSize: 50, pages: 1 },
+        ),
+        15000,
         { data: { articles: [] }, error: new Error("timeout") },
       ),
       withTimeout(
-        invokeNewsFeed({ type: "sentiment", topicQuery: japanQuery, pageSize: 45 }),
-        12000,
+        fetchPagedNewsFeed(
+          { type: "sentiment", topicQuery: japanQuery, priority: "interactive" },
+          { pageSize: 50, pages: 1 },
+        ),
+        15000,
         { data: { articles: [] }, error: new Error("timeout") },
       ),
     ])
@@ -411,10 +458,10 @@ const CompanyDashboard = ({ selectedCompany, signals, signalsLoading = false, on
 
         const companyArticles = rawCompanyArticles
           .filter((a) => articleStrictlyAboutCompany(a, company))
-          .slice(0, 8);
+          .slice(0, 20);
         const japanArticles = rawJapanArticles
           .filter((a) => isJapanInternationalCoverageArticle(a))
-          .slice(0, 8);
+          .slice(0, 20);
 
         const [companySentiment, japanSentiment, companyOpinion, japanOpinion] = await Promise.all([
           withTimeout(
@@ -572,74 +619,6 @@ const CompanyDashboard = ({ selectedCompany, signals, signalsLoading = false, on
     };
   }, [company.id, companyAiContext, lang]);
 
-  const newsletterCandidates = useMemo(
-    () => {
-      const companyName = company.name.toLowerCase();
-      const brandMarkers = (company.sentimentBrandMarkers ?? [])
-        .map((m) => m.toLowerCase())
-        .filter((m) => m.length >= 4);
-      const keywordSet = company.keywords
-        .map((k) => k.toLowerCase())
-        .filter((k) => k.length >= 4);
-      const sectorBits = company.sector
-        .toLowerCase()
-        .split(/[^a-z0-9+]+/)
-        .filter((w) => w.length >= 4 && !["group", "services", "industry", "industries"].includes(w));
-
-      const scoreSignalRelevance = (s: UnifiedSignal & { _date: Date }) => {
-        const text = `${s.title || ""} ${s.description || ""}`.toLowerCase();
-        let score = 0;
-        if (companyName && text.includes(companyName)) score += 12;
-        for (const marker of brandMarkers) {
-          if (text.includes(marker)) score += 8;
-        }
-        let kwHits = 0;
-        for (const kw of keywordSet) {
-          if (text.includes(kw)) kwHits += 1;
-        }
-        score += Math.min(5, kwHits) * 3;
-        for (const bit of sectorBits) {
-          if (text.includes(bit)) score += 1;
-        }
-        if (s.articleUrl && s.articleUrl !== "#") score += 1;
-        const hasStrongCompanyTie =
-          (companyName && text.includes(companyName)) || brandMarkers.some((m) => text.includes(m));
-        const looksOffTopicNews =
-          /\b(red carpet|celebrity|movie premiere|eredivisie|la liga|premier league|champions league|serie a|match report|injury update|dresses worn)\b/i.test(
-            text,
-          );
-        if (looksOffTopicNews && !hasStrongCompanyTie) score -= 10;
-        return Math.max(0, score);
-      };
-
-      const base = filteredSignals
-        .filter((s) => s.layer === "live-news")
-        .map((s) => ({ s, relevance: scoreSignalRelevance(s) }))
-        .sort((a, b) => {
-          if (b.relevance !== a.relevance) return b.relevance - a.relevance;
-          const d = b.s._date.getTime() - a.s._date.getTime();
-          if (d !== 0) return d;
-          return b.s.resilienceScore - a.s.resilienceScore;
-        });
-
-      // Absolute relevance gate first; relax only if we don't have enough article candidates.
-      const strict = base.filter((row) => row.relevance >= 10);
-      const medium = base.filter((row) => row.relevance >= 6);
-      const chosen = strict.length >= 8 ? strict : medium.length >= 10 ? medium : base;
-
-      return chosen.slice(0, 30).map(({ s }) => ({
-        id: s.id,
-        title: s.title,
-        description: s.description,
-        source: s.source,
-        location: s.location,
-        urgency: s.urgency,
-        domain: s.domain || s.category,
-        articleUrl: s.articleUrl,
-      }));
-    },
-    [filteredSignals, company.name, company.sector, company.keywords, company.sentimentBrandMarkers],
-  );
   const newsletterCandidatesKey = useMemo(
     () => newsletterCandidates.map((s) => `${s.id}:${s.title}:${s.articleUrl ?? ""}`).join("|"),
     [newsletterCandidates],
