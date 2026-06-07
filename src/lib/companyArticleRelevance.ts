@@ -108,18 +108,54 @@ export function matchesCompanyIndustryNews(company: Company, title: string, desc
 /** Event Registry / news API keyword string: industry + economics, not name-only. */
 export function buildCompanyIndustryNewsQuery(company: Company): string {
   const parts = [
-    ...company.industryNewsTerms.slice(0, 10),
-    company.sector,
+    ...company.industryNewsTerms.slice(0, 6),
+    company.sector.split(/&| and /i)[0]?.trim() || company.sector,
   ];
   if (company.sector.toLowerCase().includes("real estate")) {
-    parts.push(
-      "commercial real estate",
-      "office market",
-      "property market",
-      "real estate economics",
-      "urban development",
-    );
+    parts.push("commercial real estate", "office market", "property market");
   }
   parts.push(`"${company.name.replace(/"/g, " ").trim()}"`);
-  return [...new Set(parts.filter(Boolean))].join(" ").replace(/\s+/g, " ").trim().slice(0, 480);
+  return [...new Set(parts.filter(Boolean))].join(" ").replace(/\s+/g, " ").trim().slice(0, 220);
+}
+
+const MAX_MAP_KEYWORD_CHARS = 160;
+
+/** Broad industry keywords for the global map — not company names or curated term lists. */
+const SECTOR_MAP_KEYWORDS: Record<string, string> = {
+  "real estate": "commercial real estate property market urban development",
+  publish: "publishing media books industry",
+  media: "media publishing content industry",
+  entertain: "entertainment video games interactive media industry",
+  game: "video games gaming entertainment industry",
+  telecom: "telecommunications technology connectivity industry",
+  hr: "workforce employment labor market staffing",
+  staff: "workforce employment labor market staffing",
+  food: "food beverage consumer industry market",
+  beverage: "beverages consumer market health wellness",
+  health: "health wellness consumer pharmaceuticals industry",
+  tech: "technology business innovation industry market",
+};
+
+function sectorMapKeyword(sector: string): string | null {
+  const s = sector.toLowerCase();
+  for (const [needle, keyword] of Object.entries(SECTOR_MAP_KEYWORDS)) {
+    if (s.includes(needle)) return keyword;
+  }
+  return null;
+}
+
+/**
+ * One general industry keyword per country (Event Registry `keyword` field).
+ * Country scope is sourceLocationUri; company relevance is scored after fetch.
+ */
+export function buildResilienceMapKeyword(company: Company | null): string {
+  if (!company) {
+    return "business economy finance industry market".slice(0, MAX_MAP_KEYWORD_CHARS);
+  }
+
+  const matched = sectorMapKeyword(company.sector);
+  if (matched) return matched.slice(0, MAX_MAP_KEYWORD_CHARS);
+
+  const sectorLabel = (company.sector.split(/&| and /i)[0]?.trim() || "business").slice(0, 40);
+  return `${sectorLabel} industry market`.replace(/\s+/g, " ").trim().slice(0, MAX_MAP_KEYWORD_CHARS);
 }

@@ -10,9 +10,11 @@ const STANDARD_PLAN_MAX_LIMIT = 100;
 const DEFAULT_ARTICLE_LIMIT = 40;
 const DEFAULT_EVENT_REGISTRY_ORIGIN = "https://eventregistry.org";
 const PROVIDER_COOLDOWN_MS = 8 * 1000;
-const MIN_REQUEST_SPACING_MS = 150;
-const LIST_ARTICLE_BODY_LEN = 600;
-const MAX_CONCURRENT_REQUESTS = 2;
+const MIN_REQUEST_SPACING_MS = 40;
+/** Excerpt length for map/list feeds — never request full bodies (-1) on bulk loads. */
+export const MAP_ARTICLE_BODY_LEN = 280;
+const LIST_ARTICLE_BODY_LEN = MAP_ARTICLE_BODY_LEN;
+const MAX_CONCURRENT_REQUESTS = 12;
 let providerCooldownUntil = 0;
 let lastRequestAt = 0;
 let activeRequests = 0;
@@ -512,7 +514,7 @@ export async function invokeNewsFeed(body: NewsFeedRequestBody): Promise<{ data:
         sourceLocationUri: locUri,
       }, bodyLen);
     } else if (type === "genz") {
-      const keyword = topicQuery ? `${GENZ_NEWS_API_BASE_KEYWORD} ${topicQuery}` : GENZ_NEWS_API_BASE_KEYWORD;
+      const keyword = topicQuery?.trim() || GENZ_NEWS_API_BASE_KEYWORD;
       payload = eventRegistryArticlePayload(apiKey, currentPage, size, {
         keyword,
         sourceLocationUri: locUri,
