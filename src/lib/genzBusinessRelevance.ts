@@ -194,11 +194,30 @@ export function looksLikeBusinessGenZNews(title: string, description: string, co
   return scoreGenZBusinessRelevance(title, description, content) >= 3;
 }
 
-/** Default Event Registry prefix for type=genz when no topicQuery is passed. */
-export const GENZ_NEWS_API_BASE_KEYWORD =
-  "Gen Z young adults consumer workforce social media brand trends youth market";
-
-/** General Gen Z keyword for every country — not company-specific. */
-export function buildGenZMapKeyword(_company: { sector: string } | null): string {
-  return "Gen Z youth consumer workforce social media trends culture economy".slice(0, 120);
+/**
+ * Event Registry keyword buckets — one per Gen Z dashboard category, business-intelligence framed.
+ */
+export function buildGenZMapSearchBuckets(companyHint?: string): string[] {
+  const hint = companyHint?.trim() ? ` ${companyHint.trim()}` : "";
+  return [
+    `Gen Z consumer spending brand loyalty purchase behavior retail marketing young shoppers${hint}`,
+    `Gen Z workforce talent hiring career flexible work remote burnout side hustle employer brand${hint}`,
+    `Gen Z sustainability ethical consumption climate-conscious brand transparency green marketing${hint}`,
+    `Gen Z creator economy social media TikTok influencer marketing digital platforms youth advertising${hint}`,
+    `Gen Z community belonging loneliness mental health workplace culture young adults social trends${hint}`,
+  ];
 }
+
+/** Broader top-up queries when country buckets under-fill the map. */
+export function buildGenZMapTopUpQueries(companyHint?: string): string[] {
+  const hint = companyHint?.trim() ? ` ${companyHint.trim()}` : "";
+  return [
+    `Gen Z young consumers spending trends brand behavior market research demographics${hint}`,
+    `Gen Z workforce employment talent retention workplace expectations young employees${hint}`,
+    `Gen Z social media platform trends creator content marketing youth digital behavior${hint}`,
+  ];
+}
+
+/** Default Event Registry prefix for type=genz requests (merged with topicQuery in newsFeed). */
+export const GENZ_NEWS_API_BASE_KEYWORD =
+  "Gen Z young adults consumer spending workforce social media brand trends creator economy youth market";
